@@ -61,7 +61,9 @@ Decision Decide(const cred::Credentials& creds) {
     d.wake_cause     = Classify(d.ext1_mask);
     d.wake_reason    = WakeReason(d.wake_cause);
 
-    if (creds.wifi_ssid.empty()) {
+    if (!creds.wifi_enabled) {
+        d.mode = Mode::kOffline;
+    } else if (creds.wifi_profiles.empty()) {
         d.mode = Mode::kPortal;
     } else if (d.wake_cause == WakeCause::kRtcTimer && !d.first_register && HasCachedGroup()) {
         d.mode = Mode::kBackgroundRefresh;

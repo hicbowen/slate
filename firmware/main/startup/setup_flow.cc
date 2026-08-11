@@ -20,8 +20,12 @@ constexpr int  kSaveSecretRetryDelayMs = 200;
 namespace setup_flow {
 
 bool TryConnectAndSetup(cred::Credentials& c) {
-    evt::PostBootStage(BootStage::kWifiConnecting, c.wifi_ssid.c_str());
-    if (!Wifi::Get().Connect(c.wifi_ssid, c.wifi_pwd, 20000)) {
+    std::vector<Wifi::Network> networks;
+    networks.reserve(c.wifi_profiles.size());
+    for (const auto& profile : c.wifi_profiles)
+        networks.push_back({profile.ssid, profile.password});
+    evt::PostBootStage(BootStage::kWifiConnecting, c.last_success_ssid.c_str());
+    if (!Wifi::Get().ConnectAny(networks, c.last_success_ssid, 20000)) {
         ESP_LOGW(kTag, "wifi connect failed mode=sta");
         evt::PostBootStage(BootStage::kWifiFailed);
         return false;

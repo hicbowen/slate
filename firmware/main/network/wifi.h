@@ -4,14 +4,14 @@
 // 设计参考 xiaozhi-esp32 的 wifi-connect 组件:
 //   - cfg.nvs_enable=false 禁用 ESP-IDF wifi 内置的 NVS 持久化,防止
 //     mode/config 残留在 NVS 让重启后状态错乱
-//   - StartAp/Connect 互斥:进任一边之前彻底停掉另一边
+//   - StartAp/ConnectAny 互斥:进任一边之前彻底停掉另一边
 //   - Stop = 注销 event handler instance + esp_wifi_stop + destroy netif
 //
 // 重连策略:
 //   1. 快速:STA_DISCONNECTED 立即 esp_wifi_connect,最多 5 次。
 //   2. 慢速:5 次用完转 esp_timer + 主动 esp_wifi_scan_start 全信道扫描,
-//      指数退避 10s → 20 → 40 → 80 → 120 → 120s。scan 找到 SSID 即拿
-//      bssid+channel 设回 wc.sta 再 connect。
+//      指数退避 10s → 20 → 40 → 80 → 120 → 120s。scan 在全部已保存
+//      网络中优先挑不同于刚失败目标的可用项，再写入 bssid/channel 连接。
 //   3. IP_GOT_IP 后清 fail_count_ + 重置 backoff_idx_,timer 停。
 //   4. want_reconnect_=false (Disconnect / TryConnect 主动断 / StopAp) 时
 //      整套机制不触发,纯静默。
@@ -30,6 +30,7 @@
 #include <functional>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "network/wifi_reconnect_manager.h"
 
@@ -37,6 +38,11 @@ class Wifi {
     friend class WifiReconnectManager;
 
    public:
+    struct Network {
+        std::string ssid;
+        std::string password;
+    };
+
     enum class State {
         Idle,          // 还没连过
         Connecting,    // 正在连接(快速 retry / 慢速 scan-then-connect 期间)
@@ -50,18 +56,23 @@ class Wifi {
     // 不创建任何 netif,不调 wifi_start。NVS 由 App::InitStorage 统一初始化。
     void Init();
 
-    // 进 STA 模式并连接。如果当前在 AP 模式,会先彻底停掉 AP。
-    // 返回 false 时:Connect 同步等待超时(快速 retry 全失败),want_reconnect_
-    // 已被置 false,慢速重连机制不会启动。调用方典型走 captive portal fallback。
+    // 兼容单网络调用。
     bool Connect(const std::string& ssid, const std::string& password, int timeout_ms = 15000);
+
+    // 扫描一次后在全局 timeout 内依次尝试所有已保存网络。preferred_ssid 可见时优先，
+    // 其他按 RSSI 排序；未出现在普通扫描中的项（例如隐藏 SSID）放到末尾做定向尝试。
+    // 成功后保留 networks 给运行期慢速重连切网；全部失败则关闭自动重连。
+    bool ConnectAny(const std::vector<Network>& networks, const std::string& preferred_ssid, int timeout_ms = 20000);
 
     // 仅"试连":必须在 AP 模式下调用(captive portal /submit 用)。
     // 期间 wifi 处于 APSTA,STA 临时连接验证密码,验证完 disconnect 但 AP 保留。
     // 失败时 out_reason 填可读中文。本函数不开自动重连。
     bool TryConnect(const std::string& ssid, const std::string& password, int timeout_ms, std::string& out_reason);
 
-    // 主动断开 STA(不下 wifi),后续不重连
+    // 主动断开 STA(不下 wifi),后续不重连。
     void Disconnect();
+    // 真正关闭 Wi-Fi：停止重连、esp_wifi_stop、销毁 netif。设备端 Wi-Fi 总开关调用。
+    void Stop();
 
     bool  IsConnected() const;
     State state() const {
@@ -69,6 +80,7 @@ class Wifi {
     }
     int8_t      GetRssi() const;
     std::string GetIp() const;
+    std::string GetSsid() const;
 
     // 启动 SoftAP(给 captive portal 用,SSID = prefix-{MAC后两位})。
     // 如果当前在 STA 模式,会先彻底停掉 STA。共存模式 APSTA 让 TryConnect
@@ -81,7 +93,9 @@ class Wifi {
 
     // 注册事件回调
     using DisconnectCb = std::function<void(int reason_code)>;
+    using ConnectedCb  = std::function<void(const std::string& ssid, int rssi)>;
     void OnDisconnected(DisconnectCb cb);
+    void OnConnected(ConnectedCb cb);
 
    private:
     enum class Mode {
@@ -108,6 +122,9 @@ class Wifi {
     bool        StationModeActive() const;
     void        MarkSlowReconnectConnecting();
     void        ResetFastFailCount();
+    bool        ConfigureBestKnownNetwork(const wifi_ap_record_t* records, size_t count, bool prefer_alternative);
+    void        SetTargetSsid(const std::string& ssid);
+    std::string TargetSsid() const;
 
     // 仅 Init 调一次的底座
     std::mutex init_mutex_;
@@ -125,14 +142,25 @@ class Wifi {
     esp_event_handler_instance_t handler_ip_   = nullptr;
 
     // STA 状态
-    std::atomic<State>   state_{State::Idle};
-    std::atomic<int>     fail_count_{0};
-    int                  max_fast_fail_ = 5;
-    std::atomic<bool>    want_reconnect_{false};
-    mutable std::mutex   callback_mutex_;
-    DisconnectCb         on_disconnect_;
-    mutable std::mutex   ip_mutex_;
-    char                 ip_str_[INET6_ADDRSTRLEN] = {0};
+    std::atomic<State> state_{State::Idle};
+    std::atomic<int>   fail_count_{0};
+    std::atomic<int>   max_fast_fail_{5};
+    std::atomic<bool>  want_reconnect_{false};
+    std::atomic<bool>  selecting_network_{false};
+    std::atomic<bool>  probe_connect_{false};
+
+    mutable std::mutex callback_mutex_;
+    DisconnectCb       on_disconnect_;
+    ConnectedCb        on_connected_;
+
+    mutable std::mutex   connection_mutex_;
+    std::vector<Network> known_networks_;
+    std::string          target_ssid_;
+    std::string          current_ssid_;
+
+    mutable std::mutex ip_mutex_;
+    char               ip_str_[INET6_ADDRSTRLEN] = {0};
+
     std::atomic<int>     last_disconnect_reason_{0};
     WifiReconnectManager reconnect_{this};
 };

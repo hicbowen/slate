@@ -38,6 +38,8 @@ SplashScene::State MapBootStage(BootStage s) {
             return SplashScene::State::kWifiConnecting;
         case BootStage::kWifiFailed:
             return SplashScene::State::kWifiFailed;
+        case BootStage::kWifiDisabled:
+            return SplashScene::State::kWifiDisabled;
         case BootStage::kSntp:
             return SplashScene::State::kSntp;
         case BootStage::kRegistering:
@@ -65,7 +67,8 @@ void SplashScene::OnEnter(SceneContext& ctx) {
 
     // NVS 此刻已 init(InitStorage 早于 StartUiLoop)。无 cred → 配网模式。
     cred::Credentials creds;
-    state_ = cred::Load(creds) ? State::kInitializing : State::kProvisioning;
+    const bool        configured = cred::Load(creds);
+    state_ = !creds.wifi_enabled ? State::kWifiDisabled : (configured ? State::kInitializing : State::kProvisioning);
 
     CreateLayout();
     RenderContent();
@@ -242,6 +245,9 @@ void SplashScene::RenderContent() {
             break;
         case State::kWifiFailed:
             std::snprintf(buf, sizeof(buf), "Wi-Fi 连接失败\n\n长按 确认 重新配网");
+            break;
+        case State::kWifiDisabled:
+            std::snprintf(buf, sizeof(buf), "Wi-Fi 已关闭\n\n当前使用本地缓存");
             break;
         case State::kSntp:
             std::snprintf(buf, sizeof(buf), "对时中…");

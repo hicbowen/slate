@@ -133,10 +133,18 @@ void App::InitSceneStack() {
     ctx.audio = &AudioPlayer::Get();
     ctx.stack = &scene_stack_;
 
-    ctx.read_battery                = [this](int* mv, int* pct) -> bool { return ReadBattery(mv, pct); };
-    ctx.read_charge                 = []() { return Board::Get().charge()->Get(); };
-    ctx.wifi_connected              = []() { return Wifi::Get().IsConnected(); };
-    ctx.wifi_rssi                   = []() -> int { return Wifi::Get().GetRssi(); };
+    ctx.read_battery       = [this](int* mv, int* pct) -> bool { return ReadBattery(mv, pct); };
+    ctx.read_charge        = []() { return Board::Get().charge()->Get(); };
+    ctx.wifi_connected     = []() { return Wifi::Get().IsConnected(); };
+    ctx.wifi_rssi          = []() -> int { return Wifi::Get().GetRssi(); };
+    ctx.wifi_enabled       = []() { return cred::WifiEnabled(); };
+    ctx.wifi_profile_count = []() -> size_t {
+        cred::Credentials c;
+        cred::Load(c);
+        return c.wifi_profiles.size();
+    };
+    ctx.set_wifi_enabled            = [](bool enabled) { evt::PostWifiEnableRequested(enabled); };
+    ctx.open_wifi_portal            = []() { evt::PostSimple(UiEventKind::kWifiPortalRequested); };
     ctx.current_frame_seq           = []() -> int { return power_state::GetCurrentFrameSeq(); };
     ctx.clear_current_frame         = []() { power_state::ClearCurrentFrame(); };
     ctx.set_current_frame_from_meta = [](int seq, const cache::FrameMeta& meta) {
@@ -269,6 +277,10 @@ bool App::HandleEnterDoubleClick(const UiEvent& e) {
         scene_stack_.ApplyPending();
         return true;
     }
+    if (!cred::WifiEnabled()) {
+        ESP_LOGI(kTag, "button double ignored reason=wifi_disabled");
+        return true;
+    }
     if (!top || std::strcmp(top->Name(), "xiaozhi") != 0) {
         scene_stack_.Push(std::make_unique<XiaozhiScene>());
         scene_stack_.ApplyPending();
@@ -278,11 +290,147 @@ bool App::HandleEnterDoubleClick(const UiEvent& e) {
     return false;
 }
 
+bool App::HandleWifiStateChanged(const UiEvent& e) {
+    if (e.kind != UiEventKind::kWifiStateChanged)
+        return false;
+    if (e.u.wifi.connected) {
+        const std::string ssid = Wifi::Get().GetSsid();
+        if (!ssid.empty() && !cred::MarkWifiSucceeded(ssid))
+            ESP_LOGW(kTag, "wifi success persist skipped ssid=%s", ssid.c_str());
+    }
+    // 状态事件仍需继续分发给当前 Scene 刷新状态栏。
+    return false;
+}
+
+void App::StopNetworkServices() {
+    // 先停射频并唤醒可能阻塞在 ConnectAny 的控制 task，再等待上层任务退出。
+    Wifi::Get().Stop();
+    xiaozhi::XiaozhiService::Get().SuspendForSleep();
+    SyncService::Get().Stop();
+    api::ResetConnection();
+}
+
+void App::EnterPortalMode() {
+    ESP_LOGI(kTag, "enter portal mode");
+    network_restart_requested_.store(false, std::memory_order_release);
+    StopNetworkServices();
+    decision_.mode = boot_mode::Mode::kPortal;
+    sleep_mgr_.SetEnabled(false);
+    sleep_mgr_.SetNetworkWakeEnabled(false);
+    ConfigurePm(false);
+    scene_stack_.Replace(std::make_unique<SplashScene>());
+    StartPortal();
+    evt::PostBootStage(BootStage::kProvisioning);
+}
+
+void App::NetworkTaskEntry(void* arg) {
+    auto*             self = static_cast<App*>(arg);
+    cred::Credentials creds;
+    const bool        configured = cred::Load(creds);
+    const bool        ok         = configured && creds.wifi_enabled && self->InitWifiAndSync(creds, false);
+    UiEvent           event{};
+    event.kind                   = UiEventKind::kWifiConnectFinished;
+    event.u.wifi_control.enabled = ok;
+    evt::Post(event, portMAX_DELAY);
+    vTaskDelete(nullptr);
+}
+
+void App::StartNetworkAsync() {
+    bool expected = false;
+    if (!network_task_running_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        network_restart_requested_.store(true, std::memory_order_release);
+        ESP_LOGW(kTag, "network task already running; restart queued");
+        return;
+    }
+    network_restart_requested_.store(false, std::memory_order_release);
+    BaseType_t ok = xTaskCreatePinnedToCore(&App::NetworkTaskEntry, "wifi_control", 10 * 1024, this, 4, nullptr, 0);
+    if (ok != pdPASS) {
+        ESP_LOGE(kTag, "network task create failed");
+        UiEvent event{};
+        event.kind                   = UiEventKind::kWifiConnectFinished;
+        event.u.wifi_control.enabled = false;
+        evt::Post(event);
+    }
+}
+
+bool App::HandleWifiEnableRequested(const UiEvent& e) {
+    if (e.kind != UiEventKind::kWifiEnableRequested)
+        return false;
+    const bool enabled = e.u.wifi_control.enabled;
+    ESP_LOGI(kTag, "wifi toggle requested enabled=%d", enabled ? 1 : 0);
+    if (!cred::SetWifiEnabled(enabled))
+        return true;
+
+    if (!enabled) {
+        network_restart_requested_.store(false, std::memory_order_release);
+        if (portal_ && portal_->Running())
+            portal_->Stop();
+        StopNetworkServices();
+        decision_.mode = boot_mode::Mode::kOffline;
+        sleep_mgr_.SetEnabled(true);
+        sleep_mgr_.SetNetworkWakeEnabled(false);
+        evt::PostWifiState(false, 0);
+        evt::PostBootStage(BootStage::kWifiDisabled);
+        ConfigurePm(ShouldEnableLightSleep(Board::Get().charge()->Get().power_present));
+        return true;
+    }
+
+    sleep_mgr_.SetEnabled(true);
+    sleep_mgr_.SetNetworkWakeEnabled(true);
+    cred::Credentials creds;
+    cred::Load(creds);
+    if (creds.wifi_profiles.empty()) {
+        EnterPortalMode();
+        return true;
+    }
+    decision_.mode = boot_mode::Mode::kFullActive;
+    ConfigurePm(ShouldEnableLightSleep(Board::Get().charge()->Get().power_present));
+    StartNetworkAsync();
+    return true;
+}
+
+bool App::HandleWifiPortalRequested(const UiEvent& e) {
+    if (e.kind != UiEventKind::kWifiPortalRequested)
+        return false;
+    cred::SetWifiEnabled(true);
+    EnterPortalMode();
+    return true;
+}
+
+bool App::HandleWifiConnectFinished(const UiEvent& e) {
+    if (e.kind != UiEventKind::kWifiConnectFinished)
+        return false;
+    const bool success = e.u.wifi_control.enabled;
+    network_task_running_.store(false, std::memory_order_release);
+    const bool restart_requested = network_restart_requested_.exchange(false, std::memory_order_acq_rel);
+    ESP_LOGI(kTag, "wifi connect task finished success=%d enabled=%d", success ? 1 : 0, cred::WifiEnabled() ? 1 : 0);
+    if (!cred::WifiEnabled())
+        return true;
+    if (portal_ && portal_->Running()) {
+        ESP_LOGI(kTag, "wifi connect task result ignored reason=portal_running");
+        return true;
+    }
+    if (restart_requested) {
+        ESP_LOGI(kTag, "restarting queued wifi connection task");
+        StartNetworkAsync();
+        return true;
+    }
+    if (!success) {
+        EnterPortalMode();
+        return true;
+    }
+    decision_.mode = boot_mode::Mode::kFullActive;
+    sleep_mgr_.SetEnabled(true);
+    sleep_mgr_.SetNetworkWakeEnabled(true);
+    return true;
+}
+
 void App::UiLoopTask() {
     ESP_LOGD(kTag, "ui loop start mode=%s wake=%s", evt::log::BootModeName(decision_.mode),
              evt::log::WakeCauseName(decision_.wake_cause));
     switch (decision_.mode) {
         case boot_mode::Mode::kPortal:
+        case boot_mode::Mode::kOffline:
         case boot_mode::Mode::kFullActive:
             ESP_LOGD(kTag, "initial scene scene=splash");
             scene_stack_.Push(std::make_unique<SplashScene>());
@@ -307,9 +455,10 @@ void App::UiLoopTask() {
                      scene_stack_.Top() ? scene_stack_.Top()->Name() : "(none)");
         }
         using Handler                                           = bool (App::*)(const UiEvent&);
-        static constexpr std::array<Handler, 5> kSystemHandlers = {
-            &App::HandleSecretInvalid,     &App::HandleBackgroundRefreshDone, &App::HandleXiaozhiChannelClosed,
-            &App::HandleInitialGroupReady, &App::HandleEnterDoubleClick,
+        static constexpr std::array<Handler, 9> kSystemHandlers = {
+            &App::HandleSecretInvalid,       &App::HandleBackgroundRefreshDone, &App::HandleXiaozhiChannelClosed,
+            &App::HandleInitialGroupReady,   &App::HandleEnterDoubleClick,      &App::HandleWifiStateChanged,
+            &App::HandleWifiEnableRequested, &App::HandleWifiPortalRequested,   &App::HandleWifiConnectFinished,
         };
         bool handled = false;
         for (Handler handler : kSystemHandlers) {
@@ -369,8 +518,9 @@ void App::AttachInputs() {
     // 充电状态变化转发到 EventBus（HAL 不直接知道 EventBus 存在）
     Board::Get().charge()->OnStateChanged([](const ChargeStatus::Snapshot& snap) { PostChargeSnapshot(snap); });
 
-    // WiFi 断线转 EventBus（重连成功事件 wifi.cc 内部已处理；这里只接 disconnect）
+    // WiFi 状态转 EventBus。成功事件也负责把实际 SSID 更新成 MRU。
     Wifi::Get().OnDisconnected([](int /*reason*/) { evt::PostWifiState(false, 0); });
+    Wifi::Get().OnConnected([](const std::string& /*ssid*/, int rssi) { evt::PostWifiState(true, rssi); });
 }
 
 void App::StartMinuteBoundaryTicker() {
@@ -379,17 +529,21 @@ void App::StartMinuteBoundaryTicker() {
 }
 
 bool App::InitWifiAndSync(cred::Credentials& creds, bool background_refresh) {
-    ESP_LOGI(kTag, "network setup start background=%d ssid=%s has_secret=%d", background_refresh ? 1 : 0,
-             creds.wifi_ssid.c_str(), creds.device_secret.empty() ? 0 : 1);
+    ESP_LOGI(kTag, "network setup start background=%d profiles=%u preferred=%s has_secret=%d",
+             background_refresh ? 1 : 0, static_cast<unsigned>(creds.wifi_profiles.size()),
+             creds.last_success_ssid.c_str(), creds.device_secret.empty() ? 0 : 1);
     Wifi::Get().Init();
 
     // poll 收 401 → emit kSecretInvalid;UiLoop 拦下来在主线程清 NVS + esp_restart。
     api::SetUnauthorizedHandler([]() { evt::PostSimple(UiEventKind::kSecretInvalid); });
 
     if (setup_flow::TryConnectAndSetup(creds)) {
-        // 连上 → 状态栏立即显示 wifi 图标
+        if (!cred::WifiEnabled()) {
+            ESP_LOGI(kTag, "network setup cancelled reason=wifi_disabled");
+            Wifi::Get().Stop();
+            return false;
+        }
         ESP_LOGI(kTag, "network setup done sync_initial=%s", background_refresh ? "background_refresh" : "user_active");
-        evt::PostWifiState(true, Wifi::Get().GetRssi());
 
         SyncService::Get().Start(decision_.wake_reason, background_refresh
                                                             ? SyncService::InitialSync::kBackgroundRefresh
@@ -404,6 +558,20 @@ bool App::InitWifiAndSync(cred::Credentials& creds, bool background_refresh) {
 void App::StartPortal() {
     portal_ = std::make_unique<CaptivePortal>();
 
+    cred::Credentials saved;
+    cred::Load(saved);
+    portal_->SetServerUrl(saved.server_url);
+    portal_->OnListNetworks([]() {
+        cred::Credentials c;
+        cred::Load(c);
+        std::vector<CaptivePortal::SavedNetwork> networks;
+        networks.reserve(c.wifi_profiles.size());
+        for (const auto& profile : c.wifi_profiles)
+            networks.push_back({profile.ssid, profile.ssid == c.last_success_ssid});
+        return networks;
+    });
+    portal_->OnForgetNetwork([](const std::string& ssid) { return cred::RemoveWifiProfile(ssid); });
+
     portal_->OnSubmit([](const CaptivePortal::Submission& s, std::string& out_error) -> bool {
         std::string reason;
         if (!Wifi::Get().TryConnect(s.ssid, s.password, 10000, reason)) {
@@ -411,13 +579,7 @@ void App::StartPortal() {
             ESP_LOGW(kTag, "wifi try connect failed ssid=%s reason=%s", s.ssid.c_str(), reason.c_str());
             return false;
         }
-        cred::Credentials c;
-        c.wifi_ssid  = s.ssid;
-        c.wifi_pwd   = s.password;
-        c.server_url = s.server_url;
-        // device_id/device_secret 留空:配网完成 esp_restart 后 InitWifiAndSync 看到无 secret
-        // → 走 register 流。设备命名留到 Web 端 PUT /devices/:id 完成绑定后再做。
-        if (!cred::Save(c)) {
+        if (!cred::UpsertWifiProfile(s.ssid, s.password, s.server_url)) {
             out_error = "凭据保存失败,请重试";
             ESP_LOGE(kTag, "credential save failed");
             return false;
@@ -452,7 +614,8 @@ bool App::ShouldEnableLightSleep(bool power_present) const {
     //     且充电时本就暂停深睡，省电意义小。
     //   - 配网门户(SoftAP)：关，AP 模式需保持响应，light sleep 会拖累配网。
     // 音频播放/对话期间由 AudioPlayer 持有 NO_LIGHT_SLEEP 锁，避免 I2S 欠载卡顿。
-    return !power_present && decision_.mode != boot_mode::Mode::kPortal;
+    const bool portal_running = portal_ && portal_->Running();
+    return !power_present && !portal_running;
 }
 
 void App::ConfigurePm(bool light_sleep_enable) {
@@ -491,8 +654,9 @@ void App::Init() {
              decision_.first_register ? 1 : 0);
 
     SleepManager::Policy policy;
-    policy.idle_timeout_min = CONFIG_SLATE_IDLE_DEEP_SLEEP_MIN;
-    policy.disabled         = (decision_.mode == boot_mode::Mode::kPortal);
+    policy.idle_timeout_min     = CONFIG_SLATE_IDLE_DEEP_SLEEP_MIN;
+    policy.disabled             = (decision_.mode == boot_mode::Mode::kPortal);
+    policy.network_wake_enabled = creds.wifi_enabled;
     sleep_mgr_.Init(policy);
     // 阻止深睡的两个来源：语音会话活动中、以及一次 sync 突发(大文件下载)进行中。
     // 任一持续阻塞超过 SleepManager 看门狗上限时会被强制打断回睡，避免卡死耗光电池。
@@ -510,6 +674,11 @@ void App::Init() {
             ESP_LOGD(kTag, "mode portal");
             Wifi::Get().Init();
             StartPortal();
+            break;
+        case boot_mode::Mode::kOffline:
+            ESP_LOGD(kTag, "mode offline");
+            evt::PostBootStage(BootStage::kWifiDisabled);
+            PostCachedGroupReadyIfAny();
             break;
         case boot_mode::Mode::kBackgroundRefresh: {
             ESP_LOGD(kTag, "mode background_refresh");
@@ -532,9 +701,21 @@ void App::Init() {
                 }
             }
             if (!net_ok) {
-                ESP_LOGW(kTag, "fallback action=captive_portal");
-                StartPortal();
-                sleep_mgr_.Disable();
+                if (!cred::WifiEnabled()) {
+                    ESP_LOGI(kTag, "network setup stopped action=offline");
+                    decision_.mode = boot_mode::Mode::kOffline;
+                    sleep_mgr_.SetEnabled(true);
+                    sleep_mgr_.SetNetworkWakeEnabled(false);
+                    evt::PostBootStage(BootStage::kWifiDisabled);
+                } else if (portal_ && portal_->Running()) {
+                    ESP_LOGI(kTag, "network setup stopped action=keep_portal");
+                } else {
+                    ESP_LOGW(kTag, "fallback action=captive_portal");
+                    decision_.mode = boot_mode::Mode::kPortal;
+                    StartPortal();
+                    evt::PostBootStage(BootStage::kProvisioning);
+                    sleep_mgr_.Disable();
+                }
             }
             break;
         }

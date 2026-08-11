@@ -171,6 +171,7 @@ storage  0x410000  0xBF0000
 | 模式 | 条件 | 行为 |
 | --- | --- | --- |
 | `kPortal` | 没有 Wi-Fi 凭据 | 启动 SoftAP captive portal |
+| `kOffline` | 用户关闭设备端 Wi-Fi 开关 | 不初始化射频、不扫描，直接显示本地缓存；睡眠时不配置网络刷新 timer |
 | `kBackgroundRefresh` | RTC timer 唤醒、已有 device secret、且有缓存内容组 | 后台刷新当前动态帧，完成后继续 deep sleep |
 | `kFullActive` | 冷启动、按键唤醒、充电唤醒或其他情况 | 显示 UI，联网同步，允许用户操作 |
 
@@ -205,24 +206,42 @@ nvs_flash_init + LittleFS mount
 
 ## Captive Portal
 
-没有 Wi-Fi 凭据时：
+没有 Wi-Fi 凭据、所有已保存网络在正常启动时均连接失败，或用户从设置选择“管理 Wi-Fi”时：
 
 - 启动 SoftAP：`{SLATE_AP_SSID_PREFIX}-{MAC后2字节}`，默认 `Slate-XXXX`。
 - DNS hijack 所有查询到 `192.168.4.1`。
 - HTTP portal 提供两步表单：Wi-Fi SSID/password 与 backend `server_url`。
-- 提交后先 `Wifi::TryConnect()` 验证，再保存 NVS 并重启。
+- 页面只返回已保存网络的 SSID，不返回密码；支持忘记指定网络。
+- 提交后先 `Wifi::TryConnect()` 验证，再按 SSID 添加/更新 NVS 并重启，不清除其他网络。
+- 最多保存 5 组网络；第 6 组会淘汰最久未成功连接的网络。
 
 凭据结构：
 
 ```cpp
-std::string wifi_ssid;
-std::string wifi_pwd;
+std::vector<WifiProfile> wifi_profiles;
+std::string last_success_ssid;
+bool wifi_enabled;
 std::string server_url;
 std::string device_id;
 std::string device_secret;
 ```
 
-首次配网后 `device_secret` 为空，重启进入注册流程。工厂重置会清空凭据，下次开机重新进入 portal。
+`wifi_profiles` 与最近成功项序列化在 `slate.net/wifi_list`；旧固件的 `ssid` / `pwd` 会在首次读取时无感迁移。`server_url` 和设备身份仍是设备级配置，不随 Wi-Fi profile 重复保存。首次配网后 `device_secret` 为空，重启进入注册流程。工厂重置会清空凭据并把 Wi-Fi 开关恢复成默认开启，下次开机重新进入 portal。
+
+## 多 Wi-Fi 与设备端开关
+
+开机联网使用单个约 20 秒的总预算：先全信道扫描一次，在已保存网络中优先尝试最近成功且当前可见的 SSID，其余可见项按信号排序，隐藏或未出现在扫描结果里的 SSID 放到末尾定向尝试。不会对每组凭据分别等待 20 秒。
+
+运行期断线先对当前网络快速重连最多 5 次；仍失败后按 `10 → 20 → 40 → 80 → 120 → 120` 秒退避扫描全部已保存网络，并优先尝试不同于刚失败目标的可用 SSID。同一 SSID 有多个 AP 时选 RSSI 最强的 BSSID。
+
+设置页提供“Wi-Fi 开关”和“管理 Wi-Fi”：
+
+- 关闭会持久化 `wifi_on=0`，停止 SyncService、小智网络会话、重连 timer 和 Wi-Fi driver，但保留全部凭据与内容缓存。
+- 关闭期间不启动 captive portal，也不为动态内容配置 RTC 网络刷新唤醒。
+- 开启后有凭据则在后台自动选网，没有凭据则进入 captive portal。
+- “管理 Wi-Fi”会暂时断开 STA 并开启 `Slate-XXXX`，提交成功后重启恢复正常模式。
+
+当前 NVS encryption 未启用，Wi-Fi 密码沿用既有方案保存在设备 NVS 中；Portal 的 profile API 永远不返回密码。
 
 ## 设备注册与绑定
 

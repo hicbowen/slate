@@ -32,12 +32,14 @@ void SettingsScene::OnEnter(SceneContext& ctx) {
     status_bar_->SetCaption("设置");
 
     // 三段语义分组(MenuList 不显式画分隔,靠顺序传达):
-    //   偏好    音量调节
-    //   信息    设备信息
+    //   偏好    音量调节 / Wi-Fi
+    //   信息    网络管理 / 设备信息
     //   危险    重启设备 / 恢复出厂(永远末尾,避免误触)
     auto*                       stack = ctx.stack;
     std::vector<MenuList::Item> items = {
         {"音量调节", [stack]() { stack->RequestPush(std::make_unique<VolumePage>()); }},
+        {"Wi-Fi 开关", [stack]() { stack->RequestPush(std::make_unique<WifiSettingsPage>()); }},
+        {"管理 Wi-Fi", [stack]() { stack->RequestPush(std::make_unique<WifiPortalPage>()); }},
         {"设备信息", [stack]() { stack->RequestPush(std::make_unique<DeviceInfoPage>()); }},
         {"重启设备", [stack]() { stack->RequestPush(std::make_unique<RestartDevicePage>()); }},
         {"恢复出厂", [stack]() { stack->RequestPush(std::make_unique<FactoryResetPage>()); }},

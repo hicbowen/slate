@@ -129,6 +129,13 @@ bool PostWifiState(bool connected, int rssi, TickType_t timeout) {
     return Post(e, timeout);
 }
 
+bool PostWifiEnableRequested(bool enabled, TickType_t timeout) {
+    UiEvent e{};
+    e.kind                   = UiEventKind::kWifiEnableRequested;
+    e.u.wifi_control.enabled = enabled;
+    return Post(e, timeout);
+}
+
 bool PostBootStage(BootStage stage, const char* ssid, const char* pair_code, TickType_t timeout) {
     UiEvent e{};
     e.kind               = UiEventKind::kBootStage;

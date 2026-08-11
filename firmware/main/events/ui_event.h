@@ -12,6 +12,7 @@ enum class BootStage : uint8_t {
     kProvisioning,       // 无 cred,captive portal 模式
     kWifiConnecting,     // 试连 STA(载荷带 ssid)
     kWifiFailed,         // 试连超时/认证失败
+    kWifiDisabled,       // 用户主动关闭 Wi-Fi，离线显示缓存
     kSntp,               // 等系统时间对齐
     kRegistering,        // 调 /devices
     kServerUnreachable,  // 服务器 30s 无响应
@@ -71,6 +72,11 @@ enum class UiEventKind : uint8_t {
     kXiaozhiChanged,
     // Xiaozhi 网络/服务端主动关闭。App 收到后转交 XiaozhiService 收束对应会话。
     kXiaozhiChannelClosed,  // u.xiaozhi_channel.token
+    // 设置页请求 App 串行切换网络生命周期，避免 Scene 直接操作 Wi-Fi/Sync task。
+    kWifiEnableRequested,  // u.wifi_control.enabled
+    kWifiPortalRequested,
+    // 设置页开启 Wi-Fi 后由后台连接 task 回报，App 决定是否进入 portal fallback。
+    kWifiConnectFinished,  // u.wifi_control.enabled = success
 };
 
 struct UiEvent {
@@ -94,6 +100,9 @@ struct UiEvent {
             bool connected;
             int  rssi;
         } wifi;
+        struct {
+            bool enabled;
+        } wifi_control;
         struct {
             bool ok;
             bool group_changed;

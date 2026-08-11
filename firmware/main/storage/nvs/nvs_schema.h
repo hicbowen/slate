@@ -22,11 +22,13 @@ inline constexpr char kLegacyXiaozhiWs[]   = "slate.chat.ws";
 inline constexpr char kLegacy[]            = "slate";
 
 namespace net {
-inline constexpr char kSsid[]   = "ssid";
-inline constexpr char kPwd[]    = "pwd";
-inline constexpr char kUrl[]    = "url";
-inline constexpr char kDevId[]  = "dev_id";
-inline constexpr char kDevSec[] = "dev_sec";
+inline constexpr char kSsid[]     = "ssid";       // v1 legacy,只读迁移
+inline constexpr char kPwd[]      = "pwd";        // v1 legacy,只读迁移
+inline constexpr char kWifiList[] = "wifi_list";  // v2 JSON,最多 5 组
+inline constexpr char kWifiOn[]   = "wifi_on";    // 缺失时默认开启
+inline constexpr char kUrl[]      = "url";
+inline constexpr char kDevId[]    = "dev_id";
+inline constexpr char kDevSec[]   = "dev_sec";
 }  // namespace net
 
 namespace audio {
@@ -66,6 +68,8 @@ SLATE_NVS_ASSERT_NAME(kLegacy);
 
 SLATE_NVS_ASSERT_NAME(net::kSsid);
 SLATE_NVS_ASSERT_NAME(net::kPwd);
+SLATE_NVS_ASSERT_NAME(net::kWifiList);
+SLATE_NVS_ASSERT_NAME(net::kWifiOn);
 SLATE_NVS_ASSERT_NAME(net::kUrl);
 SLATE_NVS_ASSERT_NAME(net::kDevId);
 SLATE_NVS_ASSERT_NAME(net::kDevSec);

@@ -52,8 +52,16 @@ class App {
     bool HandleXiaozhiChannelClosed(const UiEvent& e);
     bool HandleInitialGroupReady(const UiEvent& e);
     bool HandleEnterDoubleClick(const UiEvent& e);
+    bool HandleWifiStateChanged(const UiEvent& e);
+    bool HandleWifiEnableRequested(const UiEvent& e);
+    bool HandleWifiPortalRequested(const UiEvent& e);
+    bool HandleWifiConnectFinished(const UiEvent& e);
+    void StopNetworkServices();
+    void EnterPortalMode();
+    void StartNetworkAsync();
 
     static void UiLoopEntry(void* arg);
+    static void NetworkTaskEntry(void* arg);
     void        UiLoopTask();
 
     SceneStack                     scene_stack_;
@@ -62,5 +70,7 @@ class App {
     UpDownComboController          up_down_combo_;
     std::unique_ptr<CaptivePortal> portal_;
     std::atomic<bool>              ui_loop_running_{false};
+    std::atomic<bool>              network_task_running_{false};
+    std::atomic<bool>              network_restart_requested_{false};
     boot_mode::Decision            decision_;
 };
