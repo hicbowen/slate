@@ -7,6 +7,11 @@ import { ValidationError } from '../../errors';
 @Injectable()
 export class ZodValidationPipe implements PipeTransform {
   transform(value: unknown, metadata: ArgumentMetadata): unknown {
+    // Custom parameter decorators own their parsing/validation. In particular,
+    // @JsonBody returns undefined for multipart requests so polymorphic routes
+    // can hand the request to Fastify's multipart parser.
+    if (metadata.type === 'custom') return value;
+
     const schema = dtoSchema(metadata.metatype);
     if (!schema) return value;
     try {
