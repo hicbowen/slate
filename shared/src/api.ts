@@ -10,8 +10,17 @@ export const API_PREFIX = '/api/v1';
 // EPD 物理像素（zectrix Note4 4.2"）
 export const FRAME_WIDTH = 400;
 export const FRAME_HEIGHT = 300;
-export const FRAME_BYTES = (FRAME_WIDTH * FRAME_HEIGHT) / 8; // 15000
+export const FRAME_BYTES_MONO1 = (FRAME_WIDTH * FRAME_HEIGHT) / 8; // 15000
+export const FRAME_BYTES_BWRY2 = (FRAME_WIDTH * FRAME_HEIGHT) / 4; // 30000
+// 兼容旧调用方：FRAME_BYTES 始终表示 Note4 的 1bpp 帧长度。
+export const FRAME_BYTES = FRAME_BYTES_MONO1;
 export const BW_THRESHOLD_DEFAULT = 128; // 后端 sharp pipeline 默认阈值（与固件 bw_threshold_=200 是两套独立通路，不联动）
+
+export const FrameFormat = z.enum(['mono1', 'bwry2']);
+export type FrameFormatT = z.infer<typeof FrameFormat>;
+
+export const DisplayProfile = z.enum(['note4_mono', 'note4c_bwry']);
+export type DisplayProfileT = z.infer<typeof DisplayProfile>;
 
 // 音频:16kHz mono 16-bit raw PCM
 export const AUDIO_SAMPLE_RATE = 16000;

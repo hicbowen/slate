@@ -9,6 +9,8 @@ export interface GroupEtagContentRow {
   dynamicType: string | null;
   imageEtag: string;
   imageSize: number;
+  imageBwryEtag?: string | null;
+  imageBwrySize?: number | null;
   audioEtag: string | null;
   audioSize: number | null;
   audioStatus: string;
@@ -48,6 +50,8 @@ export function computeGroupEtags(group: GroupEtagInput): ComputedGroupEtags {
     dynamicType: content.dynamicType ?? '',
     imageEtag: content.imageEtag,
     imageSize: content.imageSize,
+    imageBwryEtag: content.imageBwryEtag ?? '',
+    imageBwrySize: content.imageBwrySize ?? '',
     audioEtag: content.audioEtag ?? '',
     audioSize: content.audioSize ?? '',
     audioStatus: content.audioStatus,
@@ -70,6 +74,8 @@ export function computeGroupEtags(group: GroupEtagInput): ComputedGroupEtags {
       content.dynamicType,
       content.imageEtag,
       content.imageSize,
+      content.imageBwryEtag,
+      content.imageBwrySize,
       content.audioEtag,
       content.audioSize,
       content.audioStatus,

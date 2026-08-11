@@ -7,6 +7,7 @@ import {
   type DynamicTypeT,
 } from 'shared';
 import { deviceStatusBarText } from '../dynamic-content/status-text/dynamic-content-status-text';
+import { contentImageRenditions } from './content-renditions';
 
 export interface ContentRow {
   id: string;
@@ -17,6 +18,8 @@ export interface ContentRow {
   imageEtag: string;
   audioEtag: string | null;
   imageSize: number;
+  imageBwryEtag?: string | null;
+  imageBwrySize?: number | null;
   audioSize: number | null;
   audioStatus: ContentAudioStatus;
   audioSource: ContentAudioSource | null;
@@ -45,6 +48,7 @@ export function contentToSummary(row: ContentRow): ContentSummaryT {
     image_etag: row.imageEtag,
     audio_etag: row.audioEtag,
     image_size: row.imageSize,
+    image_renditions: contentImageRenditions(row),
     audio_size: row.audioSize,
     audio_status: row.audioStatus,
     audio_source: row.audioSource,

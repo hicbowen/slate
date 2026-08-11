@@ -2,6 +2,18 @@ import { z } from 'zod';
 import { DITHER_MODES } from '../dither.js';
 import { DashboardDataPayload, DynamicConfig, DynamicType, TtsVoice } from './dynamic.js';
 
+export const ImageRendition = z.object({
+  etag: z.string(),
+  size: z.number().int().nonnegative(),
+});
+export type ImageRenditionT = z.infer<typeof ImageRendition>;
+
+export const ImageRenditions = z.object({
+  mono1: ImageRendition,
+  bwry2: ImageRendition,
+});
+export type ImageRenditionsT = z.infer<typeof ImageRenditions>;
+
 export const ContentKind = z.enum(['image', 'dynamic']);
 export type ContentKindT = z.infer<typeof ContentKind>;
 
@@ -30,6 +42,7 @@ export const ContentSummary = z.object({
   image_etag: z.string(),
   audio_etag: z.string().nullable(),
   image_size: z.number().int().nonnegative(),
+  image_renditions: ImageRenditions,
   audio_size: z.number().int().nonnegative().nullable(),
   audio_status: ContentAudioStatus,
   audio_source: ContentAudioSource.nullable(),
@@ -58,6 +71,7 @@ export const ContentMutationResponse = z.object({
   seq: z.number().int().nonnegative(),
   content_etag: z.string(),
   image_etag: z.string(),
+  image_renditions: ImageRenditions,
   audio_etag: z.string().nullable(),
   manifest_etag: z.string(),
 });

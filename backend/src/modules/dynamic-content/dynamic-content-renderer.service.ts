@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { FRAME_BYTES } from 'shared';
+import { FRAME_BYTES, FRAME_BYTES_BWRY2, type FrameFormatT } from 'shared';
 import { BlobService } from '../../infra/blob/blob.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { toPrismaInputJson } from '../../common/db/prisma-json';
@@ -20,8 +20,10 @@ const DYNAMIC_RENDER_CONTENT_SELECT = {
   groupId: true,
   frameName: true,
   imageEtag: true,
+  imageBwryEtag: true,
   audioEtag: true,
   imageSize: true,
+  imageBwrySize: true,
   kind: true,
   dynamicType: true,
   dynamicConfig: true,
@@ -43,6 +45,7 @@ export interface RenderDynamicContentOptions {
 export interface RenderDynamicContentResult {
   contentId: string;
   imageEtag: string;
+  imageBwryEtag: string;
   contentEtag: string;
   audioEtag: string | null;
   groupEtag: string;
@@ -103,7 +106,8 @@ export class DynamicContentRendererService {
     dynamicType: string,
     configOverride: unknown,
     frameName?: string | null,
-    dataOverride?: unknown
+    dataOverride?: unknown,
+    format: FrameFormatT = 'mono1'
   ): Promise<Buffer> {
     const entry = this.registry.get(dynamicType);
     if (!entry) throw new ValidationError(`未知动态类型: ${dynamicType}`);
@@ -113,20 +117,22 @@ export class DynamicContentRendererService {
       dataOverride === undefined
         ? await entry.provider.fetchData(config, { now, lastData: undefined })
         : dataOverride;
-    return this.renderAndValidate({
+    const rendered = await this.renderAndValidate({
       type: dynamicType,
       frameName,
       config: (config ?? {}) as Record<string, unknown>,
       data: normalizeRenderData(data),
       renderedAt: now,
     });
+    return rendered[format];
   }
 
   async renderPreview(
     contentId: string,
     ownerUserId: string,
     configOverride: unknown,
-    frameNameOverride?: string | null
+    frameNameOverride?: string | null,
+    format: FrameFormatT = 'mono1'
   ): Promise<Buffer> {
     const content = await this.prisma.content.findUnique({
       where: { id: contentId },
@@ -174,13 +180,14 @@ export class DynamicContentRendererService {
       data = content.dynamicData;
     }
     const frameName = frameNameOverride === undefined ? content.frameName : frameNameOverride;
-    return this.renderAndValidate({
+    const rendered = await this.renderAndValidate({
       type: content.dynamicType,
       frameName,
       config: (config ?? {}) as Record<string, unknown>,
       data: normalizeRenderData(data),
       renderedAt: now,
     });
+    return rendered[format];
   }
 
   private async doRender(
@@ -248,7 +255,8 @@ export class DynamicContentRendererService {
       data: normalizeRenderData(data),
       renderedAt: now,
     });
-    const imageEtag = computeETag(rendered);
+    const imageEtag = computeETag(rendered.mono1);
+    const imageBwryEtag = computeETag(rendered.bwry2);
     const schedule = computeDynamicRefreshSchedule({
       dynamicType: content.dynamicType,
       config,
@@ -256,7 +264,7 @@ export class DynamicContentRendererService {
       defaultTtlSec: this.registry.defaultTtlSec(content.dynamicType),
     });
 
-    if (!opts.force && imageEtag === content.imageEtag) {
+    if (!opts.force && imageEtag === content.imageEtag && imageBwryEtag === content.imageBwryEtag) {
       await this.prisma.content.update({
         where: { id: contentId },
         data: {
@@ -274,6 +282,7 @@ export class DynamicContentRendererService {
       return {
         contentId,
         imageEtag,
+        imageBwryEtag,
         contentEtag: contentEtagFromGroupEtags(etags.contentEtags, contentId, imageEtag),
         audioEtag: await this.responseAudioEtag(contentId, content.audioEtag, audioSync),
         groupEtag: etags.manifestEtag,
@@ -283,13 +292,17 @@ export class DynamicContentRendererService {
     }
 
     const previousImage = await this.blob.read(content.groupId, content.id, 'image');
-    await this.blob.write(content.groupId, content.id, 'image', rendered);
+    const previousBwryImage = await this.blob.read(content.groupId, content.id, 'image_bwry');
     try {
+      await this.blob.write(content.groupId, content.id, 'image', rendered.mono1);
+      await this.blob.write(content.groupId, content.id, 'image_bwry', rendered.bwry2);
       await this.prisma.content.update({
         where: { id: contentId },
         data: {
           imageEtag,
-          imageSize: rendered.byteLength,
+          imageSize: rendered.mono1.byteLength,
+          imageBwryEtag,
+          imageBwrySize: rendered.bwry2.byteLength,
           dynamicData: data == null ? Prisma.JsonNull : toPrismaInputJson(data),
           dynamicLastRunAt: now,
           dynamicNextRunAt: schedule.nextRunAt,
@@ -300,14 +313,8 @@ export class DynamicContentRendererService {
         },
       });
     } catch (err) {
-      if (previousImage) await this.blob.write(content.groupId, content.id, 'image', previousImage);
-      else {
-        await this.blob.delete(content.groupId, content.id, 'image').catch((deleteErr: unknown) => {
-          this.logger.warn(
-            `Failed to delete dynamic image after database update rollback for content ${contentId}: ${formatError(deleteErr)}`
-          );
-        });
-      }
+      await this.restoreImageBlob(content.groupId, content.id, 'image', previousImage);
+      await this.restoreImageBlob(content.groupId, content.id, 'image_bwry', previousBwryImage);
       throw err;
     }
     const audioSync = await this.syncDynamicAudioBestEffort(contentId, now);
@@ -315,6 +322,7 @@ export class DynamicContentRendererService {
     return {
       contentId,
       imageEtag,
+      imageBwryEtag,
       contentEtag: contentEtagFromGroupEtags(etags.contentEtags, contentId, imageEtag),
       audioEtag: await this.responseAudioEtag(contentId, content.audioEtag, audioSync),
       groupEtag: etags.manifestEtag,
@@ -325,12 +333,33 @@ export class DynamicContentRendererService {
 
   private async renderAndValidate(
     input: Parameters<DynamicFrameRendererService['render']>[0]
-  ): Promise<Buffer> {
-    const rendered = await this.renderer.render(input);
-    if (rendered.byteLength !== FRAME_BYTES) {
-      throw new Error(`动态帧大小不匹配: ${rendered.byteLength}`);
+  ): Promise<{ mono1: Buffer; bwry2: Buffer }> {
+    const rendered = await this.renderer.renderRenditions(input);
+    if (
+      rendered.mono1.byteLength !== FRAME_BYTES ||
+      rendered.bwry2.byteLength !== FRAME_BYTES_BWRY2
+    ) {
+      throw new Error(
+        `动态帧大小不匹配: ${rendered.mono1.byteLength}/${rendered.bwry2.byteLength}`
+      );
     }
     return rendered;
+  }
+
+  private async restoreImageBlob(
+    groupId: string,
+    contentId: string,
+    kind: 'image' | 'image_bwry',
+    previous: Buffer | null
+  ): Promise<void> {
+    try {
+      if (previous) await this.blob.write(groupId, contentId, kind, previous);
+      else await this.blob.delete(groupId, contentId, kind);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to rollback ${kind} blob for content ${contentId}: ${formatError(err)}`
+      );
+    }
   }
 
   private async syncDynamicAudioBestEffort(

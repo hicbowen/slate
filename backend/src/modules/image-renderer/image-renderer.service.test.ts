@@ -3,7 +3,7 @@ import sharp from 'sharp';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { FRAME_BYTES, FRAME_HEIGHT, FRAME_WIDTH } from 'shared';
+import { FRAME_BYTES, FRAME_BYTES_BWRY2, FRAME_HEIGHT, FRAME_WIDTH } from 'shared';
 import { ImageRendererService } from './image-renderer.service';
 import { ImageRenderCacheService } from './image-render-cache.service';
 
@@ -41,6 +41,17 @@ describe('ImageRendererService', () => {
     expect(height).toBe(FRAME_HEIGHT);
     expect(data.length).toBe(FRAME_BYTES);
     expect(data.every((b) => b === 0xff)).toBe(true);
+  });
+
+  it('四色图按 SSD2683 线序输出黑白红黄', async () => {
+    const input = await sharp({
+      create: { width: 400, height: 300, channels: 3, background: { r: 220, g: 24, b: 24 } },
+    })
+      .png()
+      .toBuffer();
+    const { data } = await renderer.renderTo2bpp(input);
+    expect(data.length).toBe(FRAME_BYTES_BWRY2);
+    expect(data.every((byte) => byte === 0xff)).toBe(true);
   });
 
   it('黑图(autoInvert 触发) 仍是白', async () => {

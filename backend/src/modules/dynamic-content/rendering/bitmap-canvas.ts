@@ -2,6 +2,9 @@ import type { BitmapFont } from './fonts/bitmap-font';
 
 export const PIXEL_BLACK = 0;
 export const PIXEL_WHITE = 1;
+export const PIXEL_YELLOW = 2;
+export const PIXEL_RED = 3;
+export type PixelColor = 0 | 1 | 2 | 3;
 
 export class BitmapCanvas {
   readonly width: number;
@@ -14,54 +17,54 @@ export class BitmapCanvas {
     this.pixels = new Uint8Array(width * height);
   }
 
-  clear(color = PIXEL_WHITE): void {
-    this.pixels.fill(color ? PIXEL_WHITE : PIXEL_BLACK);
+  clear(color: number = PIXEL_WHITE): void {
+    this.pixels.fill(color & 3);
   }
 
-  setPixel(x: number, y: number, color = PIXEL_BLACK): void {
+  setPixel(x: number, y: number, color: number = PIXEL_BLACK): void {
     if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
-    this.pixels[y * this.width + x] = color ? PIXEL_WHITE : PIXEL_BLACK;
+    this.pixels[y * this.width + x] = color & 3;
   }
 
-  drawHLine(x: number, y: number, w: number, color = PIXEL_BLACK): void {
+  drawHLine(x: number, y: number, w: number, color: number = PIXEL_BLACK): void {
     if (y < 0 || y >= this.height || w <= 0) return;
     const x0 = Math.max(0, x);
     const x1 = Math.min(this.width, x + w);
     if (x0 >= x1) return;
-    this.pixels.fill(color ? PIXEL_WHITE : PIXEL_BLACK, y * this.width + x0, y * this.width + x1);
+    this.pixels.fill(color & 3, y * this.width + x0, y * this.width + x1);
   }
 
-  drawVLine(x: number, y: number, h: number, color = PIXEL_BLACK): void {
+  drawVLine(x: number, y: number, h: number, color: number = PIXEL_BLACK): void {
     if (x < 0 || x >= this.width || h <= 0) return;
     const y0 = Math.max(0, y);
     const y1 = Math.min(this.height, y + h);
     if (y0 >= y1) return;
-    const fillValue = color ? PIXEL_WHITE : PIXEL_BLACK;
+    const fillValue = color & 3;
     for (let yy = y0; yy < y1; yy++) {
       this.pixels[yy * this.width + x] = fillValue;
     }
   }
 
-  fillRect(x: number, y: number, w: number, h: number, color = PIXEL_BLACK): void {
+  fillRect(x: number, y: number, w: number, h: number, color: number = PIXEL_BLACK): void {
     const x0 = Math.max(0, x);
     const y0 = Math.max(0, y);
     const x1 = Math.min(this.width, x + w);
     const y1 = Math.min(this.height, y + h);
     if (x0 >= x1 || y0 >= y1) return;
-    const fillValue = color ? PIXEL_WHITE : PIXEL_BLACK;
+    const fillValue = color & 3;
     for (let yy = y0; yy < y1; yy++) {
       this.pixels.fill(fillValue, yy * this.width + x0, yy * this.width + x1);
     }
   }
 
-  strokeRect(x: number, y: number, w: number, h: number, color = PIXEL_BLACK): void {
+  strokeRect(x: number, y: number, w: number, h: number, color: number = PIXEL_BLACK): void {
     this.drawHLine(x, y, w, color);
     this.drawHLine(x, y + h - 1, w, color);
     this.drawVLine(x, y, h, color);
     this.drawVLine(x + w - 1, y, h, color);
   }
 
-  drawLine(x0: number, y0: number, x1: number, y1: number, color = PIXEL_BLACK): void {
+  drawLine(x0: number, y0: number, x1: number, y1: number, color: number = PIXEL_BLACK): void {
     const dx = Math.abs(x1 - x0);
     const sx = x0 < x1 ? 1 : -1;
     const dy = -Math.abs(y1 - y0);
@@ -82,7 +85,7 @@ export class BitmapCanvas {
     }
   }
 
-  strokeCircle(cx: number, cy: number, r: number, color = PIXEL_BLACK): void {
+  strokeCircle(cx: number, cy: number, r: number, color: number = PIXEL_BLACK): void {
     let x = r;
     let y = 0;
     let err = 0;
@@ -110,7 +113,7 @@ export class BitmapCanvas {
     codepoint: number,
     x: number,
     baselineY: number,
-    color = PIXEL_BLACK
+    color: number = PIXEL_BLACK
   ): number {
     const glyph = font.glyphs.get(codepoint);
     if (!glyph) return 0;
@@ -133,7 +136,7 @@ export class BitmapCanvas {
     text: string,
     x: number,
     baselineY: number,
-    color = PIXEL_BLACK
+    color: number = PIXEL_BLACK
   ): number {
     let penX = x;
     for (const ch of text) {
@@ -142,7 +145,7 @@ export class BitmapCanvas {
     return penX - x;
   }
 
-  drawMask(mask: BitmapMask, x: number, y: number, color = PIXEL_BLACK): void {
+  drawMask(mask: BitmapMask, x: number, y: number, color: number = PIXEL_BLACK): void {
     for (let yy = 0; yy < mask.height; yy++) {
       for (let xx = 0; xx < mask.width; xx++) {
         if (mask.pixels[yy * mask.width + xx]) this.setPixel(x + xx, y + yy, color);
@@ -153,7 +156,15 @@ export class BitmapCanvas {
   toRaw1bpp(): Buffer {
     const out = Buffer.alloc(Math.ceil((this.width * this.height) / 8));
     for (let i = 0; i < this.pixels.length; i++) {
-      if (this.pixels[i]) out[i >> 3] |= 0x80 >> (i & 7);
+      if (this.pixels[i] === PIXEL_WHITE) out[i >> 3] |= 0x80 >> (i & 7);
+    }
+    return out;
+  }
+
+  toRaw2bpp(): Buffer {
+    const out = Buffer.alloc(Math.ceil((this.width * this.height) / 4));
+    for (let i = 0; i < this.pixels.length; i++) {
+      out[i >> 2] |= (this.pixels[i]! & 3) << (6 - (i & 3) * 2);
     }
     return out;
   }

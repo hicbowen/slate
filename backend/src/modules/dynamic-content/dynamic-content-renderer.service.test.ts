@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { FRAME_BYTES } from 'shared';
+import { FRAME_BYTES, FRAME_BYTES_BWRY2 } from 'shared';
 import type { PrismaService } from '../../infra/prisma/prisma.service';
 import type { BlobService } from '../../infra/blob/blob.service';
 import type { GroupsService } from '../groups/groups.service';
@@ -164,6 +164,8 @@ function createService(opts: {
     audioEtag: opts.audioEtag ?? null,
     imageEtag: 'old-image-etag',
     imageSize: opts.imageSize ?? 0,
+    imageBwryEtag: null,
+    imageBwrySize: null,
   };
   const prisma = {
     content: {
@@ -200,6 +202,10 @@ function createService(opts: {
   };
   const frameRenderer = {
     render: async () => Buffer.alloc(FRAME_BYTES, 0xff),
+    renderRenditions: async () => ({
+      mono1: Buffer.alloc(FRAME_BYTES, 0xff),
+      bwry2: Buffer.alloc(FRAME_BYTES_BWRY2, 0x55),
+    }),
   };
   const groups = {
     recomputeGroupEtags: async () => ({

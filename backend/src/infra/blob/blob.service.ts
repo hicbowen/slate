@@ -9,12 +9,13 @@ import { ValidationError } from '../../common/errors';
 import { eachLimit } from '../../common/utils/each-limit';
 import { KeyedPromiseQueue } from '../../common/worker/keyed-promise-queue';
 
-export type BlobKind = 'image' | 'audio';
+export type BlobKind = 'image' | 'image_bwry' | 'audio';
 
-const ext = (kind: BlobKind) => (kind === 'image' ? 'img' : 'pcm');
+const ext = (kind: BlobKind) => (kind === 'image' ? 'img' : kind === 'image_bwry' ? 'bwry' : 'pcm');
 const TMP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_BLOB_BYTES: Record<BlobKind, number> = {
   image: 64 * 1024,
+  image_bwry: 64 * 1024,
   audio: 5 * 1024 * 1024,
 };
 
@@ -129,7 +130,7 @@ function assertBlobSize(kind: BlobKind, size: number): void {
   const max = MAX_BLOB_BYTES[kind];
   if (size > max) {
     throw new ValidationError(
-      `${kind === 'image' ? '图片' : '音频'} blob 不能超过 ${Math.floor(max / 1024)}KB`,
+      `${kind === 'audio' ? '音频' : '图片'} blob 不能超过 ${Math.floor(max / 1024)}KB`,
       {
         code: 'blob_too_large',
         kind,

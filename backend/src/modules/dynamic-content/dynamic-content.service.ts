@@ -4,9 +4,12 @@ import { Prisma } from '@prisma/client';
 import {
   DashboardDataPayload,
   DynamicConfig,
+  FRAME_BYTES,
+  FRAME_BYTES_BWRY2,
   isAudioDynamicConfig,
   type ContentMutationResponseT,
   type CreateDynamicContentRequestT,
+  type FrameFormatT,
   type IngestPayloadT,
 } from 'shared';
 import { BlobService } from '../../infra/blob/blob.service';
@@ -51,28 +54,39 @@ export class DynamicContentService {
     private readonly renderer: DynamicContentRendererService
   ) {}
 
-  async previewDirect(raw: {
-    config: unknown;
-    frame_name?: string | null;
-    data?: unknown;
-  }): Promise<Buffer> {
+  async previewDirect(
+    raw: {
+      config: unknown;
+      frame_name?: string | null;
+      data?: unknown;
+    },
+    format: FrameFormatT = 'mono1'
+  ): Promise<Buffer> {
     const config = DynamicConfig.parse(raw.config);
     const previewData = this.parseDashboardPreviewData(config.type, raw.data);
     return this.renderer.renderPreviewDirect(
       config.type,
       config,
       raw.frame_name ?? defaultDynamicFrameName(config.type, config),
-      previewData
+      previewData,
+      format
     );
   }
 
   async preview(
     contentId: string,
     ownerUserId: string,
-    body: { config: unknown; frame_name?: string | null; data?: unknown }
+    body: { config: unknown; frame_name?: string | null; data?: unknown },
+    format: FrameFormatT = 'mono1'
   ): Promise<Buffer> {
     if (body.data === undefined) {
-      return this.renderer.renderPreview(contentId, ownerUserId, body.config, body.frame_name);
+      return this.renderer.renderPreview(
+        contentId,
+        ownerUserId,
+        body.config,
+        body.frame_name,
+        format
+      );
     }
 
     const content = await this.prisma.content.findUnique({
@@ -99,7 +113,7 @@ export class DynamicContentService {
     }
     const frameName = body.frame_name === undefined ? content.frameName : body.frame_name;
     const previewData = this.parseDashboardData(body.data, 'dashboard 预览数据不能为空');
-    return this.renderer.renderPreviewDirect(config.type, config, frameName, previewData);
+    return this.renderer.renderPreviewDirect(config.type, config, frameName, previewData, format);
   }
 
   async append(
@@ -163,7 +177,10 @@ export class DynamicContentService {
         rendered.imageEtag,
         null,
         rendered.groupEtag,
-        rendered.contentEtag
+        rendered.contentEtag,
+        rendered.imageBwryEtag,
+        FRAME_BYTES_BWRY2,
+        FRAME_BYTES
       );
     } catch (err) {
       if (created.didCreate) await this.rollbackCreation(contentId, gid, err);
@@ -224,7 +241,10 @@ export class DynamicContentService {
         rendered.imageEtag,
         rendered.audioEtag,
         rendered.groupEtag,
-        rendered.contentEtag
+        rendered.contentEtag,
+        rendered.imageBwryEtag,
+        FRAME_BYTES_BWRY2,
+        FRAME_BYTES
       );
     });
   }
@@ -259,7 +279,10 @@ export class DynamicContentService {
       rendered.imageEtag,
       rendered.audioEtag,
       rendered.groupEtag,
-      rendered.contentEtag
+      rendered.contentEtag,
+      rendered.imageBwryEtag,
+      FRAME_BYTES_BWRY2,
+      FRAME_BYTES
     );
   }
 
@@ -289,7 +312,10 @@ export class DynamicContentService {
         rendered.imageEtag,
         rendered.audioEtag,
         rendered.groupEtag,
-        rendered.contentEtag
+        rendered.contentEtag,
+        rendered.imageBwryEtag,
+        FRAME_BYTES_BWRY2,
+        FRAME_BYTES
       ),
       updatedAt: rendered.renderedAt,
     };
@@ -321,7 +347,10 @@ export class DynamicContentService {
         rendered.imageEtag,
         rendered.audioEtag,
         rendered.groupEtag,
-        rendered.contentEtag
+        rendered.contentEtag,
+        rendered.imageBwryEtag,
+        FRAME_BYTES_BWRY2,
+        FRAME_BYTES
       ),
       updatedAt: rendered.renderedAt,
     };
@@ -388,6 +417,7 @@ export class DynamicContentService {
     }
     const cleaned = await Promise.allSettled([
       this.blob.delete(gid, contentId, 'image'),
+      this.blob.delete(gid, contentId, 'image_bwry'),
       deleteContentAudioBlob(this.blob, gid, contentId, stale?.audioEtag ?? null),
     ]);
     const failed = cleaned.filter((result) => result.status === 'rejected').length;

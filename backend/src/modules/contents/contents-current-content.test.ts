@@ -232,6 +232,9 @@ describe('ContentsService current content refresh', () => {
               }),
               update: async () => ({
                 imageEtag: 'new-image',
+                imageSize: 1,
+                imageBwryEtag: 'new-bwry',
+                imageBwrySize: 1,
                 audioEtag: null,
                 contentEtag: 'updated-content-etag',
               }),
@@ -255,7 +258,9 @@ describe('ContentsService current content refresh', () => {
       } as never,
       {
         renderTo1bpp: async () => ({ data: Buffer.from([0xff]), width: 8, height: 1 }),
+        renderTo2bpp: async () => ({ data: Buffer.from([0x55]), width: 4, height: 1 }),
         validateFrameSize: () => undefined,
+        validateBwryFrameSize: () => undefined,
       } as never,
       {} as never,
       {} as never,
@@ -273,7 +278,7 @@ describe('ContentsService current content refresh', () => {
 
     expect(response.content_etag).toBe('updated-content-etag');
     expect(recomputeCalls).toBe(1);
-    expect(blobWrites).toEqual(['content-1']);
+    expect(blobWrites).toEqual(['content-1', 'content-1']);
   });
 
   it('does not delete the current audio blob when uploaded audio etag is unchanged', async () => {
@@ -371,6 +376,9 @@ describe('ContentsService current content refresh', () => {
               }),
               update: async () => ({
                 imageEtag: 'new-image',
+                imageSize: 1,
+                imageBwryEtag: 'new-bwry',
+                imageBwrySize: 1,
                 audioEtag: null,
                 contentEtag: 'updated-content-etag',
               }),
@@ -387,7 +395,9 @@ describe('ContentsService current content refresh', () => {
       } as never,
       {
         renderTo1bpp: async () => ({ data: Buffer.from([0xff]), width: 8, height: 1 }),
+        renderTo2bpp: async () => ({ data: Buffer.from([0x55]), width: 4, height: 1 }),
         validateFrameSize: () => undefined,
+        validateBwryFrameSize: () => undefined,
       } as never,
       {} as never,
       {} as never,

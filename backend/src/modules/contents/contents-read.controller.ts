@@ -1,6 +1,6 @@
-import { Controller, Get, Param, Req, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { type ContentDetailT, type ManifestResponseT } from 'shared';
+import { FrameFormat, type ContentDetailT, type ManifestResponseT } from 'shared';
 import type { DeviceContext, WebUserContext } from '../../common/nest/auth-context';
 import {
   CurrentDevice,
@@ -61,12 +61,14 @@ export class ContentsReadController {
   @Get('contents/:contentId/image')
   async image(
     @Param('contentId') contentId: string,
+    @Query('format') rawFormat: string | undefined,
     @CurrentUser() user: WebUserContext | undefined,
     @CurrentDevice() device: DeviceContext | undefined,
     @Req() req: FastifyRequest,
     @Res() reply: FastifyReply
   ): Promise<void> {
-    const r = await this.reads.readImage(contentId, contentAuthScope(user, device));
+    const format = FrameFormat.catch('mono1').parse(rawFormat);
+    const r = await this.reads.readImage(contentId, contentAuthScope(user, device), format);
     respondWithEtag(req, reply, r.etag, r.data, 'application/octet-stream');
   }
 

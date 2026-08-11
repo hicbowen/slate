@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ContentSummary } from './content.js';
+import { DisplayProfile } from '../api.js';
 
 export const MacAddress = z
   .string()
@@ -39,6 +40,7 @@ export const DeviceState = z.object({
     bound: z.boolean(),
     pair_code: z.string().nullable(),
     server_time: z.string().datetime(),
+    display_profile: DisplayProfile,
   }),
   group: DeviceStateGroup.nullable(),
   current_content: ContentSummary.nullable().optional(),
@@ -57,6 +59,7 @@ export const PollRequest = z.object({
       current_content_seq: z.number().int().nonnegative().optional(),
       current_content_etag: z.string().max(64).optional(),
       manifest_etag: z.string().max(64).optional(),
+      display_profile: DisplayProfile.optional(),
     })
     .optional(),
 });
@@ -77,6 +80,7 @@ export type CycleDirectionT = z.infer<typeof CycleDirection>;
 // name 由 Web 端 claim 完成后通过 PUT /devices/:id 设置，注册阶段不带。
 export const RegisterDeviceRequest = z.object({
   mac: MacAddress,
+  display_profile: DisplayProfile.optional(),
 });
 export type RegisterDeviceRequestT = z.infer<typeof RegisterDeviceRequest>;
 
@@ -89,6 +93,7 @@ export const RegisterDeviceResponse = z.object({
   // true 表示后端发现 mac 已注册，按"物理重置即转移"语义清掉了上一任主人。
   reclaimed: z.boolean(),
   server_time: z.string().datetime(),
+  display_profile: DisplayProfile,
 });
 export type RegisterDeviceResponseT = z.infer<typeof RegisterDeviceResponse>;
 
@@ -120,5 +125,6 @@ export const DeviceSummary = z.object({
   fw_version: z.string().nullable(),
   owner_user_id: z.string().nullable(),
   sort_order: z.number().int(),
+  display_profile: DisplayProfile,
 });
 export type DeviceSummaryT = z.infer<typeof DeviceSummary>;

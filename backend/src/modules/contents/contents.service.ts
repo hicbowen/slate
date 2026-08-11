@@ -27,10 +27,15 @@ import {
 import { toContentMutationResponse } from './content-mutation-response';
 import type { ParsedContentUpload } from './multipart-parser';
 
-interface RenderedImageUpload {
+interface RenderedImageRendition {
   bytes: Buffer;
   etag: string;
   size: number;
+}
+
+interface RenderedImageUpload {
+  mono1: RenderedImageRendition;
+  bwry2: RenderedImageRendition;
 }
 
 interface RenderedAudioUpload {
@@ -115,7 +120,10 @@ export class ContentsService {
       content.imageEtag,
       content.audioEtag,
       groupEtag,
-      updated.contentEtag
+      updated.contentEtag,
+      content.imageBwryEtag,
+      content.imageBwrySize,
+      content.imageSize
     );
   }
 
@@ -128,6 +136,7 @@ export class ContentsService {
     });
     const deleted = await Promise.allSettled([
       this.blob.delete(content.groupId, contentId, 'image'),
+      this.blob.delete(content.groupId, contentId, 'image_bwry'),
       this.audioBlobs.delete(content.groupId, contentId, content.audioEtag),
     ]);
     const failed = deleted.filter((result) => result.status === 'rejected').length;
@@ -185,7 +194,10 @@ export class ContentsService {
       content.imageEtag,
       null,
       groupEtag,
-      updated.contentEtag
+      updated.contentEtag,
+      content.imageBwryEtag,
+      content.imageBwrySize,
+      content.imageSize
     );
   }
 
@@ -226,7 +238,9 @@ export class ContentsService {
     let mutation: { seq: number; groupEtag: string; contentEtag: string };
     try {
       rollback.deleteCreated(gid, contentId, 'image');
-      await this.blob.write(gid, contentId, 'image', image.bytes);
+      rollback.deleteCreated(gid, contentId, 'image_bwry');
+      await this.blob.write(gid, contentId, 'image', image.mono1.bytes);
+      await this.blob.write(gid, contentId, 'image_bwry', image.bwry2.bytes);
       if (audio) {
         rollback.deleteCreated(gid, audioBlobContentId(contentId, audio.etag), 'audio');
         await this.blob.write(gid, audioBlobContentId(contentId, audio.etag), 'audio', audio.bytes);
@@ -239,8 +253,10 @@ export class ContentsService {
             groupId: gid,
             sortOrder: nextSeq,
             frameName: parsed.hasFrameName ? parsed.frameName : null,
-            imageEtag: image.etag,
-            imageSize: image.size,
+            imageEtag: image.mono1.etag,
+            imageSize: image.mono1.size,
+            imageBwryEtag: image.bwry2.etag,
+            imageBwrySize: image.bwry2.size,
             ...(audio ? readyUploadedAudioFields(audio.etag, audio.size) : resetAudioFields()),
             kind: 'image',
           },
@@ -257,10 +273,13 @@ export class ContentsService {
     return toContentMutationResponse(
       contentId,
       mutation.seq,
-      image.etag,
+      image.mono1.etag,
       audio?.etag ?? null,
       mutation.groupEtag,
-      mutation.contentEtag
+      mutation.contentEtag,
+      image.bwry2.etag,
+      image.bwry2.size,
+      image.mono1.size
     );
   }
 
@@ -302,7 +321,14 @@ export class ContentsService {
         const updated = await tx.content.update({
           where: { id: contentId },
           data: prepared.data,
-          select: { imageEtag: true, audioEtag: true, contentEtag: true },
+          select: {
+            imageEtag: true,
+            imageSize: true,
+            imageBwryEtag: true,
+            imageBwrySize: true,
+            audioEtag: true,
+            contentEtag: true,
+          },
         });
         previousAudioEtagForCleanup = prepared.previousAudioEtagForCleanup;
         return { updated };
@@ -315,7 +341,10 @@ export class ContentsService {
         updated.imageEtag,
         updated.audioEtag,
         groupEtag,
-        updated.contentEtag
+        updated.contentEtag,
+        updated.imageBwryEtag,
+        updated.imageBwrySize,
+        updated.imageSize
       );
     } catch (err) {
       if (!dbUpdated) {
@@ -340,10 +369,15 @@ export class ContentsService {
     const data: Prisma.ContentUpdateInput = { ...input.baseData };
     if (upload.image) {
       const previousImageBytes = await this.blob.read(gid, contentId, 'image');
+      const previousBwryBytes = await this.blob.read(gid, contentId, 'image_bwry');
       rollback.restorePrevious(gid, contentId, 'image', previousImageBytes);
-      await this.blob.write(gid, contentId, 'image', upload.image.bytes);
-      data.imageEtag = upload.image.etag;
-      data.imageSize = upload.image.size;
+      rollback.restorePrevious(gid, contentId, 'image_bwry', previousBwryBytes);
+      await this.blob.write(gid, contentId, 'image', upload.image.mono1.bytes);
+      await this.blob.write(gid, contentId, 'image_bwry', upload.image.bwry2.bytes);
+      data.imageEtag = upload.image.mono1.etag;
+      data.imageSize = upload.image.mono1.size;
+      data.imageBwryEtag = upload.image.bwry2.etag;
+      data.imageBwrySize = upload.image.bwry2.size;
       if (!upload.audio && currentAudioEtag) {
         Object.assign(data, resetAudioFields());
       }
@@ -376,16 +410,27 @@ export class ContentsService {
     let image: RenderedImageUpload | null = null;
     if (parsed.hasImage && parsed.imageBuf) {
       const sourceEtag = computeETag(parsed.imageBuf);
-      const rendered = await this.imageRenderer.renderTo1bpp(parsed.imageBuf, {
-        threshold: parsed.threshold,
-        mode: parsed.mode,
-        sourceEtag,
-      });
-      this.imageRenderer.validateFrameSize(rendered.data);
+      const [mono1, bwry2] = await Promise.all([
+        this.imageRenderer.renderTo1bpp(parsed.imageBuf, {
+          threshold: parsed.threshold,
+          mode: parsed.mode,
+          sourceEtag,
+        }),
+        this.imageRenderer.renderTo2bpp(parsed.imageBuf, { sourceEtag }),
+      ]);
+      this.imageRenderer.validateFrameSize(mono1.data);
+      this.imageRenderer.validateBwryFrameSize(bwry2.data);
       image = {
-        bytes: rendered.data,
-        etag: computeETag(rendered.data),
-        size: rendered.data.byteLength,
+        mono1: {
+          bytes: mono1.data,
+          etag: computeETag(mono1.data),
+          size: mono1.data.byteLength,
+        },
+        bwry2: {
+          bytes: bwry2.data,
+          etag: computeETag(bwry2.data),
+          size: bwry2.data.byteLength,
+        },
       };
     }
 
@@ -403,6 +448,9 @@ export class ContentsService {
     sortOrder: number;
     kind: ContentKind;
     imageEtag: string;
+    imageSize: number;
+    imageBwryEtag: string | null;
+    imageBwrySize: number | null;
     audioEtag: string | null;
     audioSource: ContentAudioSource | null;
   }> {
@@ -414,6 +462,9 @@ export class ContentsService {
         sortOrder: true,
         kind: true,
         imageEtag: true,
+        imageSize: true,
+        imageBwryEtag: true,
+        imageBwrySize: true,
         audioEtag: true,
         audioSource: true,
       },

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { FRAME_BYTES, FRAME_HEIGHT, FRAME_WIDTH } from 'shared';
-import { BitmapCanvas, PIXEL_WHITE } from './bitmap-canvas';
+import { FRAME_BYTES, FRAME_BYTES_BWRY2, FRAME_HEIGHT, FRAME_WIDTH } from 'shared';
+import { BitmapCanvas, PIXEL_RED, PIXEL_WHITE, PIXEL_YELLOW } from './bitmap-canvas';
 import {
   renderDailyCalendarFrame,
   renderHistoryTodayFrame,
@@ -18,6 +18,11 @@ import { renderWeatherAlertFrame, renderWeatherFrame } from './weather-frame-ren
 
 export type { DynamicRenderContext } from './dynamic-render-context';
 
+export interface DynamicFrameRenditions {
+  mono1: Buffer;
+  bwry2: Buffer;
+}
+
 @Injectable()
 export class DynamicFrameRendererService {
   private readonly drawKit: FrameDrawKit;
@@ -27,6 +32,10 @@ export class DynamicFrameRendererService {
   }
 
   async render(ctx: DynamicRenderContext): Promise<Buffer> {
+    return (await this.renderRenditions(ctx)).mono1;
+  }
+
+  async renderRenditions(ctx: DynamicRenderContext): Promise<DynamicFrameRenditions> {
     const fonts = await this.fontService.getFonts();
     const c = new BitmapCanvas(FRAME_WIDTH, FRAME_HEIGHT);
     c.clear(PIXEL_WHITE);
@@ -65,11 +74,15 @@ export class DynamicFrameRendererService {
         break;
     }
 
-    const raw = c.toRaw1bpp();
-    if (raw.byteLength !== FRAME_BYTES) {
-      throw new Error(`dynamic frame size mismatch: ${raw.byteLength} vs ${FRAME_BYTES}`);
+    this.applySemanticAccent(c, ctx.type);
+    const mono1 = c.toRaw1bpp();
+    const bwry2 = c.toRaw2bpp();
+    if (mono1.byteLength !== FRAME_BYTES || bwry2.byteLength !== FRAME_BYTES_BWRY2) {
+      throw new Error(
+        `dynamic frame size mismatch: ${mono1.byteLength}/${bwry2.byteLength} vs ${FRAME_BYTES}/${FRAME_BYTES_BWRY2}`
+      );
     }
-    return raw;
+    return { mono1, bwry2 };
   }
 
   private clearSystemStatusArea(c: BitmapCanvas): void {
@@ -83,5 +96,14 @@ export class DynamicFrameRendererService {
       maxLines: 2,
       ellipsis: true,
     });
+  }
+
+  private applySemanticAccent(c: BitmapCanvas, type: string): void {
+    // 彩色只承担低频语义提示，不改变黑白版的信息结构。
+    if (type === 'weather_alert' || type === 'earthquake_report') {
+      c.fillRect(0, STATUS_BAR_H, 4, FRAME_HEIGHT - STATUS_BAR_H, PIXEL_RED);
+    } else if (type === 'daily_calendar' || type === 'month_calendar' || type === 'weather') {
+      c.fillRect(0, STATUS_BAR_H, 4, FRAME_HEIGHT - STATUS_BAR_H, PIXEL_YELLOW);
+    }
   }
 }

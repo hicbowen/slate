@@ -65,6 +65,7 @@ model Device {
   batteryPct       Int?      @map("battery_pct")
   rssiDbm          Int?      @map("rssi_dbm")
   fwVersion        String?   @map("fw_version") @db.VarChar(32)
+  displayProfile   String    @default("note4_mono") @map("display_profile") @db.VarChar(32)
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
@@ -104,6 +105,8 @@ model Content {
   imageEtag                String              @map("image_etag") @db.VarChar(64)
   audioEtag                String?             @map("audio_etag") @db.VarChar(64)
   imageSize                Int                 @map("image_size")
+  imageBwryEtag            String?             @map("image_bwry_etag") @db.VarChar(64)
+  imageBwrySize            Int?                @map("image_bwry_size")
   audioSize                Int?                @map("audio_size")
   audioStatus              ContentAudioStatus  @default(none) @map("audio_status")
   audioSource              ContentAudioSource? @map("audio_source")

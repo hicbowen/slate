@@ -25,7 +25,7 @@ export class DeviceFirmwareController {
   @RateLimit(deviceRegisterRateLimit)
   @Post('devices')
   async register(@Body() body: RegisterDeviceDto): Promise<RegisterDeviceResponseT> {
-    const r = await this.devices.registerOrReset(body.mac);
+    const r = await this.devices.registerOrReset(body.mac, body.display_profile);
     return {
       id: r.deviceId,
       mac: MacAddress.parse(body.mac),
@@ -33,6 +33,7 @@ export class DeviceFirmwareController {
       pair_code: r.pairCode,
       reclaimed: r.reclaimed,
       server_time: r.serverTime,
+      display_profile: r.displayProfile,
     };
   }
 

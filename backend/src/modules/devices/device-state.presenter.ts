@@ -1,8 +1,12 @@
 import { InternalError } from '../../common/errors';
+import type { DeviceStateT } from 'shared';
 import type { CycleResult } from '../groups/groups.service';
 import type { DevicePollSnapshot } from './device-types';
 
-export function toDeviceStatePayload(device: DevicePollSnapshot, resolvedGroup: CycleResult) {
+export function toDeviceStatePayload(
+  device: DevicePollSnapshot,
+  resolvedGroup: CycleResult
+): DeviceStateT {
   const bound = device.ownerUserId !== null;
   const group = normalizeCycleResult(resolvedGroup);
   return {
@@ -14,6 +18,10 @@ export function toDeviceStatePayload(device: DevicePollSnapshot, resolvedGroup: 
       // 已绑定不返回 pair_code，避免冗余暴露（已绑定的码也无法被再次 claim，但守住「最小披露」）。
       pair_code: bound ? null : device.pairCode,
       server_time: new Date().toISOString(),
+      display_profile:
+        device.displayProfile === 'note4c_bwry'
+          ? ('note4c_bwry' as const)
+          : ('note4_mono' as const),
     },
     group: group
       ? {

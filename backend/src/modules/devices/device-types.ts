@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import type { DeviceSummaryT } from 'shared';
+import type { DisplayProfileT } from 'shared';
 import type { DeviceGroupSnapshot } from '../groups/groups.service';
 
 export interface TelemetryInput {
@@ -11,6 +12,7 @@ export interface TelemetryInput {
   current_content_seq?: number;
   current_content_etag?: string;
   manifest_etag?: string;
+  display_profile?: DisplayProfileT;
 }
 
 export interface DevicePollSnapshot extends DeviceGroupSnapshot {
@@ -21,6 +23,7 @@ export interface DevicePollSnapshot extends DeviceGroupSnapshot {
   selectedGroupId: string | null;
   pairCode: string;
   selectedGroup: { manifestEtag: string } | null;
+  displayProfile?: string;
 }
 
 export const DEVICE_SUMMARY_SELECT = {
@@ -34,6 +37,7 @@ export const DEVICE_SUMMARY_SELECT = {
   fwVersion: true,
   ownerUserId: true,
   sortOrder: true,
+  displayProfile: true,
 } as const satisfies Prisma.DeviceSelect;
 
 export type DeviceRow = Prisma.DeviceGetPayload<{ select: typeof DEVICE_SUMMARY_SELECT }>;
@@ -55,5 +59,6 @@ export function toDeviceSummary(d: DeviceRow): DeviceSummaryT {
     fw_version: d.fwVersion,
     owner_user_id: d.ownerUserId,
     sort_order: d.sortOrder,
+    display_profile: d.displayProfile === 'note4c_bwry' ? 'note4c_bwry' : 'note4_mono',
   };
 }

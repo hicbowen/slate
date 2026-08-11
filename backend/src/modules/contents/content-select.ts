@@ -9,6 +9,8 @@ export const CONTENT_SELECT = {
   imageEtag: true,
   audioEtag: true,
   imageSize: true,
+  imageBwryEtag: true,
+  imageBwrySize: true,
   audioSize: true,
   audioStatus: true,
   audioSource: true,
