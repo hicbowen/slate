@@ -109,7 +109,7 @@ void FrameScene::OnEnter(SceneContext& ctx) {
 
     empty_label_ = lv_label_create(root_);
     lv_obj_set_style_text_font(empty_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(empty_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(empty_label_, theme::Accent(), 0);
     lv_obj_set_style_text_align(empty_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_line_space(empty_label_, 8, 0);
     lv_label_set_long_mode(empty_label_, LV_LABEL_LONG_WRAP);

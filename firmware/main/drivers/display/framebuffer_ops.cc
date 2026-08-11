@@ -101,6 +101,25 @@ bool Rgb565IsWhite(uint16_t c, uint8_t threshold) {
     return lum >= (static_cast<uint32_t>(threshold) << 8);
 }
 
+uint8_t Rgb565ToBwry(uint16_t c, uint8_t threshold) {
+    const uint8_t r5 = (c >> 11) & 0x1F;
+    const uint8_t g6 = (c >> 5) & 0x3F;
+    const uint8_t b5 = c & 0x1F;
+    const uint8_t r  = static_cast<uint8_t>((r5 * 255 + 15) / 31);
+    const uint8_t g  = static_cast<uint8_t>((g6 * 255 + 31) / 63);
+    const uint8_t b  = static_cast<uint8_t>((b5 * 255 + 15) / 31);
+
+    // 只把明显具有红/黄色相的像素送入彩色通道。字体抗锯齿和普通灰阶
+    // 仍沿用 Note4 的亮度阈值，避免浅灰边缘被误判为红黄杂点。
+    if (r >= 160 && b <= 96) {
+        if (g >= 112)
+            return 2;  // 10 黄
+        if (g <= 96)
+            return 3;  // 11 红
+    }
+    return Rgb565IsWhite(c, threshold) ? 1 : 0;
+}
+
 void SetPx1(uint8_t* fb, int width, int x, int y, bool white) {
     const int      bpr = (width + 7) >> 3;
     const uint32_t idx = static_cast<uint32_t>(y) * bpr + static_cast<uint32_t>(x >> 3);

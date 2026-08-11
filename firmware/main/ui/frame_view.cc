@@ -17,7 +17,7 @@ FrameView::FrameView(lv_obj_t* parent) {
     container_ = lv_obj_create(parent);
     lv_obj_set_size(container_, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_pos(container_, 0, 0);
-    lv_obj_set_style_bg_color(container_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(container_, theme::Paper(), 0);
     lv_obj_set_style_bg_opa(container_, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(container_, 0, 0);
     lv_obj_set_style_border_width(container_, 0, 0);

@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "drivers/display/display_profile.h"
 #include "drivers/display/epd_ssd1683.h"
 #include "events/event_bus.h"
 #include "events/ui_event_log.h"
@@ -122,7 +123,7 @@ void StyleTransparent(lv_obj_t* obj) {
 void StyleBubble(lv_obj_t* bubble) {
     lv_obj_set_style_bg_opa(bubble, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(bubble, 1, 0);
-    lv_obj_set_style_border_color(bubble, lv_color_black(), 0);
+    lv_obj_set_style_border_color(bubble, theme::Ink(), 0);
     lv_obj_set_style_radius(bubble, 8, 0);
     lv_obj_set_style_pad_left(bubble, 8, 0);
     lv_obj_set_style_pad_right(bubble, 8, 0);
@@ -148,6 +149,7 @@ void XiaozhiScene::EnsureServiceStarted(SceneContext& ctx) {
         status_bar_->SetCaption("小智异常");
         status_bar_->SetCaptionIcon(FONT_AWESOME_SAD);
         HideContentViews();
+        lv_obj_set_style_text_color(system_label_, theme::Danger(), 0);
         RenderSystemMessage("小智音频初始化失败\n\n请稍后重试或重启设备", false, "");
         lv_obj_clear_flag(hint_label_, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(hint_label_, "双击确认 返回");
@@ -208,20 +210,20 @@ void XiaozhiScene::CreateLayout() {
 
     code_label_ = lv_label_create(root_);
     lv_obj_set_style_text_font(code_label_, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_text_color(code_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(code_label_, theme::Ink(), 0);
     lv_obj_set_style_text_align(code_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_letter_space(code_label_, 4, 0);
     lv_obj_add_flag(code_label_, LV_OBJ_FLAG_HIDDEN);
 
     standby_icon_label_ = lv_label_create(root_);
     lv_obj_set_style_text_font(standby_icon_label_, &font_awesome_30_1, 0);
-    lv_obj_set_style_text_color(standby_icon_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(standby_icon_label_, theme::Accent(), 0);
     lv_label_set_text(standby_icon_label_, FONT_AWESOME_MICROCHIP_AI);
     lv_obj_align(standby_icon_label_, LV_ALIGN_CENTER, 0, RootCenterYOffset(StandbyContentCenterY() - 26));
 
     standby_body_label_ = lv_label_create(root_);
     lv_obj_set_style_text_font(standby_body_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(standby_body_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(standby_body_label_, theme::Ink(), 0);
     lv_obj_set_style_text_align(standby_body_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(standby_body_label_, "按确认开始聊天");
     lv_obj_set_width(standby_body_label_, LV_HOR_RES - 48);
@@ -229,7 +231,7 @@ void XiaozhiScene::CreateLayout() {
 
     system_label_ = lv_label_create(root_);
     lv_obj_set_style_text_font(system_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(system_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(system_label_, theme::Ink(), 0);
     lv_obj_set_style_text_align(system_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_line_space(system_label_, 6, 0);
     lv_label_set_long_mode(system_label_, LV_LABEL_LONG_WRAP);
@@ -257,7 +259,7 @@ void XiaozhiScene::CreateLayout() {
 
     xiaozhi_empty_label_ = lv_label_create(xiaozhi_area_);
     lv_obj_set_style_text_font(xiaozhi_empty_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(xiaozhi_empty_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(xiaozhi_empty_label_, theme::Accent(), 0);
     lv_obj_set_style_text_align(xiaozhi_empty_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(xiaozhi_empty_label_, "正在听，想聊点什么？");
     lv_obj_set_width(xiaozhi_empty_label_, LV_HOR_RES - 48);
@@ -266,7 +268,7 @@ void XiaozhiScene::CreateLayout() {
 
     hint_label_ = lv_label_create(root_);
     lv_obj_set_style_text_font(hint_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(hint_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(hint_label_, theme::Ink(), 0);
     lv_obj_set_style_text_align(hint_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(hint_label_, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(hint_label_, LV_HOR_RES - 16);
@@ -326,6 +328,8 @@ void XiaozhiScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
         case UiEventKind::kBatteryUpdated:
         case UiEventKind::kWifiStateChanged:
         case UiEventKind::kMinuteTick:
+            if (display_profile::kFourColor)
+                break;
             if (root_) {
                 SyncRender(ctx, [this, &ctx]() {
                     if (status_bar_)
@@ -354,8 +358,10 @@ void XiaozhiScene::RenderContent() {
     const auto snap = service_->Snapshot();
     UpdateStatusBarTitle(snap);
     HideContentViews();
+    lv_obj_set_style_text_color(system_label_, theme::Ink(), 0);
 
     if (snap.alert_active) {
+        lv_obj_set_style_text_color(system_label_, theme::Danger(), 0);
         const std::string title   = DisplayText(snap.alert_status.empty() ? "小智提醒" : snap.alert_status);
         const std::string message = util::TrimForScreen(util::SanitizeForScreen(snap.alert_message), 72);
         RenderSystemMessage(title + (message.empty() ? "" : "\n\n" + message), false, "");
@@ -365,6 +371,7 @@ void XiaozhiScene::RenderContent() {
                 RenderSystemMessage("正在获取小智配置...", false, "");
                 break;
             case xiaozhi::XiaozhiState::kAwaitingActivation:
+                lv_obj_set_style_text_color(system_label_, theme::Accent(), 0);
                 RenderSystemMessage(
                     snap.activation_message.empty() ? "请在小智控制台输入激活码" : DisplayText(snap.activation_message),
                     true, snap.activation_code);
@@ -384,6 +391,7 @@ void XiaozhiScene::RenderContent() {
                 RenderXiaozhiMessages(snap);
                 break;
             case xiaozhi::XiaozhiState::kError:
+                lv_obj_set_style_text_color(system_label_, theme::Danger(), 0);
                 RenderSystemMessage("小智暂不可用\n\n" + util::TrimForScreen(util::SanitizeForScreen(snap.error), 72),
                                     false, "");
                 break;
@@ -476,9 +484,10 @@ void XiaozhiScene::AppendXiaozhiBubble(const std::string& role, const std::strin
 
     lv_obj_t* bubble = lv_obj_create(row);
     StyleBubble(bubble);
+    lv_obj_set_style_border_color(bubble, system ? theme::Danger() : (user ? theme::Accent() : theme::Ink()), 0);
     lv_obj_t* label = lv_label_create(bubble);
     lv_obj_set_style_text_font(label, &Zfull_16, 0);
-    lv_obj_set_style_text_color(label, lv_color_black(), 0);
+    lv_obj_set_style_text_color(label, theme::Ink(), 0);
     lv_obj_set_style_text_line_space(label, 4, 0);
     LayoutBubble(bubble, label, display_text);
     lv_obj_set_height(row, lv_obj_get_height(bubble) + 2);

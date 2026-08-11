@@ -11,6 +11,7 @@
 // 状态栏 24px 高 = 16px line_height + 上下 4px 边距。
 
 #include <lvgl.h>
+#include <sdkconfig.h>
 
 #include <font_awesome.h>
 
@@ -21,6 +22,30 @@ LV_FONT_DECLARE(font_awesome_30_1);
 
 namespace theme {
 constexpr int kStatusBarHeight = 24;
+
+inline lv_color_t Paper() {
+    return lv_color_white();
+}
+
+inline lv_color_t Ink() {
+    return lv_color_black();
+}
+
+inline lv_color_t Accent() {
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    return lv_color_make(255, 220, 0);
+#else
+    return lv_color_black();
+#endif
+}
+
+inline lv_color_t Danger() {
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    return lv_color_make(220, 24, 24);
+#else
+    return lv_color_black();
+#endif
+}
 
 // 右侧 scrollbar thumb 几何,MenuList 与 DeviceInfoPage 共用。
 constexpr int kScrollbarTrackPadTop    = 12;

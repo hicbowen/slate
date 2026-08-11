@@ -192,10 +192,10 @@ void EpdSsd1683::LvglFlushCb(lv_display_t* disp, const lv_area_t* area, uint8_t*
     for (int yy = 0; yy < h; ++yy) {
         const uint16_t* row = src + (yy + (y1 - area->y1)) * sw + (x1 - area->x1);
         for (int xx = 0; xx < w; ++xx) {
-            const bool white = epd::Rgb565IsWhite(row[xx], kBwThreshold);
 #if CONFIG_SLATE_DISPLAY_NOTE4C
-            epd::SetPx2(self->buffer_, kWidth, x1 + xx, y1 + yy, white ? 1 : 0);
+            epd::SetPx2(self->buffer_, kWidth, x1 + xx, y1 + yy, epd::Rgb565ToBwry(row[xx], kBwThreshold));
 #else
+            const bool white = epd::Rgb565IsWhite(row[xx], kBwThreshold);
             epd::SetPx1(self->buffer_, kWidth, x1 + xx, y1 + yy, white);
 #endif
         }

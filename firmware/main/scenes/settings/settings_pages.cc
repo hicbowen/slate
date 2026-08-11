@@ -65,8 +65,8 @@ std::vector<uint8_t> MakeTestTone() {
 }
 }  // namespace
 
-ConfirmActionPage::ConfirmActionPage(std::string name, std::string caption, std::string warning)
-    : name_(std::move(name)), caption_(std::move(caption)), warning_(std::move(warning)) {
+ConfirmActionPage::ConfirmActionPage(std::string name, std::string caption, std::string warning, bool dangerous)
+    : name_(std::move(name)), caption_(std::move(caption)), warning_(std::move(warning)), dangerous_(dangerous) {
 }
 
 ConfirmActionPage::~ConfirmActionPage() = default;
@@ -77,7 +77,7 @@ void ConfirmActionPage::OnEnter(SceneContext& ctx) {
 
     auto* warn = lv_label_create(RootObj());
     lv_obj_set_style_text_font(warn, &Zfull_16, 0);
-    lv_obj_set_style_text_color(warn, lv_color_black(), 0);
+    lv_obj_set_style_text_color(warn, dangerous_ ? theme::Danger() : theme::Accent(), 0);
     lv_obj_set_style_text_align(warn, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_line_space(warn, 8, 0);
     lv_obj_set_width(warn, LV_HOR_RES - 64);
@@ -115,15 +115,15 @@ void VolumePage::OnEnter(SceneContext& ctx) {
 
     value_label_ = lv_label_create(RootObj());
     lv_obj_set_style_text_font(value_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(value_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(value_label_, theme::Ink(), 0);
     lv_obj_align(value_label_, LV_ALIGN_CENTER, 0, -32);
 
     bar_track_ = lv_obj_create(RootObj());
     lv_obj_set_size(bar_track_, kBarWidth, kBarHeight);
     lv_obj_align(bar_track_, LV_ALIGN_CENTER, 0, 4);
-    lv_obj_set_style_bg_color(bar_track_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(bar_track_, theme::Paper(), 0);
     lv_obj_set_style_bg_opa(bar_track_, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(bar_track_, lv_color_black(), 0);
+    lv_obj_set_style_border_color(bar_track_, theme::Ink(), 0);
     lv_obj_set_style_border_width(bar_track_, 1, 0);
     lv_obj_set_style_radius(bar_track_, 0, 0);
     lv_obj_set_style_pad_all(bar_track_, 0, 0);
@@ -132,7 +132,7 @@ void VolumePage::OnEnter(SceneContext& ctx) {
     bar_fill_ = lv_obj_create(bar_track_);
     lv_obj_set_size(bar_fill_, 0, kBarHeight - 2);
     lv_obj_set_pos(bar_fill_, 0, 0);
-    lv_obj_set_style_bg_color(bar_fill_, lv_color_black(), 0);
+    lv_obj_set_style_bg_color(bar_fill_, theme::Accent(), 0);
     lv_obj_set_style_bg_opa(bar_fill_, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(bar_fill_, 0, 0);
     lv_obj_set_style_radius(bar_fill_, 0, 0);
@@ -250,13 +250,13 @@ void WifiSettingsPage::OnEnter(SceneContext& ctx) {
 
     value_label_ = lv_label_create(RootObj());
     lv_obj_set_style_text_font(value_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(value_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(value_label_, theme::Ink(), 0);
     lv_obj_set_style_text_align(value_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(value_label_, LV_ALIGN_CENTER, 0, -30);
 
     detail_label_ = lv_label_create(RootObj());
     lv_obj_set_style_text_font(detail_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(detail_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(detail_label_, theme::Ink(), 0);
     lv_obj_set_style_text_align(detail_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(detail_label_, LV_HOR_RES - 48);
     lv_label_set_long_mode(detail_label_, LV_LABEL_LONG_WRAP);
@@ -305,6 +305,7 @@ void WifiSettingsPage::OnEvent(SceneContext& ctx, const UiEvent& e) {
 void WifiSettingsPage::Redraw(SceneContext& ctx) {
     if (!value_label_ || !detail_label_)
         return;
+    lv_obj_set_style_text_color(value_label_, desired_ ? theme::Accent() : theme::Ink(), 0);
     lv_label_set_text(value_label_, desired_ ? "[ 开启 ]" : "[ 关闭 ]");
     const size_t count = ctx.wifi_profile_count ? ctx.wifi_profile_count() : 0;
     char         detail[128];
@@ -338,7 +339,7 @@ void DeviceInfoPage::OnEnter(SceneContext& ctx) {
     scroll_area_ = lv_obj_create(root_);
     lv_obj_set_size(scroll_area_, LV_HOR_RES, LV_VER_RES - theme::kStatusBarHeight);
     lv_obj_set_pos(scroll_area_, 0, theme::kStatusBarHeight);
-    lv_obj_set_style_bg_color(scroll_area_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(scroll_area_, theme::Paper(), 0);
     lv_obj_set_style_bg_opa(scroll_area_, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(scroll_area_, 0, 0);
     lv_obj_set_style_pad_bottom(scroll_area_, 16, 0);
@@ -349,7 +350,7 @@ void DeviceInfoPage::OnEnter(SceneContext& ctx) {
 
     info_ = lv_label_create(scroll_area_);
     lv_obj_set_style_text_font(info_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(info_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(info_, theme::Ink(), 0);
     lv_obj_set_style_text_line_space(info_, 4, 0);
     lv_obj_set_style_text_align(info_, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_set_width(info_, LV_HOR_RES - 48);
@@ -401,6 +402,8 @@ void DeviceInfoPage::OnEvent(SceneContext& ctx, const UiEvent& e) {
         case UiEventKind::kBatteryUpdated:
         case UiEventKind::kWifiStateChanged:
         case UiEventKind::kMinuteTick:
+            if (display_profile::kFourColor)
+                break;
             SyncRenderIfChanged(
                 ctx,
                 [this, &ctx]() {
@@ -570,7 +573,8 @@ WifiPortalPage::WifiPortalPage()
                         "将暂时断开当前网络并开启\n"
                         "Slate 配网热点\n\n"
                         "可添加、更新或忘记网络\n"
-                        "提交成功后设备自动重启") {
+                        "提交成功后设备自动重启",
+                        false) {
 }
 
 WifiPortalPage::~WifiPortalPage() = default;

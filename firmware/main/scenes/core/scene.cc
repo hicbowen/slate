@@ -5,6 +5,7 @@
 
 #include "drivers/display/epd_ssd1683.h"
 #include "ui/status_bar.h"
+#include "ui/theme.h"
 
 namespace {
 constexpr char kTag[]        = "scene";
@@ -20,7 +21,7 @@ lv_obj_t* Scene::CreateFullscreenRoot() {
     auto* root   = lv_obj_create(screen);
     lv_obj_set_size(root, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_pos(root, 0, 0);
-    lv_obj_set_style_bg_color(root, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(root, theme::Paper(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(root, 0, 0);
     lv_obj_set_style_border_width(root, 0, 0);

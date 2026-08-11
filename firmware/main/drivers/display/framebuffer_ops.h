@@ -30,6 +30,7 @@ Rect Clamp(const Rect& r, int width, int height);
 Rect AlignX8(const Rect& r);
 
 bool    Rgb565IsWhite(uint16_t c, uint8_t threshold);
+uint8_t Rgb565ToBwry(uint16_t c, uint8_t threshold);
 void    SetPx1(uint8_t* fb, int width, int x, int y, bool white);
 bool    GetPx1(const uint8_t* fb, int width, int x, int y);
 void    SetPx2(uint8_t* fb, int width, int x, int y, uint8_t color);

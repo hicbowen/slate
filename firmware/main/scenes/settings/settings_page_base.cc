@@ -33,7 +33,7 @@ void SettingsPageBase::ExitSettingsScaffold(SceneContext& ctx, std::function<voi
 lv_obj_t* SettingsPageBase::CreateBottomHint(const char* text) {
     auto* hint = lv_label_create(root_);
     lv_obj_set_style_text_font(hint, &Zfull_16, 0);
-    lv_obj_set_style_text_color(hint, lv_color_black(), 0);
+    lv_obj_set_style_text_color(hint, theme::Ink(), 0);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(hint, text ? text : "");
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -16);

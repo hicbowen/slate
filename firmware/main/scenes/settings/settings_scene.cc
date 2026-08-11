@@ -41,8 +41,8 @@ void SettingsScene::OnEnter(SceneContext& ctx) {
         {"Wi-Fi 开关", [stack]() { stack->RequestPush(std::make_unique<WifiSettingsPage>()); }},
         {"管理 Wi-Fi", [stack]() { stack->RequestPush(std::make_unique<WifiPortalPage>()); }},
         {"设备信息", [stack]() { stack->RequestPush(std::make_unique<DeviceInfoPage>()); }},
-        {"重启设备", [stack]() { stack->RequestPush(std::make_unique<RestartDevicePage>()); }},
-        {"恢复出厂", [stack]() { stack->RequestPush(std::make_unique<FactoryResetPage>()); }},
+        {"重启设备", [stack]() { stack->RequestPush(std::make_unique<RestartDevicePage>()); }, MenuList::Tone::kDanger},
+        {"恢复出厂", [stack]() { stack->RequestPush(std::make_unique<FactoryResetPage>()); }, MenuList::Tone::kDanger},
     };
     menu_ = std::make_unique<MenuList>(root_, std::move(items), saved_cursor_);
 

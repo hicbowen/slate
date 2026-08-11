@@ -42,7 +42,7 @@ const char* BatteryIcon(int pct, bool charging, bool full) {
 
 void ApplyIconStyle(lv_obj_t* lbl) {
     lv_obj_set_style_text_font(lbl, &font_awesome_14_1, 0);
-    lv_obj_set_style_text_color(lbl, lv_color_black(), 0);
+    lv_obj_set_style_text_color(lbl, theme::Ink(), 0);
     lv_label_set_text(lbl, "");
 }
 
@@ -52,11 +52,11 @@ StatusBar::StatusBar(lv_obj_t* parent) {
     root_ = lv_obj_create(parent);
     lv_obj_set_size(root_, LV_HOR_RES, theme::kStatusBarHeight);
     lv_obj_set_pos(root_, 0, 0);
-    lv_obj_set_style_bg_color(root_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(root_, theme::Paper(), 0);
     lv_obj_set_style_bg_opa(root_, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(root_, 0, 0);
     lv_obj_set_style_border_width(root_, 1, 0);
-    lv_obj_set_style_border_color(root_, lv_color_black(), 0);
+    lv_obj_set_style_border_color(root_, theme::Accent(), 0);
     lv_obj_set_style_border_side(root_, LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_clear_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -77,7 +77,7 @@ StatusBar::StatusBar(lv_obj_t* parent) {
     // 数字用 Zfull 12px(ASCII 子集),比 16px 更紧凑工整。
     battery_pct_lbl_ = lv_label_create(root_);
     lv_obj_set_style_text_font(battery_pct_lbl_, &Zfull_12, 0);
-    lv_obj_set_style_text_color(battery_pct_lbl_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(battery_pct_lbl_, theme::Ink(), 0);
     lv_label_set_text(battery_pct_lbl_, "");
     lv_obj_align(battery_pct_lbl_, LV_ALIGN_RIGHT_MID, kBatteryPctXOffset, kBatteryPctYOffset);
 
@@ -88,7 +88,7 @@ StatusBar::StatusBar(lv_obj_t* parent) {
     // 中央标题：16px Zfull-GB 1bpp。和 BootSplash 同字体,整固件统一中文风格。
     title_label_ = lv_label_create(root_);
     lv_obj_set_style_text_font(title_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(title_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(title_label_, theme::Ink(), 0);
     lv_obj_set_style_text_align(title_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(title_label_, LV_LABEL_LONG_CLIP);
     lv_label_set_text(title_label_, "");
