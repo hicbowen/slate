@@ -3,7 +3,7 @@
 // LittleFS 缓存:挂在 /littlefs,目录布局:
 //   /littlefs/state.json                 {selected_group_id, last_etag}
 //   /littlefs/groups/{gid}/manifest.json {group_id, group_name, manifest_etag, content_count, last_access_seq}
-//   /littlefs/groups/{gid}/frames/{idx}.img  15000 字节 1bpp
+//   /littlefs/groups/{gid}/frames/{idx}.img  Note4 15000B / Note4C 30000B
 //   /littlefs/groups/{gid}/frames/{idx}.pcm  16k mono raw PCM
 
 #include <cstddef>

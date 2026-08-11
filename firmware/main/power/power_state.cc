@@ -32,7 +32,8 @@ RTC_DATA_ATTR uint32_t s_timer_wake_fail_count = 0;
 constexpr uint32_t kMaxBackoffShift   = 6;
 constexpr uint64_t kMaxBackoffWakeSec = 3600;
 
-constexpr uint32_t     kStatusBarSnapshotMagic                             = 0x53544231u;  // "STB1"
+constexpr uint32_t kStatusBarSnapshotMagic =
+    display_profile::kFourColor ? 0x53544232u : 0x53544231u;  // "STB2" / "STB1"
 RTC_DATA_ATTR uint32_t s_status_bar_magic                                  = 0;
 RTC_DATA_ATTR uint32_t s_status_bar_hash                                   = 0;
 RTC_DATA_ATTR uint8_t  s_status_bar_snapshot[epd::kStatusBarSnapshotBytes] = {};

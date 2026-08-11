@@ -55,7 +55,7 @@ uint32_t ComputeNextWakeSec();
 // 由后台刷新路径调用：网络建立失败 / sync 完成(ok 或失败) 时各上报一次。
 void RecordTimerWakeResult(bool success);
 
-// 睡前最后一次刷到物理屏上的状态栏 1bpp 快照。用于 timer wake 后重建
+// 睡前最后一次刷到物理屏上的状态栏 profile 原始快照。用于 timer wake 后重建
 // prev_buffer_ 的 0~24 行，让后台 partial refresh 的 old/new 输入真实一致。
 bool SaveStatusBarSnapshot(const uint8_t* data, size_t len);
 bool LoadStatusBarSnapshot(uint8_t* out, size_t len);

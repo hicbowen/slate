@@ -11,6 +11,7 @@
 #include <new>
 #include <vector>
 
+#include "drivers/display/display_profile.h"
 #include "drivers/display/epd_ssd1683.h"
 #include "drivers/display/framebuffer_ops.h"
 #include "events/event_bus.h"
@@ -22,12 +23,12 @@
 
 namespace {
 constexpr char kTag[] = "bg_refresh";
-constexpr int  kBpr   = FrameView::kWidth / 8;
+constexpr int  kBpr   = display_profile::kBytesPerRow;
 
 // 后台刷新整体硬截止：从进场到完成的总时长上限。WiFi 连接 + poll + 拉帧 + EPD 刷新
 // 都算在内。超时直接投 kBgRefreshDone 回睡，不再依赖 10min idle Tick 兜底，封住
 // 「sync 卡住 → 持续亮屏连网耗电」的窗口。
-constexpr int kBgRefreshDeadlineMs = 40000;
+constexpr int kBgRefreshDeadlineMs = display_profile::kFourColor ? 150'000 : 40'000;
 
 void PostBgRefreshDone() {
     evt::PostSimple(UiEventKind::kBgRefreshDone);
@@ -47,7 +48,7 @@ struct WatcherContext {
 void WatcherEntry(void* arg) {
     std::unique_ptr<WatcherContext> ctx(static_cast<WatcherContext*>(arg));
     auto*                           epd        = ctx ? ctx->epd : nullptr;
-    constexpr int                   kTimeoutMs = 8000;
+    constexpr int                   kTimeoutMs = display_profile::kRefreshIdleTimeoutMs;
     if (epd)
         epd->WaitForRefreshIdle(kTimeoutMs);
     auto done_posted = ctx ? ctx->done_posted : std::shared_ptr<std::atomic<bool>>();
@@ -173,9 +174,9 @@ bool BgRefreshScene::SeedPreviousFrame(SceneContext& ctx) {
 
     const int y = theme::kStatusBarHeight;
     const int h = FrameView::kHeight - y;
-    ctx.epd->SeedPreviousRaw1bpp(0, 0, epd::kStatusBarSnapshotWidth, epd::kStatusBarSnapshotHeight, status_bar.data(),
-                                 status_bar.size());
-    ctx.epd->SeedPreviousRaw1bpp(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
+    ctx.epd->SeedPreviousRawFrame(0, 0, epd::kStatusBarSnapshotWidth, epd::kStatusBarSnapshotHeight, status_bar.data(),
+                                  status_bar.size());
+    ctx.epd->SeedPreviousRawFrame(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
     return true;
 }
 
@@ -231,11 +232,14 @@ bool BgRefreshScene::RenderChangedFrame(SceneContext& ctx) {
     lv_refr_now(NULL);
 
     // Background refresh uses LVGL only for the status bar. The frame body is
-    // written as raw 1bpp data so it exactly matches the cached screen format.
+    // written as raw profile data so it exactly matches the cached screen format.
     const int y = theme::kStatusBarHeight;
     const int h = FrameView::kHeight - y;
-    ctx.epd->WriteRaw1bpp(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
-    ctx.epd->RequestUrgentPartialRefresh();
+    ctx.epd->WriteRawFrame(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
+    if (display_profile::kFourColor)
+        ctx.epd->RequestUrgentFullRefresh();
+    else
+        ctx.epd->RequestUrgentPartialRefresh();
     ctx.epd->Unlock();
 
     StartWatcher(ctx.epd);

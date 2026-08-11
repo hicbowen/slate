@@ -2,6 +2,7 @@
 
 #include <esp_log.h>
 
+#include "drivers/display/display_profile.h"
 #include "events/event_bus.h"
 #include "power/power_state.h"
 #include "sync/sync_internal.h"
@@ -312,7 +313,7 @@ bool SyncService::SyncCurrentContent(const std::string& gid, const api::ContentM
             }
         }
         power_state::SetCurrentFrameFromMeta(f.seq, next_meta);
-        changed = old_meta.status_bar_text != next_meta.status_bar_text ||
+        changed = (!display_profile::kFourColor && old_meta.status_bar_text != next_meta.status_bar_text) ||
                   (!old_meta.image_etag.empty() && old_meta.image_etag != next_meta.image_etag);
         return true;
     }
@@ -372,6 +373,6 @@ bool SyncService::SyncCurrentContent(const std::string& gid, const api::ContentM
         return false;
     }
     power_state::SetCurrentFrameFromMeta(f.seq, next_meta);
-    changed = image_downloaded || image_etag_changed || status_bar_changed;
+    changed = image_downloaded || image_etag_changed || (!display_profile::kFourColor && status_bar_changed);
     return true;
 }

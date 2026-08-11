@@ -9,7 +9,7 @@ namespace {
 constexpr char kTag[]      = "frame_view";
 constexpr int  kStatusBarH = theme::kStatusBarHeight;
 constexpr int  kImgH       = FrameView::kHeight - kStatusBarH;
-constexpr int  kBpr        = FrameView::kWidth >> 3;
+constexpr int  kBpr        = display_profile::kBytesPerRow;
 constexpr int  kImgBytes   = kImgH * kBpr;
 }  // namespace
 
@@ -31,7 +31,7 @@ void FrameView::SetFrame(EpdSsd1683* epd, const std::vector<uint8_t>& raw) {
         ESP_LOGW(kTag, "raw size mismatch bytes=%u expected=%d", static_cast<unsigned>(raw.size()), kRawBytes);
         return;
     }
-    epd->WriteRaw1bpp(0, kStatusBarH, kWidth, kImgH, raw.data() + kStatusBarH * kBpr, kImgBytes);
+    epd->WriteRawFrame(0, kStatusBarH, kWidth, kImgH, raw.data() + kStatusBarH * kBpr, kImgBytes);
 }
 
 void FrameView::Show() {

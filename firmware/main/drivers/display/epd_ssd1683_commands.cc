@@ -3,6 +3,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include <cstring>
+
 #include "drivers/display/framebuffer_ops.h"
 #include "utils/time_utils.h"
 
@@ -16,9 +18,11 @@ void EpdSsd1683::EpdInit() {
     gpio_set_level(rst_, 1);
     vTaskDelay(pdMS_TO_TICKS(10));
     ReadBusy();
+#if !CONFIG_SLATE_DISPLAY_NOTE4C
     EpdSendCommand(0x00);
     EpdSendData(0x2F);
     EpdSendData(0x2E);
+#endif
     EpdSendCommand(0xE9);
     EpdSendData(0x01);
     ReadBusy();
@@ -62,6 +66,14 @@ void EpdSsd1683::ApplyTemperatureBoost() {
 }
 
 void EpdSsd1683::EpdDisplayFull() {
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    EpdSendCommand(0x10);
+    for (int y = 0; y < kHeight; ++y) {
+        std::memcpy(epd_line_.data(), snapshot_ + y * display_profile::kBytesPerRow, display_profile::kBytesPerRow);
+        WriteBytes(epd_line_.data(), display_profile::kBytesPerRow);
+    }
+    EpdTurnOnDisplay();
+#else
     int      bpr     = (kWidth + 7) >> 3;
     int      bpr_out = bpr * 2;
     uint8_t* line    = epd_line_.data();
@@ -84,9 +96,14 @@ void EpdSsd1683::EpdDisplayFull() {
         WriteBytes(line, bpr_out);
     }
     EpdTurnOnDisplay();
+#endif
 }
 
 void EpdSsd1683::EpdDisplayPartial() {
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    // Note4C 面板没有局刷波形；上层正常不会进入这里，兜底仍按全刷处理。
+    EpdDisplayFull();
+#else
     int      bpr     = (kWidth + 7) >> 3;
     int      bpr_out = bpr * 2;
     uint8_t* line    = epd_line_.data();
@@ -109,17 +126,25 @@ void EpdSsd1683::EpdDisplayPartial() {
         WriteBytes(line, bpr_out);
     }
     EpdTurnOnDisplay();
+#endif
 }
 
 void EpdSsd1683::EpdTurnOnDisplay() {
     EpdSendCommand(0x04);  // power on
     ReadBusy();
     EpdSendCommand(0x12);  // display refresh
+#if !CONFIG_SLATE_DISPLAY_NOTE4C
     EpdSendData(0x00);
+#endif
     ReadBusy();
     EpdSendCommand(0x02);  // power off (controller internal)
     EpdSendData(0x00);
     ReadBusy();
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    // 四色参考驱动在每次全刷后进入 controller deep sleep，避免电荷泵持续耗电。
+    EpdSendCommand(0x07);
+    EpdSendData(0xA5);
+#endif
     // 跟参考实现对齐:每次刷完屏都断 GPIO6,跟刷新前的 EpdInit() 内 EpdPowerOn 配对。
     // 见 esp32-eink/main/boards/zectrix-s3-epaper-4.2/custom_lcd_display.cc:826。
     EpdPowerOff();

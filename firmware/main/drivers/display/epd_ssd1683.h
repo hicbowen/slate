@@ -11,16 +11,16 @@
 #include <functional>
 #include <vector>
 
+#include "drivers/display/display_profile.h"
 #include "drivers/display/framebuffer_ops.h"
 
-// SSD1683 类驱动 4.2" 黑白 EPD（400×300，1bpp）+ LVGL 集成。
-// SPI 写帧 + 异步 refresh_task（300 ms 节流，防过频刷新损伤 EPD）+ LVGL flush_cb
-// 阈值化 RGB565→1bpp。RequestUrgentFullRefresh() 立即触发全帧刷新。
+// SSD1683 类驱动 4.2" EPD（Note4 1bpp / Note4C 2bpp）+ LVGL 集成。
+// 两种面板由编译期 display profile 选择，避免运行时误判面板并发送错误波形命令。
 class EpdSsd1683 {
    public:
     static constexpr int kWidth     = 400;
     static constexpr int kHeight    = 300;
-    static constexpr int kBufferLen = ((kWidth + 7) / 8) * kHeight;
+    static constexpr int kBufferLen = display_profile::kFrameBytes;
 
     EpdSsd1683();
     ~EpdSsd1683();
@@ -34,18 +34,18 @@ class EpdSsd1683 {
     void RequestUrgentPartialRefresh();  // partial(~1s 残影)
     void RequestUrgentFullRefresh();     // full(~5s 干净)
 
-    // 直接把 1bpp 原始数据写入 framebuffer，绕过 LVGL 管线。
-    // bit=1=白，bit=0=黑（与服务端下发格式一致，无需反转）。
+    // 直接把当前 profile 的原始数据写入 framebuffer，绕过 LVGL 管线。
+    // Note4:1bpp；Note4C:2bpp(00 黑、01 白、10 黄、11 红)。
     // 调用后自动 notify refresh_task；调用方再发 RequestUrgentXxxRefresh 设 urgent 标志。
-    void WriteRaw1bpp(int x, int y, int w, int h, const uint8_t* data, size_t len);
+    void WriteRawFrame(int x, int y, int w, int h, const uint8_t* data, size_t len);
 
     // 把已知的当前物理画面种到 buffer_/prev_snapshot_，不触发刷新。
     // deep sleep 唤醒后内存丢失，但 EPD 物理像素仍保持；timer 自动刷新要先用
     // 睡前缓存重建 previous snapshot，后续才能做真正 partial 而不是首次 full 清屏。
-    void SeedPreviousRaw1bpp(int x, int y, int w, int h, const uint8_t* data, size_t len);
+    void SeedPreviousRawFrame(int x, int y, int w, int h, const uint8_t* data, size_t len);
 
     // 读取上次已刷到物理屏的 framebuffer 快照。只有 prev_snapshot_ 已同步时返回 true。
-    bool ReadPreviousRaw1bpp(int x, int y, int w, int h, uint8_t* out, size_t len);
+    bool ReadPreviousRawFrame(int x, int y, int w, int h, uint8_t* out, size_t len);
 
     bool Lock(int timeout_ms = 0);
     void Unlock();
@@ -83,7 +83,7 @@ class EpdSsd1683 {
     bool                 refresh_in_progress_      = false;
     TickType_t           last_sample_tick_         = 0;
     TickType_t           last_flush_tick_          = 0;  // LVGL 最后一次 flush_cb 的时刻,用于等待静默
-    int                  sample_interval_ms_       = 300;
+    int                  sample_interval_ms_       = display_profile::kMinRefreshIntervalMs;
     int                  partial_since_full_       = 0;  // 累积多少次 partial 后强制 full 清残影
     static constexpr int kPartialBeforeFullCleanup = 8;
 

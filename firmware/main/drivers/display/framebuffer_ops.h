@@ -3,11 +3,14 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "drivers/display/display_profile.h"
+
 namespace epd {
 
 constexpr int kStatusBarSnapshotWidth  = 400;
 constexpr int kStatusBarSnapshotHeight = 24;
-constexpr int kStatusBarSnapshotBytes  = kStatusBarSnapshotWidth * kStatusBarSnapshotHeight / 8;
+constexpr int kStatusBarSnapshotBytes =
+    kStatusBarSnapshotWidth * kStatusBarSnapshotHeight * display_profile::kBitsPerPixel / 8;
 
 struct Rect {
     int x = 0;
@@ -26,13 +29,17 @@ Rect Union(const Rect& a, const Rect& b);
 Rect Clamp(const Rect& r, int width, int height);
 Rect AlignX8(const Rect& r);
 
-bool Rgb565IsWhite(uint16_t c, uint8_t threshold);
-void SetPx1(uint8_t* fb, int width, int x, int y, bool white);
-bool GetPx1(const uint8_t* fb, int width, int x, int y);
-void Copy1bppInto(uint8_t* fb, int fb_w, int fb_h, int x, int y, int w, int h, const uint8_t* data);
-void Copy1bppFrom(const uint8_t* fb, int fb_w, int fb_h, int x, int y, int w, int h, uint8_t* data);
-void Pack1bppTo2683(uint8_t in, uint8_t& out0, uint8_t& out1);
-void PackPartial1bppTo2683(uint8_t prev, uint8_t now, uint8_t& out0, uint8_t& out1);
+bool    Rgb565IsWhite(uint16_t c, uint8_t threshold);
+void    SetPx1(uint8_t* fb, int width, int x, int y, bool white);
+bool    GetPx1(const uint8_t* fb, int width, int x, int y);
+void    SetPx2(uint8_t* fb, int width, int x, int y, uint8_t color);
+uint8_t GetPx2(const uint8_t* fb, int width, int x, int y);
+void    Copy1bppInto(uint8_t* fb, int fb_w, int fb_h, int x, int y, int w, int h, const uint8_t* data);
+void    Copy1bppFrom(const uint8_t* fb, int fb_w, int fb_h, int x, int y, int w, int h, uint8_t* data);
+void    Copy2bppInto(uint8_t* fb, int fb_w, int fb_h, int x, int y, int w, int h, const uint8_t* data);
+void    Copy2bppFrom(const uint8_t* fb, int fb_w, int fb_h, int x, int y, int w, int h, uint8_t* data);
+void    Pack1bppTo2683(uint8_t in, uint8_t& out0, uint8_t& out1);
+void    PackPartial1bppTo2683(uint8_t prev, uint8_t now, uint8_t& out0, uint8_t& out1);
 
 DiffResult Diff(const uint8_t* a, const uint8_t* b, size_t len);
 

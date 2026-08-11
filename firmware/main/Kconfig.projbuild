@@ -1,5 +1,20 @@
 menu "Slate Configuration"
 
+choice SLATE_DISPLAY_PROFILE
+    prompt "Display hardware profile"
+    default SLATE_DISPLAY_NOTE4
+    help
+        Note4 uses the 1bpp black/white panel and supports partial refresh.
+        Note4C uses the 2bpp black/white/red/yellow panel and full refresh only.
+
+config SLATE_DISPLAY_NOTE4
+    bool "Zectrix Note4 (black/white)"
+
+config SLATE_DISPLAY_NOTE4C
+    bool "Zectrix Note4C (black/white/red/yellow)"
+
+endchoice
+
 config SLATE_DEFAULT_SERVER_URL
     string "Default server URL (shown in captive portal)"
     default ""

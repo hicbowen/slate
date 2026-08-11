@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "bsp/config.h"
+#include "drivers/display/display_profile.h"
 #include "utils/json_utils.h"
 #include "utils/time_utils.h"
 
@@ -38,6 +39,7 @@ inline constexpr char kCurrentContentSeq[]   = "current_content_seq";
 inline constexpr char kCurrentContentEtag[]  = "current_content_etag";
 inline constexpr char kCurrentGroup[]        = "current_group";
 inline constexpr char kDeviceStatusBarText[] = "device_status_bar_text";
+inline constexpr char kDisplayProfile[]      = "display_profile";
 inline constexpr char kDetail[]              = "detail";
 inline constexpr char kDevice[]              = "device";
 inline constexpr char kDeviceSecret[]        = "device_secret";
@@ -46,6 +48,7 @@ inline constexpr char kFwVersion[]           = "fw_version";
 inline constexpr char kGroup[]               = "group";
 inline constexpr char kId[]                  = "id";
 inline constexpr char kImageEtag[]           = "image_etag";
+inline constexpr char kImageRenditions[]     = "image_renditions";
 inline constexpr char kImageSize[]           = "image_size";
 inline constexpr char kKind[]                = "kind";
 inline constexpr char kManifestEtag[]        = "manifest_etag";
@@ -187,6 +190,22 @@ void ParseContentMeta(cJSON* item, ContentMeta& out) {
     out.next_wake_sec          = out.has_next_wake_sec ? next_wake->valueint : 0;
     if (out.kind.empty())
         out.kind = "image";
+
+    cJSON* renditions = cJSON_GetObjectItemCaseSensitive(item, proto::kImageRenditions);
+    if (cJSON_IsObject(renditions)) {
+        // 新协议一旦声明 renditions 就必须使用当前 profile；不静默回退到顶层 legacy mono etag。
+        out.image_etag.clear();
+        out.image_size  = 0;
+        cJSON* selected = cJSON_GetObjectItemCaseSensitive(renditions, display_profile::kFrameFormat);
+        if (cJSON_IsObject(selected)) {
+            const std::string selected_etag = JsonString(selected, "etag");
+            const int         selected_size = JsonInt(selected, "size", 0);
+            if (!selected_etag.empty() && selected_size == display_profile::kFrameBytes) {
+                out.image_etag = selected_etag;
+                out.image_size = selected_size;
+            }
+        }
+    }
 }
 
 }  // namespace
@@ -273,7 +292,7 @@ bool ApiClient::DoRequest(const std::string& path, esp_http_client_method_t meth
     const std::string full = normalized_base + path;
 
     // 防止异常响应耗尽堆内存。上限与后端音频转码 60 秒 PCM 上限对齐；
-    // JSON API 与 1bpp 图片远小于这个值，音频资源也不会被合法 TTS 误拦截。
+    // JSON API 与 1/2bpp 图片远小于这个值，音频资源也不会被合法 TTS 误拦截。
     constexpr size_t kMaxResponseBytes = static_cast<size_t>(AUDIO_MAX_PCM_BYTES);
 
     // 整个请求事务串行化:持久 conn_ 不能并发使用。
@@ -504,6 +523,7 @@ bool ApiClient::Register(RegisterResult& out) {
         return false;
     }
     cJSON_AddStringToObject(j, proto::kMac, mac.c_str());
+    cJSON_AddStringToObject(j, proto::kDisplayProfile, display_profile::kDeviceProfile);
     char* body = cJSON_PrintUnformatted(j);
     cJSON_Delete(j);
     if (!body) {
@@ -572,6 +592,7 @@ bool ApiClient::Poll(const Telemetry& tel, DeviceState& out) {
             cJSON_AddStringToObject(t, proto::kCurrentContentEtag, tel.current_content_etag.c_str());
         if (!tel.manifest_etag.empty())
             cJSON_AddStringToObject(t, proto::kManifestEtag, tel.manifest_etag.c_str());
+        cJSON_AddStringToObject(t, proto::kDisplayProfile, display_profile::kDeviceProfile);
         cJSON_AddItemToObject(root, proto::kTelemetry, t);
     }
 
@@ -691,7 +712,8 @@ bool ApiClient::DownloadBinary(const std::string& path, const std::string& if_no
 
 bool ApiClient::DownloadContentImage(const std::string& id, const std::string& if_none_match, std::vector<uint8_t>& out,
                                      bool& not_modified) {
-    std::string path = std::string(kApiPrefix) + "/contents/" + UrlEncodePathSegment(id) + "/image";
+    std::string path = std::string(kApiPrefix) + "/contents/" + UrlEncodePathSegment(id) +
+                       "/image?format=" + display_profile::kFrameFormat;
     return DownloadBinary(path, if_none_match, out, not_modified);
 }
 

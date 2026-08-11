@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include "drivers/display/display_profile.h"
 #include "ui/theme.h"
 
 namespace {
@@ -95,6 +96,11 @@ StatusBar::StatusBar(lv_obj_t* parent) {
 }
 
 bool StatusBar::SetWifi(bool connected, int rssi) {
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    // 四色屏固定使用稳定图标：信号格变化不值得触发一次十余秒的全刷。
+    connected = true;
+    rssi      = -60;
+#endif
     const char* icon = WifiIcon(connected, rssi);
     if (shown_wifi_ == icon)
         return false;
@@ -104,6 +110,12 @@ bool StatusBar::SetWifi(bool connected, int rssi) {
 }
 
 bool StatusBar::SetBattery(int pct, bool charging, bool full) {
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    // 固定中性电量图标并隐藏百分比，避免电量采样波动触发四色全刷。
+    pct      = 50;
+    charging = false;
+    full     = false;
+#endif
     bool        changed = false;
     const char* icon    = BatteryIcon(pct, charging, full);
     if (shown_battery_ != icon) {
@@ -118,7 +130,9 @@ bool StatusBar::SetBattery(int pct, bool charging, bool full) {
     //   pct >= 0   → "%d%%"
     //   pct < 0    → "--"(无电池 / 未读到)
     char buf[16] = "";
-    if (full) {
+    if (display_profile::kFourColor) {
+        // 留空，仅显示固定图标。
+    } else if (full) {
         std::snprintf(buf, sizeof(buf), "100%%");
     } else if (charging) {
         // 留空,只剩图标

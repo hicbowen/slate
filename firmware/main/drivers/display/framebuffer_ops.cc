@@ -118,6 +118,20 @@ bool GetPx1(const uint8_t* fb, int width, int x, int y) {
     return (fb[idx] & bit) != 0;
 }
 
+void SetPx2(uint8_t* fb, int width, int x, int y, uint8_t color) {
+    const int      bpr   = (width + 3) >> 2;
+    const uint32_t idx   = static_cast<uint32_t>(y) * bpr + static_cast<uint32_t>(x >> 2);
+    const uint8_t  shift = 6 - 2 * (x & 3);
+    fb[idx]              = static_cast<uint8_t>((fb[idx] & ~(0x03 << shift)) | ((color & 0x03) << shift));
+}
+
+uint8_t GetPx2(const uint8_t* fb, int width, int x, int y) {
+    const int      bpr   = (width + 3) >> 2;
+    const uint32_t idx   = static_cast<uint32_t>(y) * bpr + static_cast<uint32_t>(x >> 2);
+    const uint8_t  shift = 6 - 2 * (x & 3);
+    return static_cast<uint8_t>((fb[idx] >> shift) & 0x03);
+}
+
 void Copy1bppInto(uint8_t* fb, int fb_w, int fb_h, int x, int y, int w, int h, const uint8_t* data) {
     if (!fb || !data || fb_w <= 0 || fb_h <= 0 || w <= 0 || h <= 0)
         return;
@@ -188,6 +202,63 @@ void Copy1bppFrom(const uint8_t* fb, int fb_w, int fb_h, int x, int y, int w, in
                 dst_row[col >> 3] |= bit;
             else
                 dst_row[col >> 3] &= ~bit;
+        }
+    }
+}
+
+void Copy2bppInto(uint8_t* fb, int fb_w, int fb_h, int x, int y, int w, int h, const uint8_t* data) {
+    if (!fb || !data || fb_w <= 0 || fb_h <= 0 || w <= 0 || h <= 0)
+        return;
+    if (x >= fb_w || y >= fb_h || x + w <= 0 || y + h <= 0)
+        return;
+
+    const int src_bpr = (w + 3) >> 2;
+    const int dst_bpr = (fb_w + 3) >> 2;
+    if (x == 0 && w == fb_w) {
+        for (int row = 0; row < h; row++) {
+            const int dy = y + row;
+            if (dy >= 0 && dy < fb_h)
+                std::memcpy(fb + dy * dst_bpr, data + row * src_bpr, src_bpr);
+        }
+        return;
+    }
+    for (int row = 0; row < h; row++) {
+        const int dy = y + row;
+        if (dy < 0 || dy >= fb_h)
+            continue;
+        const uint8_t* src_row = data + row * src_bpr;
+        for (int col = 0; col < w; col++) {
+            const int dx = x + col;
+            if (dx >= 0 && dx < fb_w)
+                SetPx2(fb, fb_w, dx, dy, static_cast<uint8_t>((src_row[col >> 2] >> (6 - 2 * (col & 3))) & 3));
+        }
+    }
+}
+
+void Copy2bppFrom(const uint8_t* fb, int fb_w, int fb_h, int x, int y, int w, int h, uint8_t* data) {
+    if (!fb || !data || fb_w <= 0 || fb_h <= 0 || w <= 0 || h <= 0)
+        return;
+    const int dst_bpr = (w + 3) >> 2;
+    const int src_bpr = (fb_w + 3) >> 2;
+    std::memset(data, 0x55, dst_bpr * h);
+    if (x >= fb_w || y >= fb_h || x + w <= 0 || y + h <= 0)
+        return;
+    if (x == 0 && w == fb_w) {
+        for (int row = 0; row < h; row++) {
+            const int sy = y + row;
+            if (sy >= 0 && sy < fb_h)
+                std::memcpy(data + row * dst_bpr, fb + sy * src_bpr, src_bpr);
+        }
+        return;
+    }
+    for (int row = 0; row < h; row++) {
+        const int sy = y + row;
+        if (sy < 0 || sy >= fb_h)
+            continue;
+        for (int col = 0; col < w; col++) {
+            const int sx = x + col;
+            if (sx >= 0 && sx < fb_w)
+                SetPx2(data, w, col, row, GetPx2(fb, fb_w, sx, sy));
         }
     }
 }
