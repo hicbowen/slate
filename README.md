@@ -156,17 +156,18 @@ bun run dev:frontend    # http://localhost:5173，Vite proxy /api 与 /healthz �
 
 ```bash
 source $IDF_PATH/export.sh
+cd firmware
 
 # Note4 黑白屏（默认）
-idf.py -C firmware -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
+idf.py -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
   -D SDKCONFIG_DEFAULTS=sdkconfig.defaults build
-idf.py -C firmware -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
+idf.py -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
   -D SDKCONFIG_DEFAULTS=sdkconfig.defaults -p <serial> flash monitor
 
 # Note4C 四色屏
-idf.py -C firmware -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
+idf.py -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
   -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults" build
-idf.py -C firmware -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
+idf.py -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
   -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults" \
   -p <serial> flash monitor
 ```
