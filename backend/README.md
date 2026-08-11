@@ -387,7 +387,7 @@ mono1 为 MSB-first，bit=1 白/0 黑；gray4 每字节 2 像素且高 nibble �
 - `font_test`
 - `hot_list`
 
-动态帧由 `DynamicFrameRendererService` 直接用 bitmap canvas 和位图字体同时绘制 mono1 / bwry2，不走浏览器或 SVG；预警、地震等语义重点可使用红黄墨色。`DynamicContentSchedulerService` 在 `BACKGROUND_WORKERS=true` 时启动，每次最多 claim 5 个到期任务，失败后指数退避。
+动态帧由 `DynamicFrameRendererService` 直接用 bitmap canvas 和位图字体同时绘制 mono1 / bwry2，不走浏览器或 SVG。渲染器先导出兼容的 mono1，再复制像素画布叠加 Note4C 红黄语义色，保证四色优化不会改变 Note4 输出。`DynamicContentSchedulerService` 在 `BACKGROUND_WORKERS=true` 时启动，每次最多 claim 5 个到期任务，失败后指数退避。
 
 刷新时间语义：
 

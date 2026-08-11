@@ -1,5 +1,12 @@
 import { FRAME_HEIGHT, FRAME_WIDTH, type DashboardTemplateT } from 'shared';
-import { BitmapCanvas, PIXEL_BLACK, PIXEL_WHITE } from './bitmap-canvas';
+import {
+  BitmapCanvas,
+  PIXEL_BLACK,
+  PIXEL_RED,
+  PIXEL_WHITE,
+  PIXEL_YELLOW,
+  type PixelColor,
+} from './bitmap-canvas';
 import {
   blockRect,
   resolveDashboardRenderInput,
@@ -62,7 +69,7 @@ function renderDashboardTemplate(
       const rect = blockRect(rawBlock);
       if (!rect) continue;
       const font = rawBlock.font_size === 12 ? fonts.sans12 : fonts.sans16;
-      const color = rawBlock.color === 'white' ? PIXEL_WHITE : PIXEL_BLACK;
+      const color = dashboardColor(rawBlock.color);
       const align = readAlign(rawBlock.align);
       const text = resolveTemplate(pickText(rawBlock.value, ''), dataRoot);
       const anchorX =
@@ -91,6 +98,7 @@ function renderDashboardTemplate(
         resolveTemplate(pickText(rawBlock.label, ''), dataRoot),
         resolveTemplate(pickText(rawBlock.value, ''), dataRoot),
         resolveSeries(rawBlock.sparkline, dataRoot),
+        dashboardColor(rawBlock.color),
         draw
       );
     } else if (type === 'progress') {
@@ -109,13 +117,23 @@ function renderDashboardTemplate(
         rawBlock.label_font_size,
         rawBlock.value_font_size,
         rawBlock.bar_height,
+        dashboardColor(rawBlock.color),
         draw
       );
     } else if (type === 'sparkline') {
       const rect = blockRect(rawBlock);
       if (!rect) continue;
       const series = resolveSeries(rawBlock.values, dataRoot);
-      if (series.length >= 2) draw.drawSparkline(c, rect.x, rect.y, rect.w, rect.h, series);
+      if (series.length >= 2)
+        draw.drawSparkline(
+          c,
+          rect.x,
+          rect.y,
+          rect.w,
+          rect.h,
+          series,
+          dashboardColor(rawBlock.color)
+        );
     } else if (type === 'line') {
       const x1 = readInt(rawBlock.x1, -1, 0, FRAME_WIDTH - 1);
       const y1 = readInt(rawBlock.y1, -1, STATUS_BAR_H, FRAME_HEIGHT - 1);
@@ -123,17 +141,25 @@ function renderDashboardTemplate(
       const y2 = readInt(rawBlock.y2, -1, STATUS_BAR_H, FRAME_HEIGHT - 1);
       if (x1 >= 0 && y1 >= STATUS_BAR_H && x2 >= 0 && y2 >= STATUS_BAR_H) {
         if (rawBlock.style === 'dashed' && y1 === y2) {
-          draw.drawRule(c, Math.min(x1, x2), y1, Math.abs(x2 - x1), 'dashed');
+          draw.drawRuleColor(
+            c,
+            Math.min(x1, x2),
+            y1,
+            Math.abs(x2 - x1),
+            'dashed',
+            dashboardColor(rawBlock.color)
+          );
         } else {
-          c.drawLine(x1, y1, x2, y2, PIXEL_BLACK);
+          c.drawLine(x1, y1, x2, y2, dashboardColor(rawBlock.color));
         }
       }
     } else if (type === 'rect') {
       const rect = blockRect(rawBlock);
       if (!rect) continue;
-      if (rawBlock.fill === 'black') c.fillRect(rect.x, rect.y, rect.w, rect.h, PIXEL_BLACK);
-      else if (rawBlock.fill === 'white') c.fillRect(rect.x, rect.y, rect.w, rect.h, PIXEL_WHITE);
-      if (rawBlock.stroke !== false) c.strokeRect(rect.x, rect.y, rect.w, rect.h, PIXEL_BLACK);
+      if (rawBlock.fill !== 'none')
+        c.fillRect(rect.x, rect.y, rect.w, rect.h, dashboardColor(rawBlock.fill));
+      if (rawBlock.stroke !== false)
+        c.strokeRect(rect.x, rect.y, rect.w, rect.h, dashboardColor(rawBlock.stroke_color));
     }
   }
 }
@@ -148,13 +174,18 @@ function drawMetricBlock(
   label: string,
   value: string,
   series: number[],
+  color: PixelColor,
   draw: FrameDrawKit
 ): void {
   c.strokeRect(x, y, w, h, PIXEL_BLACK);
   draw.drawText(c, fonts.sans12, label, x + 7, y + 4, { maxWidth: w - 14, ellipsis: true });
-  draw.drawText(c, fonts.sans16, value, x + 7, y + 27, { maxWidth: w - 14, ellipsis: true });
+  draw.drawText(c, fonts.sans16, value, x + 7, y + 27, {
+    maxWidth: w - 14,
+    ellipsis: true,
+    color,
+  });
   if (series.length >= 2 && h >= 54) {
-    draw.drawSparkline(c, x + 7, y + h - 18, w - 14, 10, series);
+    draw.drawSparkline(c, x + 7, y + h - 18, w - 14, 10, series, color);
   }
 }
 
@@ -171,6 +202,7 @@ function drawProgressBlock(
   labelFontSize: number | undefined,
   valueFontSize: number | undefined,
   barHeight: number | undefined,
+  color: PixelColor,
   draw: FrameDrawKit
 ): void {
   const labelFont = labelFontSize === 16 ? fonts.sans16 : fonts.sans12;
@@ -192,12 +224,25 @@ function drawProgressBlock(
   });
   c.strokeRect(barX, barY, barW, barH, PIXEL_BLACK);
   const fillW = Math.max(0, Math.min(barW - 2, Math.round(((barW - 2) * percentage) / 100)));
-  if (fillW > 0) c.fillRect(barX + 1, barY + 1, fillW, barH - 2, PIXEL_BLACK);
+  if (fillW > 0) c.fillRect(barX + 1, barY + 1, fillW, barH - 2, color);
   if (valueText) {
     draw.drawTextCenteredY(c, valueFont, valueText, x + w, centerY, {
       align: 'right',
       maxWidth: valueW,
       ellipsis: true,
     });
+  }
+}
+
+function dashboardColor(color: string | undefined): PixelColor {
+  switch (color) {
+    case 'white':
+      return PIXEL_WHITE;
+    case 'yellow':
+      return PIXEL_YELLOW;
+    case 'red':
+      return PIXEL_RED;
+    default:
+      return PIXEL_BLACK;
   }
 }

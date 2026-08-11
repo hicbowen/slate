@@ -114,13 +114,18 @@ export function DashboardConfigPanel({
       <DynamicRefreshSettings config={config} onChange={onChange} />
 
       {templateSelection === CUSTOM_DASHBOARD_TEMPLATE_VALUE && (
-        <JsonEditor
-          label="自定义模板 JSON"
-          value={templateDraft.text}
-          error={templateDraft.error}
-          minRows={8}
-          onChange={templateDraft.updateDraft}
-        />
+        <div>
+          <JsonEditor
+            label="自定义模板 JSON"
+            value={templateDraft.text}
+            error={templateDraft.error}
+            minRows={8}
+            onChange={templateDraft.updateDraft}
+          />
+          <p className="mt-1.5 font-sans text-[11px] leading-snug text-stone">
+            颜色支持 black / white / yellow / red；Note4C 显示四色，Note4 自动保持黑白可读。
+          </p>
+        </div>
       )}
 
       <JsonEditor

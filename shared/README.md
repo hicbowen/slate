@@ -190,6 +190,9 @@ export type PollRequestT = z.infer<typeof PollRequest>;
 - `line`
 - `rect`
 
+颜色字段接受 `black | white | yellow | red`。`text`、`metric`、`progress`、`sparkline`、`line` 可设置
+`color`，`rect` 使用 `fill` 与 `stroke_color`。Note4C 按原色输出，Note4 会把红黄安全降级为同位置黑色；已有模板不填颜色时仍默认黑色。
+
 内置系统模板：
 
 - `ai_usage_stats`

@@ -103,7 +103,8 @@ export class FrameDrawKit {
     y: number,
     w: number,
     h: number,
-    values: number[]
+    values: number[],
+    color: number = PIXEL_BLACK
   ): void {
     if (values.length < 2 || w <= 1 || h <= 1) return;
     let min = Number.POSITIVE_INFINITY;
@@ -118,7 +119,7 @@ export class FrameDrawKit {
     for (let i = 1; i < values.length; i++) {
       const xx = x + Math.round((w * i) / (values.length - 1));
       const yy = y + h - Math.round(((values[i]! - min) / range) * h);
-      c.drawLine(lastX, lastY, xx, yy, PIXEL_BLACK);
+      c.drawLine(lastX, lastY, xx, yy, color);
       lastX = xx;
       lastY = yy;
     }

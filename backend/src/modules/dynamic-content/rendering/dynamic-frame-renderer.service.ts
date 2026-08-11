@@ -13,6 +13,7 @@ import { FrameDrawKit } from './frame-draw-kit';
 import { STATUS_BAR_H } from './frame-renderer-layout';
 import { DynamicFrameFontService, type FontSet } from './fonts/dynamic-frame-font.service';
 import { renderFontTestFrame } from './font-test-frame-renderer';
+import { applyFourColorAccents } from './four-color-accents';
 import { renderHotListFrame } from './hot-list-frame-renderer';
 import { renderWeatherAlertFrame, renderWeatherFrame } from './weather-frame-renderer';
 
@@ -76,7 +77,9 @@ export class DynamicFrameRendererService {
 
     this.applySemanticAccent(c, ctx.type);
     const mono1 = c.toRaw1bpp();
-    const bwry2 = c.toRaw2bpp();
+    const fourColor = c.clone();
+    applyFourColorAccents(fourColor, ctx);
+    const bwry2 = fourColor.toRaw2bpp();
     if (mono1.byteLength !== FRAME_BYTES || bwry2.byteLength !== FRAME_BYTES_BWRY2) {
       throw new Error(
         `dynamic frame size mismatch: ${mono1.byteLength}/${bwry2.byteLength} vs ${FRAME_BYTES}/${FRAME_BYTES_BWRY2}`

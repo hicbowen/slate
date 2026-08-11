@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import {
   DASHBOARD_CUSTOM_STARTER_TEMPLATE,
   FONT_TEST_FONTS,
   FRAME_BYTES,
+  FRAME_BYTES_BWRY2,
   FRAME_HEIGHT,
   FRAME_WIDTH,
 } from 'shared';
@@ -25,6 +27,68 @@ const renderedAt = new Date('2026-05-17T04:00:00.000Z');
 const STATUS_BAR_H = 24;
 
 describe('DynamicFrameRendererService', () => {
+  it('keeps Note4 baselines byte-identical while adding Note4C semantic colors', async () => {
+    const cases: Array<{
+      ctx: DynamicRenderContext;
+      monoSha256: string;
+      minimumRed: number;
+      minimumYellow: number;
+    }> = [
+      {
+        ctx: {
+          type: 'daily_calendar',
+          frameName: '日历',
+          config: { tz: 'Asia/Shanghai' },
+          data: {
+            year: '2026',
+            month: '5',
+            day: '17',
+            weekdayCN: '星期日',
+            lunarDate: '农历四月初一',
+            ganzhiYear: '丙午年',
+            ganzhiMonth: '癸巳月',
+            ganzhiDay: '辛卯日',
+            nextSolarTerm: '小满',
+            nextSolarTermDays: 4,
+            yi: ['祭祀', '祈福', '求嗣', '开光'],
+            ji: ['入宅', '修造', '安门', '伐木'],
+          },
+          renderedAt,
+        },
+        monoSha256: '73d1e03524b2da973b3ea9a923b0bbcaa9888cafb27758d2f5f5f5bcf14b6f88',
+        minimumRed: 5,
+        minimumYellow: 100,
+      },
+      {
+        ctx: {
+          type: 'hot_list',
+          frameName: '热榜',
+          config: { type: 'hot_list', source: 'weibo', refresh_interval_sec: 600 },
+          data: {
+            items: Array.from({ length: 8 }, (_, index) => ({
+              rank: index + 1,
+              title: `测试热榜标题 ${index + 1}`,
+            })),
+          },
+          renderedAt,
+        },
+        monoSha256: '863e0234bdd09165b5320eb0bc857195a66d4ece47972ebdfd09c0d38993140b',
+        minimumRed: 100,
+        minimumYellow: 100,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const renditions = await renderer.renderRenditions(testCase.ctx);
+      expect(renditions.mono1.byteLength).toBe(FRAME_BYTES);
+      expect(renditions.bwry2.byteLength).toBe(FRAME_BYTES_BWRY2);
+      expect(createHash('sha256').update(renditions.mono1).digest('hex')).toBe(testCase.monoSha256);
+      const colors = countBwryPixels(renditions.bwry2);
+      expect(colors.red).toBeGreaterThan(testCase.minimumRed);
+      expect(colors.yellow).toBeGreaterThan(testCase.minimumYellow);
+    }
+  });
+
   it('renders dynamic frames as nonblank 400x300 1bpp images', async () => {
     const contexts: DynamicRenderContext[] = [
       {
@@ -413,6 +477,22 @@ function countPixels(frame: Buffer): { black: number; white: number } {
     }
   }
   return { black, white };
+}
+
+function countBwryPixels(frame: Buffer): {
+  black: number;
+  white: number;
+  yellow: number;
+  red: number;
+} {
+  const counts = [0, 0, 0, 0];
+  for (const byte of frame) {
+    counts[(byte >> 6) & 3]!++;
+    counts[(byte >> 4) & 3]!++;
+    counts[(byte >> 2) & 3]!++;
+    counts[byte & 3]!++;
+  }
+  return { black: counts[0]!, white: counts[1]!, yellow: counts[2]!, red: counts[3]! };
 }
 
 function blackBounds(

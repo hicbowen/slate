@@ -8,7 +8,7 @@ const DeviceRect = z.object({
 });
 
 const BindingText = z.string().min(1).max(160);
-const TemplateColor = z.enum(['black', 'white']);
+const TemplateColor = z.enum(['black', 'white', 'yellow', 'red']);
 const DashboardTextFontSize = z.union([z.literal(12), z.literal(16)]);
 const DashboardProgressBarHeight = z.number().int().min(4).max(24);
 
@@ -26,6 +26,7 @@ export const DashboardTemplateBlock = z.discriminatedUnion('type', [
     label: BindingText,
     value: BindingText,
     sparkline: z.union([BindingText, z.array(z.number()).min(2).max(60)]).optional(),
+    color: TemplateColor.default('black'),
   }),
   DeviceRect.extend({
     type: z.literal('progress'),
@@ -37,10 +38,12 @@ export const DashboardTemplateBlock = z.discriminatedUnion('type', [
     label_font_size: DashboardTextFontSize.default(12),
     value_font_size: DashboardTextFontSize.default(12),
     bar_height: DashboardProgressBarHeight.default(9),
+    color: TemplateColor.default('black'),
   }),
   DeviceRect.extend({
     type: z.literal('sparkline'),
     values: z.union([BindingText, z.array(z.number()).min(2).max(60)]),
+    color: TemplateColor.default('black'),
   }),
   z.object({
     type: z.literal('line'),
@@ -49,11 +52,13 @@ export const DashboardTemplateBlock = z.discriminatedUnion('type', [
     x2: z.number().int().min(0).max(399),
     y2: z.number().int().min(24).max(299),
     style: z.enum(['solid', 'dashed']).default('solid'),
+    color: TemplateColor.default('black'),
   }),
   DeviceRect.extend({
     type: z.literal('rect'),
     stroke: z.boolean().default(true),
-    fill: z.enum(['none', 'black', 'white']).default('none'),
+    stroke_color: TemplateColor.default('black'),
+    fill: z.union([z.literal('none'), TemplateColor]).default('none'),
   }),
 ]);
 export type DashboardTemplateBlockT = z.infer<typeof DashboardTemplateBlock>;
@@ -93,6 +98,7 @@ export const DASHBOARD_AI_USAGE_STATS_TEMPLATE = DashboardTemplate.parse({
       h: 48,
       label: '今日消费',
       value: '{today_cost_usd|usd2}',
+      color: 'yellow',
     },
     {
       type: 'metric',
@@ -193,7 +199,7 @@ export const DASHBOARD_AI_USAGE_STATS_TEMPLATE = DashboardTemplate.parse({
       label: '更新时间',
       value: '{last_updated_time_label}',
     },
-    { type: 'line', x1: 20, y1: 218, x2: 380, y2: 218, style: 'dashed' },
+    { type: 'line', x1: 20, y1: 218, x2: 380, y2: 218, style: 'dashed', color: 'yellow' },
     {
       type: 'text',
       x: 20,
@@ -202,6 +208,7 @@ export const DASHBOARD_AI_USAGE_STATS_TEMPLATE = DashboardTemplate.parse({
       h: 12,
       value: '按平台拆分',
       font_size: 12,
+      color: 'yellow',
     },
     {
       type: 'text',
@@ -327,6 +334,7 @@ export const DASHBOARD_CUSTOM_STARTER_TEMPLATE = DashboardTemplate.parse({
       label: '{primary_label}',
       value: '{primary_value}',
       sparkline: '{primary_trend}',
+      color: 'yellow',
     },
     {
       type: 'metric',
@@ -365,6 +373,7 @@ export const DASHBOARD_CUSTOM_STARTER_TEMPLATE = DashboardTemplate.parse({
       label: '{primary_progress_label}',
       percentage: '{primary_progress_percent}',
       value_text: '{primary_progress_text}',
+      color: 'yellow',
     },
     {
       type: 'progress',
@@ -396,7 +405,16 @@ export const DASHBOARD_AI_QUOTA_MONITOR_TEMPLATE = DashboardTemplate.parse({
   blocks: [
     { type: 'metric', x: 20, y: 44, w: 110, h: 52, label: '服务', value: '{service_label}' },
     { type: 'metric', x: 145, y: 44, w: 110, h: 52, label: '套餐', value: '{plan_label}' },
-    { type: 'metric', x: 270, y: 44, w: 110, h: 52, label: '状态', value: '{status_label}' },
+    {
+      type: 'metric',
+      x: 270,
+      y: 44,
+      w: 110,
+      h: 52,
+      label: '状态',
+      value: '{status_label}',
+      color: 'yellow',
+    },
     {
       type: 'progress',
       x: 20,
@@ -409,6 +427,7 @@ export const DASHBOARD_AI_QUOTA_MONITOR_TEMPLATE = DashboardTemplate.parse({
       label_font_size: 16,
       value_font_size: 16,
       bar_height: 14,
+      color: 'yellow',
     },
     {
       type: 'progress',
@@ -422,8 +441,9 @@ export const DASHBOARD_AI_QUOTA_MONITOR_TEMPLATE = DashboardTemplate.parse({
       label_font_size: 16,
       value_font_size: 16,
       bar_height: 14,
+      color: 'yellow',
     },
-    { type: 'line', x1: 20, y1: 210, x2: 380, y2: 210, style: 'dashed' },
+    { type: 'line', x1: 20, y1: 210, x2: 380, y2: 210, style: 'dashed', color: 'yellow' },
     {
       type: 'metric',
       x: 20,

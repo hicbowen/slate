@@ -129,6 +129,8 @@ dashboard 动态内容可以选择系统模板或自定义 JSON 模板：
 - 系统模板：`ai_usage_stats`、`ai_quota_monitor`
 - 自定义模板：编辑 `DashboardTemplate` JSON
 
+自定义模板颜色支持 `black | white | yellow | red`。Note4C 预览显示原生四色，Note4 会把红黄降级为同位置黑色，布局保持一致。
+
 创建时必须提供初始数据。编辑已有 dashboard 内容时，`DashboardPushPanel` 会展示：
 
 ```text

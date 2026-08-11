@@ -17,6 +17,12 @@ export class BitmapCanvas {
     this.pixels = new Uint8Array(width * height);
   }
 
+  clone(): BitmapCanvas {
+    const copy = new BitmapCanvas(this.width, this.height);
+    copy.pixels.set(this.pixels);
+    return copy;
+  }
+
   clear(color: number = PIXEL_WHITE): void {
     this.pixels.fill(color & 3);
   }
@@ -54,6 +60,23 @@ export class BitmapCanvas {
     const fillValue = color & 3;
     for (let yy = y0; yy < y1; yy++) {
       this.pixels.fill(fillValue, yy * this.width + x0, yy * this.width + x1);
+    }
+  }
+
+  replaceColorInRect(x: number, y: number, w: number, h: number, from: number, to: number): void {
+    const x0 = Math.max(0, x);
+    const y0 = Math.max(0, y);
+    const x1 = Math.min(this.width, x + w);
+    const y1 = Math.min(this.height, y + h);
+    if (x0 >= x1 || y0 >= y1) return;
+    const source = from & 3;
+    const target = to & 3;
+    for (let yy = y0; yy < y1; yy++) {
+      const row = yy * this.width;
+      for (let xx = x0; xx < x1; xx++) {
+        const offset = row + xx;
+        if (this.pixels[offset] === source) this.pixels[offset] = target;
+      }
     }
   }
 
