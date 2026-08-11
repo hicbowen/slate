@@ -7,6 +7,7 @@ import { DitherControls } from './DitherControls';
 import { ImageAudioBlock } from './ImageAudioBlock';
 import { ImageDropzone } from './ImageDropzone';
 import { PreviewCanvas } from './PreviewCanvas';
+import { FrameFormatToggle } from '@/components/eink/FrameFormatToggle';
 import type { useImageContentForm } from '@/features/contents/hooks/useImageContentForm';
 
 interface ImageFormBodyProps {
@@ -47,9 +48,13 @@ export function ImageFormBody({
       className={cn('grid grid-cols-1 gap-6 lg:gap-8', gridClassName ?? 'lg:grid-cols-[1.3fr_1fr]')}
     >
       <div className="order-2 min-w-0 lg:order-1">
-        <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em] ml-0.5 mb-2">
-          预览 · 1bpp · {FRAME_WIDTH}×{FRAME_HEIGHT}
-        </p>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 ml-0.5">
+          <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em]">
+            预览 · {form.preview.format === 'bwry2' ? '2bpp · 黑白红黄' : '1bpp · 黑白'} ·{' '}
+            {FRAME_WIDTH}×{FRAME_HEIGHT}
+          </p>
+          <FrameFormatToggle value={form.preview.format} onChange={form.preview.setFormat} />
+        </div>
         <PreviewCanvas
           canvasRef={form.image.previewRef}
           imageFile={form.image.file}
@@ -57,6 +62,7 @@ export function ImageFormBody({
           existingImagePending={existingImagePending}
           threshold={form.dither.threshold}
           mode={form.dither.mode}
+          format={form.preview.format}
           scale={form.crop.scale}
           offset={form.crop.offset}
           onOffsetChange={form.crop.setOffset}

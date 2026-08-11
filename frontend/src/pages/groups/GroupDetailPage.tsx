@@ -2,12 +2,13 @@
 //
 // dnd-kit reorder 通过 useDndOrder 复用；本地顺序会在保存失败时回滚。
 
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Layers } from 'lucide-react';
 import { useGroup, useUpdateGroup } from '@/features/groups/query/group-queries';
 import { useGroupContents } from '@/features/contents/query/content-read-queries';
 import { useReorderContents } from '@/features/contents/query/content-mutation-queries';
-import type { ContentDetailT, GroupSummaryT } from 'shared';
+import type { ContentDetailT, FrameFormatT, GroupSummaryT } from 'shared';
 import { Spinner } from '@/components/ui/Spinner';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -22,6 +23,7 @@ import { getApiErrorMessage } from '@/lib/api-errors';
 import { formatBytes } from '@/lib/format';
 import { useDndOrder } from '@/components/dnd/useDndOrder';
 import { appRoutes } from '@/app/routes';
+import { FrameFormatToggle } from '@/components/eink/FrameFormatToggle';
 
 export function GroupDetailPage() {
   const navigate = useNavigate();
@@ -48,6 +50,7 @@ function GroupDetailContent({
   const contents = useGroupContents(gid);
   const reorder = useReorderContents(gid);
   const toast = useToast();
+  const [previewFormat, setPreviewFormat] = useState<FrameFormatT>('mono1');
 
   const group = groupQuery.data;
   const { sensors, currentOrder, orderedItems, onDragEnd } = useDndOrder(
@@ -110,15 +113,30 @@ function GroupDetailContent({
         ) : contents.isError ? (
           <EmptyState title="加载失败" hint="请刷新重试。" />
         ) : contents.data && contents.data.length > 0 ? (
-          <SortableGrid
-            sensors={sensors}
-            order={currentOrder}
-            items={orderedItems}
-            onDragEnd={onDragEnd}
-            getKey={(content) => content.id}
-            className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-            renderItem={(content) => <ContentCard gid={gid} content={content} onEdit={openEdit} />}
-          />
+          <>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-stone">
+                设备效果预览
+              </p>
+              <FrameFormatToggle value={previewFormat} onChange={setPreviewFormat} />
+            </div>
+            <SortableGrid
+              sensors={sensors}
+              order={currentOrder}
+              items={orderedItems}
+              onDragEnd={onDragEnd}
+              getKey={(content) => content.id}
+              className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+              renderItem={(content) => (
+                <ContentCard
+                  gid={gid}
+                  content={content}
+                  onEdit={openEdit}
+                  previewFormat={previewFormat}
+                />
+              )}
+            />
+          </>
         ) : (
           <EmptyState
             title="尚无内容"

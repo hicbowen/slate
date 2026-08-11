@@ -77,8 +77,9 @@ export function DynamicContentEditor({
     ]
   );
 
-  const savedPreviewEnabled = !!content.image_etag;
-  const savedPreview = useContentImage(content.id, content.image_etag ?? null);
+  const savedRendition = content.image_renditions[form.previewFormat];
+  const savedPreviewEnabled = !!savedRendition.etag;
+  const savedPreview = useContentImage(content.id, savedRendition.etag, form.previewFormat);
   const dynamicMeta = form.type ? DYNAMIC_TYPE_META[form.type] : null;
   const showParams = Boolean(dynamicMeta?.hasConfigurableParams);
   const showAudio = Boolean(
@@ -124,13 +125,15 @@ export function DynamicContentEditor({
         onBack={onDone}
         icon={<Sparkles size={24} />}
         title="编辑动态内容"
-        subtitle="动态内容由服务端生成 400×300 1bpp 帧，设备端直接显示并叠加状态栏。"
+        subtitle="服务端同时生成 Note4 黑白帧与 Note4C 黑白红黄帧，设备按型号下载。"
       />
 
       <div className="mt-6 fade-up fade-up-1">
         <DynamicContentFormShell
           onSubmit={handleSubmit}
           gridClassName="lg:grid-cols-[1.3fr_1fr]"
+          previewFormat={form.previewFormat}
+          onPreviewFormatChange={form.setPreviewFormat}
           preview={
             <SavedOrLiveDynamicFramePreview
               savedData={savedPreview.data}
@@ -139,6 +142,7 @@ export function DynamicContentEditor({
               livePending={form.previewPending}
               hasConfig={!!form.config}
               caption={form.caption}
+              format={form.previewFormat}
             />
           }
           header={

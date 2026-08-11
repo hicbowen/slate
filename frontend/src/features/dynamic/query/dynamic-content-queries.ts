@@ -3,6 +3,7 @@ import type {
   ContentMutationResponseT,
   CreateDynamicContentRequestT,
   DynamicConfigT,
+  FrameFormatT,
   IngestResponseT,
 } from 'shared';
 import { API_PREFIX, api } from '@/lib/http';
@@ -75,11 +76,13 @@ export function usePreviewDynamicContent(contentId: string | undefined) {
       config,
       frameName,
       data: previewData,
+      format,
       signal,
     }: {
       config: DynamicConfigT;
       frameName?: string | null;
       data?: Record<string, unknown>;
+      format: FrameFormatT;
       signal?: AbortSignal;
     }) => {
       const url = contentId
@@ -88,6 +91,7 @@ export function usePreviewDynamicContent(contentId: string | undefined) {
       const body = { config, frame_name: frameName, data: previewData };
       const { data } = await api.post<ArrayBuffer>(url, body, {
         responseType: 'arraybuffer',
+        params: { format },
         signal,
       });
       return data;

@@ -4,6 +4,7 @@ import {
   DEFAULT_DITHER_MODE,
   type ContentDetailT,
   type DitherMode,
+  type FrameFormatT,
 } from 'shared';
 import { useAudioFormState } from './useAudioFormState';
 import { useCropState } from './useCropState';
@@ -16,6 +17,7 @@ export function useImageContentForm(content?: ContentDetailT) {
   const audio = useAudioFormState(content);
   const [threshold, setThreshold] = useState(BW_THRESHOLD_DEFAULT);
   const [mode, setMode] = useState<DitherMode>(DEFAULT_DITHER_MODE);
+  const [previewFormat, setPreviewFormat] = useState<FrameFormatT>('mono1');
   const [frameName, setFrameName] = useState(content?.frame_name ?? '');
   const { scale, setScale, offset, setOffset, resetCrop } = useCropState();
   const frameNameChanged = isEdit && frameName !== (content.frame_name ?? '');
@@ -48,6 +50,7 @@ export function useImageContentForm(content?: ContentDetailT) {
     audio.resetAudio();
     setThreshold(BW_THRESHOLD_DEFAULT);
     setMode(DEFAULT_DITHER_MODE);
+    setPreviewFormat('mono1');
     setFrameName('');
     resetCrop();
   }, [audio, resetCrop]);
@@ -55,10 +58,11 @@ export function useImageContentForm(content?: ContentDetailT) {
   const buildFormData = useImageFormSubmit({
     imageFile,
     audioFile: audio.audioFile,
-    previewRef,
     frameName,
     threshold,
     mode,
+    scale,
+    offset,
   });
 
   return {
@@ -85,6 +89,10 @@ export function useImageContentForm(content?: ContentDetailT) {
       setThreshold,
       mode,
       setMode,
+    },
+    preview: {
+      format: previewFormat,
+      setFormat: setPreviewFormat,
     },
     crop: {
       scale,

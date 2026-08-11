@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
-import type { ContentDetailT } from 'shared';
+import type { ContentDetailT, FrameFormatT } from 'shared';
 import { DragHandle } from '@/components/ui/DragHandle';
 import { useRefreshDynamicContent } from '@/features/dynamic/query/dynamic-content-queries';
 import { useContentImage } from '@/features/contents/query/content-image-queries';
@@ -17,16 +17,23 @@ interface ContentCardProps {
   gid: string;
   content: ContentDetailT;
   onEdit: (content: ContentDetailT) => void;
+  previewFormat?: FrameFormatT;
 }
 
-export const ContentCard = memo(function ContentCard({ gid, content, onEdit }: ContentCardProps) {
+export const ContentCard = memo(function ContentCard({
+  gid,
+  content,
+  onEdit,
+  previewFormat = 'mono1',
+}: ContentCardProps) {
   const isDynamic = content.kind === 'dynamic';
   const refresh = useRefreshDynamicContent(gid);
   const { deleteWithConfirm, isPending: deletePending } = useDeleteContentWithConfirm({
     gid,
     content,
   });
-  const img = useContentImage(content.id, content.image_etag);
+  const rendition = content.image_renditions[previewFormat];
+  const img = useContentImage(content.id, rendition.etag, previewFormat);
   const { attributes, listeners, setNodeRef, style, isDragging } = useSortableStyle(content.id);
   const refreshContent = useMutationAction<string>({
     isPending: refresh.isPending,
@@ -49,6 +56,7 @@ export const ContentCard = memo(function ContentCard({ gid, content, onEdit }: C
           data={img.data}
           caption={content.device_status_bar_text}
           showStatusBar={false}
+          format={previewFormat}
         />
       }
       topRight={

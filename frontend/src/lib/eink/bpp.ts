@@ -1,5 +1,5 @@
-import { FRAME_HEIGHT, FRAME_WIDTH } from 'shared';
-import { INK_RGB, PAPER_HEX, PAPER_RGB } from './colors';
+import { FRAME_HEIGHT, FRAME_WIDTH, type FrameFormatT } from 'shared';
+import { INK_RGB, PAPER_HEX, PAPER_RGB, RED_RGB, YELLOW_RGB } from './colors';
 
 export function clearCanvas(
   ctx: CanvasRenderingContext2D,
@@ -49,6 +49,47 @@ export function isValidBppLength(
 ): boolean {
   const byteLength = bytes instanceof ArrayBuffer ? bytes.byteLength : bytes.length;
   return byteLength === (width * height) / 8;
+}
+
+export function decodeBwry2Image(
+  bytes: Uint8Array | ArrayBuffer,
+  width: number = FRAME_WIDTH,
+  height: number = FRAME_HEIGHT
+): ImageData {
+  const byteView = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes;
+  const data = new ImageData(width, height);
+  const pixels = new Uint32Array(data.data.buffer);
+  const palette = [INK_RGB, PAPER_RGB, YELLOW_RGB, RED_RGB].map(rgbaPixel);
+  let dst = 0;
+
+  for (const byte of byteView) {
+    pixels[dst++] = palette[(byte >> 6) & 3]!;
+    pixels[dst++] = palette[(byte >> 4) & 3]!;
+    pixels[dst++] = palette[(byte >> 2) & 3]!;
+    pixels[dst++] = palette[byte & 3]!;
+  }
+  return data;
+}
+
+export function isValidFrameLength(
+  bytes: Uint8Array | ArrayBuffer,
+  format: FrameFormatT,
+  width: number = FRAME_WIDTH,
+  height: number = FRAME_HEIGHT
+): boolean {
+  const byteLength = bytes instanceof ArrayBuffer ? bytes.byteLength : bytes.length;
+  return byteLength === (width * height) / (format === 'bwry2' ? 4 : 8);
+}
+
+export function decodeFrameImage(
+  bytes: Uint8Array | ArrayBuffer,
+  format: FrameFormatT,
+  width: number = FRAME_WIDTH,
+  height: number = FRAME_HEIGHT
+): ImageData {
+  return format === 'bwry2'
+    ? decodeBwry2Image(bytes, width, height)
+    : decodeBppImage(bytes, width, height);
 }
 
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x0a0b0c0d]).buffer)[0] === 0x0d;

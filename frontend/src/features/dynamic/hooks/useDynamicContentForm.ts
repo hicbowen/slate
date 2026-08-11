@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { DynamicConfig, type DynamicConfigT, type DynamicTypeT } from 'shared';
+import { DynamicConfig, type DynamicConfigT, type DynamicTypeT, type FrameFormatT } from 'shared';
 import { defaultConfig } from '@/features/dynamic/model/default-config';
 import {
   defaultDynamicFrameName,
@@ -37,12 +37,14 @@ export function useDynamicContentForm({
   const [dashboardData, setDashboardData] = useState<Record<string, unknown> | null>(
     initialDashboardData
   );
+  const [previewFormat, setPreviewFormat] = useState<FrameFormatT>('mono1');
   const { livePreviewData, previewPending, invalidatePreview } = useDynamicPreview({
     contentId,
     type,
     config,
     frameName,
     dashboardData,
+    format: previewFormat,
   });
   const configKey = useMemo(() => (config ? dynamicConfigKey(config) : ''), [config]);
   const hasDashboardData = dashboardData !== null && Object.keys(dashboardData).length > 0;
@@ -66,6 +68,7 @@ export function useDynamicContentForm({
     setConfig(null);
     setFrameName('');
     setDashboardData(null);
+    setPreviewFormat('mono1');
   }, [invalidatePreview]);
 
   const changeConfig = useCallback((next: DynamicConfigT) => {
@@ -115,6 +118,8 @@ export function useDynamicContentForm({
     canSubmit: !!(type && config && (type !== 'dashboard' || dashboardDataSatisfied)),
     previewPending,
     livePreviewData,
+    previewFormat,
+    setPreviewFormat,
     caption: effectiveDynamicStatusBarText(type, config, frameName),
     invalidatePreview,
     loadType,

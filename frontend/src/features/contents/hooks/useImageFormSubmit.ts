@@ -1,29 +1,28 @@
 import { useCallback } from 'react';
-import type { DitherMode } from 'shared';
+import { FRAME_HEIGHT, FRAME_WIDTH, type DitherMode } from 'shared';
+import { PAPER_HEX } from '@/lib/eink/colors';
 
 export function useImageFormSubmit({
   imageFile,
   audioFile,
-  previewRef,
   frameName,
   threshold,
   mode,
+  scale,
+  offset,
 }: {
   imageFile: File | null;
   audioFile: File | null;
-  previewRef: React.RefObject<HTMLCanvasElement | null>;
   frameName: string;
   threshold: number;
   mode: DitherMode;
+  scale: number;
+  offset: { x: number; y: number };
 }) {
   return useCallback(async (): Promise<FormData> => {
     const fd = new FormData();
     if (imageFile) {
-      const canvas = previewRef.current;
-      if (!canvas) {
-        throw new Error('预览画布尚未就绪，请稍后重试。');
-      }
-      const blob = await exportCanvasBlob(canvas);
+      const blob = await exportNormalizedSource(imageFile, scale, offset);
       fd.append('image', blob, 'cropped.png');
       fd.append('threshold', String(threshold));
       fd.append('mode', mode);
@@ -31,7 +30,39 @@ export function useImageFormSubmit({
     if (audioFile) fd.append('audio', audioFile);
     fd.append('frame_name', frameName.trim());
     return fd;
-  }, [audioFile, frameName, imageFile, mode, previewRef, threshold]);
+  }, [audioFile, frameName, imageFile, mode, offset, scale, threshold]);
+}
+
+async function exportNormalizedSource(
+  file: File,
+  scale: number,
+  offset: { x: number; y: number }
+): Promise<Blob> {
+  const image = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = FRAME_WIDTH;
+    canvas.height = FRAME_HEIGHT;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('无法创建图片画布。');
+
+    ctx.fillStyle = PAPER_HEX;
+    ctx.fillRect(0, 0, FRAME_WIDTH, FRAME_HEIGHT);
+    const baseScale = Math.min(FRAME_WIDTH / image.width, FRAME_HEIGHT / image.height);
+    const finalScale = baseScale * scale;
+    const drawWidth = image.width * finalScale;
+    const drawHeight = image.height * finalScale;
+    ctx.drawImage(
+      image,
+      (FRAME_WIDTH - drawWidth) / 2 + offset.x,
+      (FRAME_HEIGHT - drawHeight) / 2 + offset.y,
+      drawWidth,
+      drawHeight
+    );
+    return await exportCanvasBlob(canvas);
+  } finally {
+    image.close();
+  }
 }
 
 function exportCanvasBlob(canvas: HTMLCanvasElement): Promise<Blob> {

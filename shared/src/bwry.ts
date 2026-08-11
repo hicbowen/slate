@@ -80,11 +80,7 @@ export function packBwryPixels(pixels: Uint8Array, width: number, height: number
 }
 
 /** 历史 1bpp 内容映射到四彩线序；不会凭空恢复已经丢失的红黄信息。 */
-export function expandMono1ToBwry2(
-  mono: Uint8Array,
-  width: number,
-  height: number
-): Uint8Array {
+export function expandMono1ToBwry2(mono: Uint8Array, width: number, height: number): Uint8Array {
   if (width % 8 !== 0) throw new Error(`width must be multiple of 8, got ${width}`);
   if (mono.length !== (width * height) / 8) {
     throw new Error(`mono buffer size mismatch: ${mono.length} vs ${(width * height) / 8}`);
@@ -98,10 +94,7 @@ export function expandMono1ToBwry2(
       (((byte >> 5) & 1) << 2) |
       ((byte >> 4) & 1);
     const lower =
-      (((byte >> 3) & 1) << 6) |
-      (((byte >> 2) & 1) << 4) |
-      (((byte >> 1) & 1) << 2) |
-      (byte & 1);
+      (((byte >> 3) & 1) << 6) | (((byte >> 2) & 1) << 4) | (((byte >> 1) & 1) << 2) | (byte & 1);
     out[dst++] = upper;
     out[dst++] = lower;
   }

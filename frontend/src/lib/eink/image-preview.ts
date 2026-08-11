@@ -1,6 +1,15 @@
-import { autoContrast, autoInvert, ditherToBinary, rgbaToGray, type DitherMode } from 'shared';
+import {
+  BWRY_PALETTE,
+  autoContrast,
+  autoInvert,
+  ditherToBinary,
+  ditherToBwryPixels,
+  rgbaToGray,
+  type DitherMode,
+  type FrameFormatT,
+} from 'shared';
 import { clearCanvas } from './bpp';
-import { INK_RGB, PAPER_RGB } from './colors';
+import { INK_RGB, PAPER_RGB, RED_RGB, YELLOW_RGB } from './colors';
 
 export function drawImagePreview(
   ctx: CanvasRenderingContext2D,
@@ -11,12 +20,14 @@ export function drawImagePreview(
     offset,
     threshold,
     mode,
+    format,
     dither,
   }: {
     scale: number;
     offset: { x: number; y: number };
     threshold: number;
     mode: DitherMode;
+    format: FrameFormatT;
     dither: boolean;
   }
 ) {
@@ -35,6 +46,12 @@ export function drawImagePreview(
   if (!dither) return;
 
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  if (format === 'bwry2') {
+    drawBwryPreview(imageData, canvas.width, canvas.height);
+    ctx.putImageData(imageData, 0, 0);
+    return;
+  }
+
   let gray = rgbaToGray(imageData.data, canvas.width, canvas.height, 4);
   gray = autoInvert(gray, canvas.width, canvas.height);
   gray = autoContrast(gray, 1);
@@ -49,4 +66,24 @@ export function drawImagePreview(
     imageData.data[i + 3] = 255;
   }
   ctx.putImageData(imageData, 0, 0);
+}
+
+function drawBwryPreview(imageData: ImageData, width: number, height: number): void {
+  const rgb = new Uint8Array(width * height * 3);
+  for (let src = 0, dst = 0; src < imageData.data.length; src += 4) {
+    rgb[dst++] = imageData.data[src]!;
+    rgb[dst++] = imageData.data[src + 1]!;
+    rgb[dst++] = imageData.data[src + 2]!;
+  }
+  const pixels = ditherToBwryPixels(rgb, width, height);
+  const previewPalette = [INK_RGB, PAPER_RGB, YELLOW_RGB, RED_RGB] as const;
+  for (let i = 0; i < pixels.length; i++) {
+    const sourceColor = BWRY_PALETTE[pixels[i]!]!;
+    const previewColor = previewPalette[pixels[i]!] ?? sourceColor;
+    const offset = i * 4;
+    imageData.data[offset] = previewColor[0];
+    imageData.data[offset + 1] = previewColor[1];
+    imageData.data[offset + 2] = previewColor[2];
+    imageData.data[offset + 3] = 255;
+  }
 }

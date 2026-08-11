@@ -38,7 +38,12 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
   const toast = useToast();
   const form = useImageContentForm(content);
 
-  const existingImg = useContentImage(content.id, !form.image.file ? content.image_etag : null);
+  const rendition = content.image_renditions[form.preview.format];
+  const existingImg = useContentImage(
+    content.id,
+    !form.image.file ? rendition.etag : null,
+    form.preview.format
+  );
   const canSubmit = form.canEdit;
 
   async function submitContent() {

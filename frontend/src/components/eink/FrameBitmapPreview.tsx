@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
-import { FRAME_HEIGHT, FRAME_WIDTH } from 'shared';
+import { FRAME_HEIGHT, FRAME_WIDTH, type FrameFormatT } from 'shared';
 import { cn } from '@/lib/cn';
-import { clearCanvas, decodeBppImage, isValidBppLength } from '@/lib/eink/bpp';
+import { clearCanvas, decodeFrameImage, isValidFrameLength } from '@/lib/eink/bpp';
 import { StatusBarOverlay } from './StatusBarOverlay';
 
 interface FrameBitmapPreviewProps {
@@ -9,6 +9,7 @@ interface FrameBitmapPreviewProps {
   caption?: string | null;
   className?: string;
   showStatusBar?: boolean;
+  format?: FrameFormatT;
 }
 
 export function FrameBitmapPreview({
@@ -16,8 +17,9 @@ export function FrameBitmapPreview({
   caption,
   className,
   showStatusBar = true,
+  format = 'mono1',
 }: FrameBitmapPreviewProps) {
-  const canvasRef = useContentBitmap(data);
+  const canvasRef = useContentBitmap(data, format);
 
   return (
     <div className={cn('relative h-full w-full overflow-hidden bg-paper', className)}>
@@ -33,9 +35,9 @@ export function FrameBitmapPreview({
   );
 }
 
-function useContentBitmap(data: ArrayBuffer | null | undefined) {
+function useContentBitmap(data: ArrayBuffer | null | undefined, format: FrameFormatT) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const imageData = useMemo(() => decodeContentBitmap(data), [data]);
+  const imageData = useMemo(() => decodeContentBitmap(data, format), [data, format]);
 
   useLayoutEffect(() => {
     drawContentBitmap(canvasRef.current, imageData);
@@ -58,9 +60,12 @@ function drawContentBitmap(canvas: HTMLCanvasElement | null, data: ImageData | n
   ctx.putImageData(data, 0, 0);
 }
 
-function decodeContentBitmap(data: ArrayBuffer | null | undefined): ImageData | null {
+function decodeContentBitmap(
+  data: ArrayBuffer | null | undefined,
+  format: FrameFormatT
+): ImageData | null {
   if (!data) return null;
   const bytes = new Uint8Array(data);
-  if (!isValidBppLength(bytes)) return null;
-  return decodeBppImage(bytes);
+  if (!isValidFrameLength(bytes, format)) return null;
+  return decodeFrameImage(bytes, format);
 }

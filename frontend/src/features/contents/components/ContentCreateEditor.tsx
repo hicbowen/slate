@@ -11,6 +11,7 @@ import { DynamicFramePreview } from '@/features/dynamic/components/DynamicFrameP
 import { useDynamicContentForm } from '@/features/dynamic/hooks/useDynamicContentForm';
 import { ContentTypeCardGrid, ContentTypePicker } from './ContentTypePicker';
 import { ImageCreateForm } from './ImageCreateForm';
+import { FrameFormatToggle } from '@/components/eink/FrameFormatToggle';
 
 // ─── 主编辑器 ──────────────────────────────────────────────────────────────────
 
@@ -62,10 +63,21 @@ export function ContentCreateEditor({ gid, onDone, onEditCreatedImage }: Content
         {!type ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
             <div className="order-2 min-w-0 lg:order-1">
-              <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em] ml-0.5 mb-2">
-                设备预览
-              </p>
-              <DynamicFramePreview data={null} pending={false} hasConfig={false} />
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 ml-0.5">
+                <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em]">
+                  设备预览
+                </p>
+                <FrameFormatToggle
+                  value={dynamicForm.previewFormat}
+                  onChange={dynamicForm.setPreviewFormat}
+                />
+              </div>
+              <DynamicFramePreview
+                data={null}
+                pending={false}
+                hasConfig={false}
+                format={dynamicForm.previewFormat}
+              />
             </div>
             <div className="order-1 min-w-0 lg:order-2 lg:mt-7">
               <div className="max-w-3xl">

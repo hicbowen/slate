@@ -1,5 +1,5 @@
 import { FRAME_WIDTH, FRAME_HEIGHT } from 'shared';
-import type { DitherMode } from 'shared';
+import type { DitherMode, FrameFormatT } from 'shared';
 import type { RefObject } from 'react';
 import { cn } from '@/lib/cn';
 import { StatusBarOverlay } from '@/components/eink/StatusBarOverlay';
@@ -11,6 +11,7 @@ interface PreviewCanvasProps {
   existingImagePending?: boolean;
   threshold: number;
   mode: DitherMode;
+  format: FrameFormatT;
   scale: number;
   offset: { x: number; y: number };
   onOffsetChange: (o: { x: number; y: number }) => void;
@@ -25,6 +26,7 @@ export function PreviewCanvas({
   existingImagePending,
   threshold,
   mode,
+  format,
   scale,
   offset,
   onOffsetChange,
@@ -37,6 +39,7 @@ export function PreviewCanvas({
     existingImage,
     threshold,
     mode,
+    format,
     scale,
     offset,
     onOffsetChange,

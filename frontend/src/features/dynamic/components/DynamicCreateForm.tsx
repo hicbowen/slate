@@ -56,12 +56,15 @@ export function DynamicCreateForm({ gid, type, form, header, onDone }: DynamicCr
     <DynamicContentFormShell
       onSubmit={onSubmit}
       gridClassName="lg:grid-cols-2"
+      previewFormat={form.previewFormat}
+      onPreviewFormatChange={form.setPreviewFormat}
       preview={
         <DynamicFramePreview
           data={form.livePreviewData}
           pending={form.previewPending}
           hasConfig={!!form.config}
           caption={form.caption}
+          format={form.previewFormat}
         />
       }
       header={header}
