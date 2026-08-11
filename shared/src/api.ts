@@ -12,12 +12,17 @@ export const FRAME_WIDTH = 400;
 export const FRAME_HEIGHT = 300;
 export const FRAME_BYTES_MONO1 = (FRAME_WIDTH * FRAME_HEIGHT) / 8; // 15000
 export const FRAME_BYTES_BWRY2 = (FRAME_WIDTH * FRAME_HEIGHT) / 4; // 30000
+export const FRAME_BYTES_GRAY4 = (FRAME_WIDTH * FRAME_HEIGHT) / 2; // 60000
 // 兼容旧调用方：FRAME_BYTES 始终表示 Note4 的 1bpp 帧长度。
 export const FRAME_BYTES = FRAME_BYTES_MONO1;
 export const BW_THRESHOLD_DEFAULT = 128; // 后端 sharp pipeline 默认阈值（与固件 bw_threshold_=200 是两套独立通路，不联动）
 
-export const FrameFormat = z.enum(['mono1', 'bwry2']);
+export const FrameFormat = z.enum(['mono1', 'bwry2', 'gray4']);
 export type FrameFormatT = z.infer<typeof FrameFormat>;
+
+// 静态图片在 Note4 上的实际展示策略。gray16 对应传输格式 gray4（每像素 0..15）。
+export const ImageDisplayMode = z.enum(['mono1', 'gray16']);
+export type ImageDisplayModeT = z.infer<typeof ImageDisplayMode>;
 
 export const DisplayProfile = z.enum(['note4_mono', 'note4c_bwry']);
 export type DisplayProfileT = z.infer<typeof DisplayProfile>;

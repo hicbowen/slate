@@ -5,4 +5,5 @@ export * from './types/content.js';
 export * from './types/dynamic.js';
 export * from './dither.js';
 export * from './bwry.js';
+export * from './gray4.js';
 export * from './preprocess.js';

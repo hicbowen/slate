@@ -231,20 +231,20 @@ void FrameScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
                     idx_ = 0;
             }
             if (content_count_ > 0) {
-                SyncRender(
-                    ctx, [this]() { ApplyEmptyState(); }, /*force_full*/ false);
                 LoadFrame(ctx, idx_, /*force_full*/ true,
                           same_group ? AudioBehavior::StopIfUnavailable : AudioBehavior::RestartIfAvailable);
             } else {
                 if (ctx.audio)
                     ctx.audio->Stop();
-                SyncRender(
-                    ctx, [this]() { ApplyEmptyState(); }, /*force_full*/ true);
+                if (SyncRender(
+                        ctx, [this]() { ApplyEmptyState(); }, /*force_full*/ true))
+                    current_gray_ = false;
             }
             break;
         }
         case UiEventKind::kMinuteTick:
-            RefreshStatusBarAndRender(ctx, status_bar_.get());
+            if (!current_gray_)
+                RefreshStatusBarAndRender(ctx, status_bar_.get());
             break;
         case UiEventKind::kUnbound: {
             ESP_LOGW(kTag, "device unbound action=splash");
@@ -280,7 +280,7 @@ void FrameScene::PrevFrame(SceneContext& ctx) {
 
 void FrameScene::CycleGroup(SceneContext& ctx, bool next) {
     ESP_LOGI(kTag, "cycle group direction=%s gid=%s idx=%d", next ? "next" : "prev", gid_.c_str(), idx_);
-    if (!display_profile::kFourColor) {
+    if (!display_profile::kFourColor && !current_gray_) {
         SyncRenderIfChanged(
             ctx, [this]() { return status_bar_ && status_bar_->SetCaption("切换内容组…"); },
             /*force_full*/ false);
@@ -290,7 +290,7 @@ void FrameScene::CycleGroup(SceneContext& ctx, bool next) {
 }
 
 void FrameScene::HandleGroupSyncStatus(SceneContext& ctx, const UiEvent& e) {
-    if (display_profile::kFourColor)
+    if (display_profile::kFourColor || current_gray_)
         return;
     ESP_LOGD(kTag, "group sync status mode=%s gid=%s name=%s current=%u total=%u",
              evt::log::GroupSyncStatusModeName(e.u.group_sync.mode), e.u.group_sync.gid, e.u.group_sync.name,
@@ -304,7 +304,7 @@ void FrameScene::HandleGroupSyncStatus(SceneContext& ctx, const UiEvent& e) {
 }
 
 void FrameScene::RefreshStatusBarForCharge(SceneContext& ctx, const UiEvent& e) {
-    if (display_profile::kFourColor)
+    if (display_profile::kFourColor || current_gray_)
         return;
     const auto& c   = e.u.charge;
     int         pct = -1;
@@ -318,7 +318,7 @@ void FrameScene::RefreshStatusBarForCharge(SceneContext& ctx, const UiEvent& e) 
 }
 
 void FrameScene::RefreshStatusBarForBattery(SceneContext& ctx, const UiEvent& e) {
-    if (display_profile::kFourColor)
+    if (display_profile::kFourColor || current_gray_)
         return;
     bool charging = false;
     bool full     = false;
@@ -336,7 +336,7 @@ void FrameScene::RefreshStatusBarForBattery(SceneContext& ctx, const UiEvent& e)
 }
 
 void FrameScene::RefreshStatusBarForWifi(SceneContext& ctx, const UiEvent& e) {
-    if (display_profile::kFourColor)
+    if (display_profile::kFourColor || current_gray_)
         return;
     SyncRenderIfChanged(
         ctx, [this, &e]() { return status_bar_ && status_bar_->SetWifi(e.u.wifi.connected, e.u.wifi.rssi); },
@@ -344,7 +344,7 @@ void FrameScene::RefreshStatusBarForWifi(SceneContext& ctx, const UiEvent& e) {
 }
 
 void FrameScene::RestoreStatusBarCaption(SceneContext& ctx) {
-    if (display_profile::kFourColor)
+    if (display_profile::kFourColor || current_gray_)
         return;
     if (cached_status_bar_text_.empty())
         return;
@@ -375,21 +375,27 @@ void FrameScene::LoadFrame(SceneContext& ctx, int idx, bool force_full, AudioBeh
         return;
     }
 
+    cache::FrameMeta meta;
+    if (!cache::ReadFrameMeta(gid_, idx, meta) ||
+        !display_profile::IsSupportedFrameFormat(meta.image_format)) {
+        ESP_LOGW(kTag, "load frame failed idx=%d reason=meta_miss", idx);
+        return;
+    }
+    const bool gray = !display_profile::kFourColor && meta.image_format == display_profile::kGrayFormat;
     std::vector<uint8_t> raw;
-    if (!cache::ReadFrameImage(gid_, idx, raw) || raw.size() != static_cast<size_t>(FrameView::kRawBytes)) {
+    const size_t expected = static_cast<size_t>(display_profile::FrameBytesForFormat(meta.image_format));
+    if (!cache::ReadFrameImage(gid_, idx, raw) || raw.size() != expected) {
         ESP_LOGW(kTag, "load frame failed idx=%d reason=image_miss bytes=%u", idx, static_cast<unsigned>(raw.size()));
         if (ctx.audio)
             ctx.audio->Stop();
         return;
     }
-    cache::FrameMeta meta;
-    cache::ReadFrameMeta(gid_, idx, meta);
-
     if (!ctx.epd->Lock(2000)) {
         ESP_LOGW(kTag, "load frame failed idx=%d reason=epd_lock_timeout", idx);
         return;
     }
     ESP_LOGD(kTag, "lvgl refresh begin scene=frame idx=%d", idx);
+    ApplyEmptyState();
     if (status_bar_)
         status_bar_->SetCaption(meta.status_bar_text);
     cached_status_bar_text_ = meta.status_bar_text;
@@ -397,16 +403,25 @@ void FrameScene::LoadFrame(SceneContext& ctx, int idx, bool force_full, AudioBeh
     ESP_LOGD(kTag, "lvgl refresh done scene=frame idx=%d", idx);
     ctx.epd->Unlock();
 
-    if (frame_view_)
-        frame_view_->SetFrame(ctx.epd, raw);
-
     const bool full = force_full || (!first_loaded_ && first_load_full_refresh_);
-    first_loaded_   = true;
-    if (full)
-        ctx.epd->RequestUrgentFullRefresh();
-    else
-        ctx.epd->RequestUrgentPartialRefresh();
-    ESP_LOGD(kTag, "load frame refresh idx=%d full=%d first_loaded=%d", idx, full ? 1 : 0, first_loaded_ ? 1 : 0);
+    if (gray) {
+        if (!ctx.epd->RequestGray16FullRefresh(raw.data(), raw.size())) {
+            ESP_LOGW(kTag, "load frame failed idx=%d reason=gray_request_rejected", idx);
+            return;
+        }
+        current_gray_ = true;
+    } else {
+        if (frame_view_)
+            frame_view_->SetFrame(ctx.epd, raw);
+        if (full)
+            ctx.epd->RequestUrgentFullRefresh();
+        else
+            ctx.epd->RequestUrgentPartialRefresh();
+        current_gray_ = false;
+    }
+    first_loaded_ = true;
+    ESP_LOGD(kTag, "load frame refresh idx=%d full=%d gray=%d first_loaded=%d", idx, full ? 1 : 0, gray ? 1 : 0,
+             first_loaded_ ? 1 : 0);
 
     if (ctx.audio) {
         std::vector<uint8_t> pcm;

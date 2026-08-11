@@ -166,6 +166,11 @@ bool BgRefreshScene::SeedPreviousFrame(SceneContext& ctx) {
         return false;
     }
 
+    cache::FrameMeta meta;
+    if (!cache::ReadFrameMeta(gid, seq, meta) || meta.image_format == display_profile::kGrayFormat) {
+        ESP_LOGW(kTag, "seed skipped reason=non_mono_frame seq=%d", seq);
+        return false;
+    }
     std::vector<uint8_t> raw;
     if (!cache::ReadFrameImage(gid, seq, raw) || raw.size() != static_cast<size_t>(FrameView::kRawBytes)) {
         ESP_LOGW(kTag, "seed skipped reason=image_miss seq=%d bytes=%u", seq, static_cast<unsigned>(raw.size()));
@@ -208,14 +213,18 @@ bool BgRefreshScene::RenderChangedFrame(SceneContext& ctx) {
     if (!ResolveCurrentFrame(gid, seq, content_count))
         return false;
 
+    cache::FrameMeta meta;
+    if (!cache::ReadFrameMeta(gid, seq, meta)) {
+        ESP_LOGW(kTag, "render skipped reason=meta_miss seq=%d", seq);
+        return false;
+    }
     std::vector<uint8_t> raw;
-    if (!cache::ReadFrameImage(gid, seq, raw) || raw.size() != static_cast<size_t>(FrameView::kRawBytes)) {
+    const size_t expected = static_cast<size_t>(display_profile::FrameBytesForFormat(meta.image_format));
+    if (!cache::ReadFrameImage(gid, seq, raw) || raw.size() != expected) {
         ESP_LOGW(kTag, "render skipped reason=image_miss seq=%d bytes=%u", seq, static_cast<unsigned>(raw.size()));
         return false;
     }
 
-    cache::FrameMeta meta;
-    cache::ReadFrameMeta(gid, seq, meta);
     UpdateFrameSchedule(seq, meta);
 
     if (!ctx.epd->Lock(2000)) {
@@ -233,12 +242,16 @@ bool BgRefreshScene::RenderChangedFrame(SceneContext& ctx) {
 
     // Background refresh uses LVGL only for the status bar. The frame body is
     // written as raw profile data so it exactly matches the cached screen format.
-    const int y = theme::kStatusBarHeight;
-    const int h = FrameView::kHeight - y;
-    ctx.epd->WriteRawFrame(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
+    if (!display_profile::kFourColor && meta.image_format == display_profile::kGrayFormat) {
+        ctx.epd->RequestGray16FullRefresh(raw.data(), raw.size());
+    } else {
+        const int y = theme::kStatusBarHeight;
+        const int h = FrameView::kHeight - y;
+        ctx.epd->WriteRawFrame(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
+    }
     if (display_profile::kFourColor)
         ctx.epd->RequestUrgentFullRefresh();
-    else
+    else if (meta.image_format != display_profile::kGrayFormat)
         ctx.epd->RequestUrgentPartialRefresh();
     ctx.epd->Unlock();
 

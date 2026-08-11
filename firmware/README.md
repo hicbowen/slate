@@ -162,7 +162,7 @@ factory  0x10000   0x400000
 storage  0x410000  0xBF0000
 ```
 
-`storage` 是 LittleFS，约 12 MB。Note4 每帧 15 KB，Note4C 每帧 30 KB，另加可选 PCM；切换固件 profile 后，尺寸不匹配的旧图片缓存会自动重新下载。
+`storage` 是 LittleFS，约 12 MB。Note4 黑白帧 15 KB、16 灰帧 60 KB，Note4C 每帧 30 KB，另加可选 PCM；缓存元数据记录实际 `image_format`，格式或尺寸不匹配时会自动重新下载。
 
 ## 启动模式
 
@@ -288,7 +288,7 @@ poll telemetry：
 
 - manifest etag 未变：只写当前 state，触发缓存命中 UI。
 - manifest etag 变化：`GET /groups/:gid/manifest`，再增量下载缺失 image/audio。
-- manifest 中按固件 profile 选择 `image_renditions.mono1` 或 `image_renditions.bwry2`；图片下载请求显式带 `?format=mono1|bwry2`。
+- manifest 中 Note4 静态图片按 `display_mode` 选择 `image_renditions.mono1` 或 `image_renditions.gray4`，Note4 动态内容使用 mono1，Note4C 始终使用 bwry2；图片下载请求显式带实际 `format`。
 - 每个资源请求带 `If-None-Match`，后端命中返回 304。
 - timer wake 且 manifest 未变时，如果后端返回 `current_content`，只更新当前帧。
 - 切组调用 `/devices/current/group/next` 或 `/prev`，然后同步目标组。
@@ -313,6 +313,7 @@ poll telemetry：
 status_bar_text
 content_etag
 image_etag
+image_format
 audio_etag
 has_ttl
 ttl_sec
@@ -366,10 +367,19 @@ SettingsScene        设置页
 
 | profile | 服务端帧 | 刷新策略 | 状态信息策略 |
 | --- | --- | --- | --- |
-| `note4_mono` | 15000 B，1bpp，1=白/0=黑 | 支持局刷；大面积变化或累计局刷后全刷 | 显示实时 Wi-Fi、电量百分比和充电状态 |
+| `note4_mono` | 15000 B mono1 或 60000 B gray4，4bpp 中 0=黑/15=白 | mono1 支持局刷；gray4 仅全刷 | 显示实时 Wi-Fi、电量百分比和充电状态；灰度驻留时抑制状态栏局刷 |
 | `note4c_bwry` | 30000 B，2bpp，00 黑/01 白/10 黄/11 红 | 仅全刷；请求合并且相邻刷新至少间隔 12 秒 | 固定 Wi-Fi 与中性电量图标，隐藏百分比 |
 
 Note4C 会忽略信号格、电量采样、充电状态、分钟 tick 和同步进度文案造成的纯状态栏更新；图片 rendition 变化、用户切帧、切组和设置操作仍可触发刷新。动态内容的实际图片发生变化时仍按服务端 `next_wake_sec` 刷新。
+
+Note4 模式切换固定遵循：
+
+1. 日常 UI 与动态内容使用 mono1；小面积变化局刷，变化过大或累计 8 次局刷后全刷清残影。
+2. 进入 gray4 静态图片时，刷新任务先用 OTP 1bpp 波形写入纯白全屏基底，再用外置 5 段波形完成 16 灰全刷。
+3. gray4 显示期间不做状态栏或同步文案局刷。
+4. 离开 gray4 后把 mono1 基底标记为失效，下一次 mono1 刷新强制全刷；之后才恢复局刷。
+
+16 灰初始化与 LUT 数据基于 Zectrix Lab 官方 demo 固定提交 `ca285c98ed0641f86780edb1f5ec77b0335fe649`，许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。灰度刷新最长等待按 45 秒配置。
 
 共同约束：
 

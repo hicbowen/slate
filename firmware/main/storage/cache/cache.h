@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "drivers/display/display_profile.h"
+
 namespace cache {
 
 bool Init();
@@ -46,8 +48,10 @@ bool TouchGroup(const std::string& gid);
 bool PruneOldGroups(const std::string& current_gid, const std::string& target_gid, size_t min_free_bytes,
                     int max_groups);
 
-bool FrameImageExists(const std::string& gid, int idx, const std::string& expected_etag);
-bool WriteFrameImage(const std::string& gid, int idx, const std::vector<uint8_t>& bytes, const std::string& etag);
+bool FrameImageExists(const std::string& gid, int idx, const std::string& expected_etag,
+                      const std::string& format = display_profile::kFrameFormat);
+bool WriteFrameImage(const std::string& gid, int idx, const std::vector<uint8_t>& bytes, const std::string& etag,
+                     const std::string& format = display_profile::kFrameFormat);
 bool ReadFrameImage(const std::string& gid, int idx, std::vector<uint8_t>& out);
 
 bool FrameAudioExists(const std::string& gid, int idx, const std::string& expected_etag);
@@ -60,6 +64,7 @@ struct FrameMeta {
     std::string status_bar_text;
     std::string content_etag;
     std::string image_etag;
+    std::string image_format = display_profile::kFrameFormat;
     std::string audio_etag;
     bool        has_ttl = false;
     uint32_t    ttl_sec = 0;
@@ -76,8 +81,10 @@ class CacheWriter {
     CacheWriter& operator=(const CacheWriter&) = delete;
 
     bool Begin();
-    bool FrameImageExists(int idx, const std::string& expected_etag) const;
-    bool WriteFrameImage(int idx, const std::vector<uint8_t>& bytes, const std::string& etag);
+    bool FrameImageExists(int idx, const std::string& expected_etag,
+                          const std::string& format = display_profile::kFrameFormat) const;
+    bool WriteFrameImage(int idx, const std::vector<uint8_t>& bytes, const std::string& etag,
+                         const std::string& format = display_profile::kFrameFormat);
     bool FrameAudioExists(int idx, const std::string& expected_etag) const;
     bool WriteFrameAudio(int idx, const std::vector<uint8_t>& bytes, const std::string& etag);
     bool WriteFrameMeta(int idx, const FrameMeta& meta);

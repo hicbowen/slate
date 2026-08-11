@@ -9,6 +9,7 @@ import { ImageDropzone } from './ImageDropzone';
 import { PreviewCanvas } from './PreviewCanvas';
 import { FrameFormatToggle } from '@/components/eink/FrameFormatToggle';
 import type { useImageContentForm } from '@/features/contents/hooks/useImageContentForm';
+import { ImageDisplayModeToggle } from './ImageDisplayModeToggle';
 
 interface ImageFormBodyProps {
   gid: string;
@@ -50,10 +51,19 @@ export function ImageFormBody({
       <div className="order-2 min-w-0 lg:order-1">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 ml-0.5">
           <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em]">
-            预览 · {form.preview.format === 'bwry2' ? '2bpp · 黑白红黄' : '1bpp · 黑白'} ·{' '}
-            {FRAME_WIDTH}×{FRAME_HEIGHT}
+            预览 ·{' '}
+            {form.preview.format === 'bwry2'
+              ? '2bpp · 黑白红黄'
+              : form.preview.format === 'gray4'
+                ? '4bpp · 16 灰'
+                : '1bpp · 黑白'}{' '}
+            · {FRAME_WIDTH}×{FRAME_HEIGHT}
           </p>
-          <FrameFormatToggle value={form.preview.format} onChange={form.preview.setFormat} />
+          <FrameFormatToggle
+            value={form.preview.format}
+            onChange={form.preview.setFormat}
+            allowGray
+          />
         </div>
         <PreviewCanvas
           canvasRef={form.image.previewRef}
@@ -86,6 +96,7 @@ export function ImageFormBody({
 
         <FormSection label="类型参数" hint={isEdit ? '不传图片则保留原图。' : undefined}>
           <div className="space-y-4">
+            <ImageDisplayModeToggle value={form.display.mode} onChange={form.display.setMode} />
             <ImageDropzone isEdit={isEdit} imageFile={form.image.file} onPick={form.image.onPick} />
             <DitherControls
               mode={form.dither.mode}

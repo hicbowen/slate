@@ -2,12 +2,14 @@
 
 namespace sync_internal {
 
-std::string ExistingImageEtag(const std::string& gid, int seq, const std::string& expected_etag) {
+std::string ExistingImageEtag(const std::string& gid, int seq, const std::string& expected_etag,
+                              const std::string& format) {
     cache::FrameMeta meta;
-    if (cache::ReadFrameMeta(gid, seq, meta) && cache::FrameImageExists(gid, seq, meta.image_etag)) {
+    if (cache::ReadFrameMeta(gid, seq, meta) &&
+        cache::FrameImageExists(gid, seq, meta.image_etag, meta.image_format)) {
         return meta.image_etag;
     }
-    if (cache::FrameImageExists(gid, seq, expected_etag)) {
+    if (cache::FrameImageExists(gid, seq, expected_etag, format)) {
         return expected_etag;
     }
     return "";

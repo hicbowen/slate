@@ -16,7 +16,7 @@
 | ORM | Prisma 7 + `@prisma/adapter-mariadb`，直连 MySQL |
 | 校验 | zod 4 + 全局 `ZodValidationPipe` |
 | 日志 | nestjs-pino + pino |
-| 图像 | sharp 0.34 + shared 1bpp mono / 2bpp BWRY 量化 |
+| 图像 | sharp 0.34 + shared 1bpp mono / 4bpp 16 灰 / 2bpp BWRY 量化 |
 | 音频 | ffmpeg 转 16 kHz mono s16le PCM |
 | 认证 | bcryptjs 密码哈希 + jsonwebtoken JWT |
 
@@ -94,7 +94,8 @@ Group
 Content
   group_id, sort_order, frame_name?
   kind = image | dynamic
-  image_etag, image_size, image_bwry_etag?, image_bwry_size?, content_etag
+  image_etag, image_size, image_gray_etag?, image_gray_size?
+  image_bwry_etag?, image_bwry_size?, display_mode, content_etag
   audio_etag?, audio_size?, audio_status, audio_source?, audio_voice?, audio_text?
   dynamic_type?, dynamic_config?, dynamic_data?
   dynamic_last_run_at?, dynamic_next_run_at?, dynamic_refresh_due_at?
@@ -170,7 +171,7 @@ GET    /api/v1/dynamic/weather/cities?q=北京
 
 `POST /groups/:groupId/contents` 和 `PATCH /contents/:contentId` 支持两种 content type：
 
-- `multipart/form-data`：图片内容。字段包括 `image`、`audio`、`threshold`、`mode`、`frame_name`。
+- `multipart/form-data`：图片内容。字段包括 `image`、`audio`、`threshold`、`mode`、`frame_name`、`display_mode=mono1|gray16`。
 - `application/json`：动态内容。body 符合 `shared` 的 `CreateDynamicContentRequest` 或 `PatchDynamicContentRequest`。
 
 ### 内容读取与设备资源下发（JWT 或 device secret）
@@ -179,7 +180,7 @@ GET    /api/v1/dynamic/weather/cities?q=北京
 GET /api/v1/groups/:groupId/contents
 GET /api/v1/groups/:groupId/manifest
 GET /api/v1/contents/:contentId
-GET /api/v1/contents/:contentId/image?format=mono1|bwry2
+GET /api/v1/contents/:contentId/image?format=mono1|gray4|bwry2
 GET /api/v1/contents/:contentId/audio
 ```
 
@@ -202,10 +203,12 @@ manifest response：
     seq: number;
     content_etag: string;
     frame_name: string | null;
+    display_mode: 'mono1' | 'gray16';
     device_status_bar_text: string;
     image_etag: string;
     image_renditions: {
       mono1: { etag: string; size: number };
+      gray4?: { etag: string; size: number };
       bwry2: { etag: string; size: number };
     };
     audio_etag: string | null;
@@ -349,6 +352,7 @@ device secret 必须是 64 字符 hex bearer token；JWT 与 device secret 不�
 ```text
 {BLOB_DIR}/
 ├── {groupId}/{contentId}.img                   400 x 300 1bpp packed，15000 bytes
+├── {groupId}/{contentId}.gray                  400 x 300 4bpp 16 灰，60000 bytes
 ├── {groupId}/{contentId}.bwry                  400 x 300 2bpp BWRY，30000 bytes
 ├── {groupId}/{contentId}.{audioEtag}.pcm       16 kHz mono s16le raw PCM
 └── image-render-cache/{xx}/{key}.bin
@@ -365,9 +369,9 @@ device secret 必须是 64 字符 hex bearer token；JWT 与 device secret 不�
 3. grayscale raw。
 4. `shared.autoInvert` 四角判断黑底反相。
 5. `shared.autoContrast(cutoff=1)`。
-6. 从同一 RGB 源分别生成 `shared.ditherTo1bpp` mono1 与 `shared.ditherToBwry2bpp` bwry2。
+6. 从同一 RGB 源分别生成 `shared.ditherTo1bpp` mono1、`shared.packGrayTo4bpp` gray4 与 `shared.ditherToBwry2bpp` bwry2。
 
-mono1 为 MSB-first，bit=1 白/0 黑；bwry2 每字节 4 像素，00 黑/01 白/10 黄/11 红。
+mono1 为 MSB-first，bit=1 白/0 黑；gray4 每字节 2 像素且高 nibble 在前，0 黑/15 白；bwry2 每字节 4 像素，00 黑/01 白/10 黄/11 红。`display_mode` 只选择 Note4 静态图片的实际下发格式，不改变 Note4C rendition。
 
 ### 动态内容
 

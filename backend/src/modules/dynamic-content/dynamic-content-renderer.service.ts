@@ -1,6 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { FRAME_BYTES, FRAME_BYTES_BWRY2, type FrameFormatT } from 'shared';
+import {
+  expandMono1ToGray4,
+  FRAME_BYTES,
+  FRAME_BYTES_BWRY2,
+  FRAME_HEIGHT,
+  FRAME_WIDTH,
+  type FrameFormatT,
+} from 'shared';
 import { BlobService } from '../../infra/blob/blob.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { toPrismaInputJson } from '../../common/db/prisma-json';
@@ -124,7 +131,9 @@ export class DynamicContentRendererService {
       data: normalizeRenderData(data),
       renderedAt: now,
     });
-    return rendered[format];
+    return format === 'gray4'
+      ? Buffer.from(expandMono1ToGray4(rendered.mono1, FRAME_WIDTH, FRAME_HEIGHT))
+      : rendered[format];
   }
 
   async renderPreview(
@@ -187,7 +196,9 @@ export class DynamicContentRendererService {
       data: normalizeRenderData(data),
       renderedAt: now,
     });
-    return rendered[format];
+    return format === 'gray4'
+      ? Buffer.from(expandMono1ToGray4(rendered.mono1, FRAME_WIDTH, FRAME_HEIGHT))
+      : rendered[format];
   }
 
   private async doRender(

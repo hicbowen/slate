@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { FRAME_HEIGHT, FRAME_WIDTH, type DitherMode } from 'shared';
+import { FRAME_HEIGHT, FRAME_WIDTH, type DitherMode, type ImageDisplayModeT } from 'shared';
 import { PAPER_HEX } from '@/lib/eink/colors';
 
 export function useImageFormSubmit({
@@ -10,6 +10,7 @@ export function useImageFormSubmit({
   mode,
   scale,
   offset,
+  displayMode,
 }: {
   imageFile: File | null;
   audioFile: File | null;
@@ -18,6 +19,7 @@ export function useImageFormSubmit({
   mode: DitherMode;
   scale: number;
   offset: { x: number; y: number };
+  displayMode: ImageDisplayModeT;
 }) {
   return useCallback(async (): Promise<FormData> => {
     const fd = new FormData();
@@ -29,8 +31,9 @@ export function useImageFormSubmit({
     }
     if (audioFile) fd.append('audio', audioFile);
     fd.append('frame_name', frameName.trim());
+    fd.append('display_mode', displayMode);
     return fd;
-  }, [audioFile, frameName, imageFile, mode, offset, scale, threshold]);
+  }, [audioFile, displayMode, frameName, imageFile, mode, offset, scale, threshold]);
 }
 
 async function exportNormalizedSource(

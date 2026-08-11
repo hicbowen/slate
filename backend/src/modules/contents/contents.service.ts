@@ -36,6 +36,7 @@ interface RenderedImageRendition {
 interface RenderedImageUpload {
   mono1: RenderedImageRendition;
   bwry2: RenderedImageRendition;
+  gray4: RenderedImageRendition;
 }
 
 interface RenderedAudioUpload {
@@ -123,7 +124,10 @@ export class ContentsService {
       updated.contentEtag,
       content.imageBwryEtag,
       content.imageBwrySize,
-      content.imageSize
+      content.imageSize,
+      content.imageGrayEtag,
+      content.imageGraySize,
+      content.displayMode === 'gray16' ? 'gray16' : 'mono1'
     );
   }
 
@@ -137,6 +141,7 @@ export class ContentsService {
     const deleted = await Promise.allSettled([
       this.blob.delete(content.groupId, contentId, 'image'),
       this.blob.delete(content.groupId, contentId, 'image_bwry'),
+      this.blob.delete(content.groupId, contentId, 'image_gray'),
       this.audioBlobs.delete(content.groupId, contentId, content.audioEtag),
     ]);
     const failed = deleted.filter((result) => result.status === 'rejected').length;
@@ -197,7 +202,10 @@ export class ContentsService {
       updated.contentEtag,
       content.imageBwryEtag,
       content.imageBwrySize,
-      content.imageSize
+      content.imageSize,
+      content.imageGrayEtag,
+      content.imageGraySize,
+      content.displayMode === 'gray16' ? 'gray16' : 'mono1'
     );
   }
 
@@ -239,8 +247,10 @@ export class ContentsService {
     try {
       rollback.deleteCreated(gid, contentId, 'image');
       rollback.deleteCreated(gid, contentId, 'image_bwry');
+      rollback.deleteCreated(gid, contentId, 'image_gray');
       await this.blob.write(gid, contentId, 'image', image.mono1.bytes);
       await this.blob.write(gid, contentId, 'image_bwry', image.bwry2.bytes);
+      await this.blob.write(gid, contentId, 'image_gray', image.gray4.bytes);
       if (audio) {
         rollback.deleteCreated(gid, audioBlobContentId(contentId, audio.etag), 'audio');
         await this.blob.write(gid, audioBlobContentId(contentId, audio.etag), 'audio', audio.bytes);
@@ -257,6 +267,9 @@ export class ContentsService {
             imageSize: image.mono1.size,
             imageBwryEtag: image.bwry2.etag,
             imageBwrySize: image.bwry2.size,
+            imageGrayEtag: image.gray4.etag,
+            imageGraySize: image.gray4.size,
+            displayMode: parsed.displayMode,
             ...(audio ? readyUploadedAudioFields(audio.etag, audio.size) : resetAudioFields()),
             kind: 'image',
           },
@@ -279,7 +292,10 @@ export class ContentsService {
       mutation.contentEtag,
       image.bwry2.etag,
       image.bwry2.size,
-      image.mono1.size
+      image.mono1.size,
+      image.gray4.etag,
+      image.gray4.size,
+      parsed.displayMode
     );
   }
 
@@ -293,7 +309,13 @@ export class ContentsService {
   ): Promise<ContentMutationResponseT> {
     const baseData: Prisma.ContentUpdateInput = {};
     if (parsed.hasFrameName) baseData.frameName = parsed.frameName;
-    if (parsed.hasFrameName === false && !parsed.hasImage && !parsed.hasAudio) {
+    if (parsed.hasDisplayMode) baseData.displayMode = parsed.displayMode;
+    if (
+      parsed.hasFrameName === false &&
+      !parsed.hasImage &&
+      !parsed.hasAudio &&
+      !parsed.hasDisplayMode
+    ) {
       throw new ValidationError('没有可更新的字段', { code: 'nothing_to_patch' });
     }
     const { image, audio } = await this.renderUpload(parsed, signal);
@@ -305,10 +327,25 @@ export class ContentsService {
       const { updated, groupEtag } = await this.withGroupMutation(gid, async (tx) => {
         const current = await tx.content.findUnique({
           where: { id: contentId },
-          select: { kind: true, groupId: true, audioEtag: true },
+          select: {
+            kind: true,
+            groupId: true,
+            audioEtag: true,
+            imageGrayEtag: true,
+          },
         });
         if (!current || current.groupId !== gid) throw new NotFoundError('内容不存在');
         if (current.kind !== 'image') throw new ValidationError('动态内容请使用 JSON 更新');
+        if (
+          parsed.hasDisplayMode &&
+          parsed.displayMode === 'gray16' &&
+          !parsed.hasImage &&
+          !current.imageGrayEtag
+        ) {
+          throw new ValidationError('旧图片切换 16 灰前需要重新上传原图', {
+            code: 'gray_source_required',
+          });
+        }
 
         const prepared = await this.prepareImageUpdate({
           gid,
@@ -326,6 +363,9 @@ export class ContentsService {
             imageSize: true,
             imageBwryEtag: true,
             imageBwrySize: true,
+            imageGrayEtag: true,
+            imageGraySize: true,
+            displayMode: true,
             audioEtag: true,
             contentEtag: true,
           },
@@ -344,7 +384,10 @@ export class ContentsService {
         updated.contentEtag,
         updated.imageBwryEtag,
         updated.imageBwrySize,
-        updated.imageSize
+        updated.imageSize,
+        updated.imageGrayEtag,
+        updated.imageGraySize,
+        updated.displayMode === 'gray16' ? 'gray16' : 'mono1'
       );
     } catch (err) {
       if (!dbUpdated) {
@@ -370,14 +413,19 @@ export class ContentsService {
     if (upload.image) {
       const previousImageBytes = await this.blob.read(gid, contentId, 'image');
       const previousBwryBytes = await this.blob.read(gid, contentId, 'image_bwry');
+      const previousGrayBytes = await this.blob.read(gid, contentId, 'image_gray');
       rollback.restorePrevious(gid, contentId, 'image', previousImageBytes);
       rollback.restorePrevious(gid, contentId, 'image_bwry', previousBwryBytes);
+      rollback.restorePrevious(gid, contentId, 'image_gray', previousGrayBytes);
       await this.blob.write(gid, contentId, 'image', upload.image.mono1.bytes);
       await this.blob.write(gid, contentId, 'image_bwry', upload.image.bwry2.bytes);
+      await this.blob.write(gid, contentId, 'image_gray', upload.image.gray4.bytes);
       data.imageEtag = upload.image.mono1.etag;
       data.imageSize = upload.image.mono1.size;
       data.imageBwryEtag = upload.image.bwry2.etag;
       data.imageBwrySize = upload.image.bwry2.size;
+      data.imageGrayEtag = upload.image.gray4.etag;
+      data.imageGraySize = upload.image.gray4.size;
       if (!upload.audio && currentAudioEtag) {
         Object.assign(data, resetAudioFields());
       }
@@ -410,16 +458,18 @@ export class ContentsService {
     let image: RenderedImageUpload | null = null;
     if (parsed.hasImage && parsed.imageBuf) {
       const sourceEtag = computeETag(parsed.imageBuf);
-      const [mono1, bwry2] = await Promise.all([
+      const [mono1, bwry2, gray4] = await Promise.all([
         this.imageRenderer.renderTo1bpp(parsed.imageBuf, {
           threshold: parsed.threshold,
           mode: parsed.mode,
           sourceEtag,
         }),
         this.imageRenderer.renderTo2bpp(parsed.imageBuf, { sourceEtag }),
+        this.imageRenderer.renderTo4bppGray(parsed.imageBuf, { sourceEtag }),
       ]);
       this.imageRenderer.validateFrameSize(mono1.data);
       this.imageRenderer.validateBwryFrameSize(bwry2.data);
+      this.imageRenderer.validateGrayFrameSize(gray4.data);
       image = {
         mono1: {
           bytes: mono1.data,
@@ -430,6 +480,11 @@ export class ContentsService {
           bytes: bwry2.data,
           etag: computeETag(bwry2.data),
           size: bwry2.data.byteLength,
+        },
+        gray4: {
+          bytes: gray4.data,
+          etag: computeETag(gray4.data),
+          size: gray4.data.byteLength,
         },
       };
     }
@@ -451,6 +506,9 @@ export class ContentsService {
     imageSize: number;
     imageBwryEtag: string | null;
     imageBwrySize: number | null;
+    imageGrayEtag: string | null;
+    imageGraySize: number | null;
+    displayMode: string;
     audioEtag: string | null;
     audioSource: ContentAudioSource | null;
   }> {
@@ -465,6 +523,9 @@ export class ContentsService {
         imageSize: true,
         imageBwryEtag: true,
         imageBwrySize: true,
+        imageGrayEtag: true,
+        imageGraySize: true,
+        displayMode: true,
         audioEtag: true,
         audioSource: true,
       },

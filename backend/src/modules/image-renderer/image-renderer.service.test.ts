@@ -3,7 +3,13 @@ import sharp from 'sharp';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { FRAME_BYTES, FRAME_BYTES_BWRY2, FRAME_HEIGHT, FRAME_WIDTH } from 'shared';
+import {
+  FRAME_BYTES,
+  FRAME_BYTES_BWRY2,
+  FRAME_BYTES_GRAY4,
+  FRAME_HEIGHT,
+  FRAME_WIDTH,
+} from 'shared';
 import { ImageRendererService } from './image-renderer.service';
 import { ImageRenderCacheService } from './image-render-cache.service';
 
@@ -52,6 +58,19 @@ describe('ImageRendererService', () => {
     const { data } = await renderer.renderTo2bpp(input);
     expect(data.length).toBe(FRAME_BYTES_BWRY2);
     expect(data.every((byte) => byte === 0xff)).toBe(true);
+  });
+
+  it('16 灰图按高 nibble 在前输出 4bpp，0 黑/15 白', async () => {
+    const white = await makePng(400, 300, { r: 255, g: 255, b: 255 });
+    const black = await makePng(400, 300, { r: 0, g: 0, b: 0 });
+    const whiteFrame = await renderer.renderTo4bppGray(white, { autoInvert: false });
+    const blackFrame = await renderer.renderTo4bppGray(black, { autoInvert: false });
+
+    expect(whiteFrame.data.length).toBe(FRAME_BYTES_GRAY4);
+    expect(whiteFrame.data.every((byte) => byte === 0xff)).toBe(true);
+    expect(blackFrame.data.every((byte) => byte === 0x00)).toBe(true);
+    expect(() => renderer.validateGrayFrameSize(whiteFrame.data)).not.toThrow();
+    expect(() => renderer.validateGrayFrameSize(Buffer.alloc(100))).toThrow();
   });
 
   it('黑图(autoInvert 触发) 仍是白', async () => {

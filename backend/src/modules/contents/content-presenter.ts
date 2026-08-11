@@ -20,6 +20,9 @@ export interface ContentRow {
   imageSize: number;
   imageBwryEtag?: string | null;
   imageBwrySize?: number | null;
+  imageGrayEtag?: string | null;
+  imageGraySize?: number | null;
+  displayMode?: string;
   audioSize: number | null;
   audioStatus: ContentAudioStatus;
   audioSource: ContentAudioSource | null;
@@ -49,6 +52,7 @@ export function contentToSummary(row: ContentRow): ContentSummaryT {
     audio_etag: row.audioEtag,
     image_size: row.imageSize,
     image_renditions: contentImageRenditions(row),
+    display_mode: row.kind === 'image' && row.displayMode === 'gray16' ? 'gray16' : 'mono1',
     audio_size: row.audioSize,
     audio_status: row.audioStatus,
     audio_source: row.audioSource,

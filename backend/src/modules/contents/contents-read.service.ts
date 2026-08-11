@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { expandMono1ToBwry2, FRAME_HEIGHT, FRAME_WIDTH } from 'shared';
+import { expandMono1ToBwry2, expandMono1ToGray4, FRAME_HEIGHT, FRAME_WIDTH } from 'shared';
 import type { ContentDetailT, FrameFormatT, ManifestResponseT } from 'shared';
 import { BlobService } from '../../infra/blob/blob.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
@@ -9,7 +9,7 @@ import { GroupsService } from '../groups/groups.service';
 import { ContentAudioBlobService } from './content-audio-blob.service';
 import { contentToDetail, contentToSummary } from './content-presenter';
 import { CONTENT_SELECT, contentSelect } from './content-select';
-import { fallbackBwryEtag } from './content-renditions';
+import { fallbackBwryEtag, fallbackGrayEtag } from './content-renditions';
 
 @Injectable()
 export class ContentsReadService {
@@ -121,11 +121,17 @@ export class ContentsReadService {
       groupId: true,
       imageEtag: true,
       imageBwryEtag: true,
+      imageGrayEtag: true,
     });
     if (format === 'bwry2' && content.imageBwryEtag) {
       const data = await this.blob.read(content.groupId, content.id, 'image_bwry');
       if (!data) throw new NotFoundError('四色图片文件丢失');
       return { data, etag: content.imageBwryEtag };
+    }
+    if (format === 'gray4' && content.imageGrayEtag) {
+      const data = await this.blob.read(content.groupId, content.id, 'image_gray');
+      if (!data) throw new NotFoundError('灰阶图片文件丢失');
+      return { data, etag: content.imageGrayEtag };
     }
     const data = await this.blob.read(content.groupId, content.id, 'image');
     if (!data) throw new NotFoundError('图片文件丢失');
@@ -133,6 +139,12 @@ export class ContentsReadService {
       return {
         data: Buffer.from(expandMono1ToBwry2(data, FRAME_WIDTH, FRAME_HEIGHT)),
         etag: fallbackBwryEtag(content.imageEtag),
+      };
+    }
+    if (format === 'gray4') {
+      return {
+        data: Buffer.from(expandMono1ToGray4(data, FRAME_WIDTH, FRAME_HEIGHT)),
+        etag: fallbackGrayEtag(content.imageEtag),
       };
     }
     return { data, etag: content.imageEtag };

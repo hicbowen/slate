@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { AppConfig } from '../../infra/config/app.config';
 
 export interface CacheKeyParts {
-  format: 'mono1' | 'bwry2';
+  format: 'mono1' | 'bwry2' | 'gray4';
   sourceEtag: string;
   width: number;
   height: number;

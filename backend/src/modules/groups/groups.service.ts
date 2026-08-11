@@ -78,6 +78,9 @@ export class GroupsService {
             imageSize: true,
             imageBwryEtag: true,
             imageBwrySize: true,
+            imageGrayEtag: true,
+            imageGraySize: true,
+            displayMode: true,
             audioEtag: true,
             audioSize: true,
             audioStatus: true,
@@ -343,6 +346,7 @@ export class GroupsService {
         return [
           this.blob.delete(gid, content.id, 'image'),
           this.blob.delete(gid, content.id, 'image_bwry'),
+          this.blob.delete(gid, content.id, 'image_gray'),
           content.audioEtag
             ? this.blob.delete(gid, audioBlobContentId(content.id, content.audioEtag), 'audio')
             : Promise.resolve(),
@@ -383,7 +387,7 @@ export class GroupsService {
     const rows = await this.prisma.content.groupBy({
       by: ['groupId'],
       where: { groupId: { in: groupIds } },
-      _sum: { imageSize: true, imageBwrySize: true, audioSize: true },
+      _sum: { imageSize: true, imageBwrySize: true, imageGraySize: true, audioSize: true },
     });
     return sizeMapFromRows(rows);
   }
@@ -392,7 +396,7 @@ export class GroupsService {
     const rows = await this.prisma.content.groupBy({
       by: ['groupId'],
       where: { group: { ownerUserId } },
-      _sum: { imageSize: true, imageBwrySize: true, audioSize: true },
+      _sum: { imageSize: true, imageBwrySize: true, imageGraySize: true, audioSize: true },
     });
     return sizeMapFromRows(rows);
   }
@@ -488,14 +492,22 @@ function toSummary(
 function sizeMapFromRows(
   rows: Array<{
     groupId: string;
-    _sum: { imageSize: number | null; imageBwrySize: number | null; audioSize: number | null };
+    _sum: {
+      imageSize: number | null;
+      imageBwrySize: number | null;
+      imageGraySize: number | null;
+      audioSize: number | null;
+    };
   }>
 ): Map<string, number> {
   const result = new Map<string, number>();
   for (const row of rows) {
     result.set(
       row.groupId,
-      (row._sum.imageSize ?? 0) + (row._sum.imageBwrySize ?? 0) + (row._sum.audioSize ?? 0)
+      (row._sum.imageSize ?? 0) +
+        (row._sum.imageBwrySize ?? 0) +
+        (row._sum.imageGraySize ?? 0) +
+        (row._sum.audioSize ?? 0)
     );
   }
   return result;

@@ -32,7 +32,7 @@ export const ContentCard = memo(function ContentCard({
     gid,
     content,
   });
-  const rendition = content.image_renditions[previewFormat];
+  const rendition = content.image_renditions[previewFormat] ?? content.image_renditions.mono1;
   const img = useContentImage(content.id, rendition.etag, previewFormat);
   const { attributes, listeners, setNodeRef, style, isDragging } = useSortableStyle(content.id);
   const refreshContent = useMutationAction<string>({

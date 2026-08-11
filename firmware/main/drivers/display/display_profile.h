@@ -1,10 +1,17 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include <sdkconfig.h>
 
 namespace display_profile {
+
+inline constexpr int         kMonoFrameBytes = 400 * 300 / 8;
+inline constexpr int         kGrayFrameBytes = 400 * 300 / 2;
+inline constexpr const char* kMonoFormat     = "mono1";
+inline constexpr const char* kGrayFormat     = "gray4";
+inline constexpr const char* kBwryFormat     = "bwry2";
 
 #if CONFIG_SLATE_DISPLAY_NOTE4C
 inline constexpr bool        kFourColor            = true;
@@ -28,10 +35,24 @@ inline constexpr uint8_t     kWhiteByte            = 0xFF;
 inline constexpr const char* kFrameFormat          = "mono1";
 inline constexpr const char* kDeviceProfile        = "note4_mono";
 inline constexpr int         kMinRefreshIntervalMs = 300;
-inline constexpr int         kRefreshIdleTimeoutMs = 8'000;
+inline constexpr int         kRefreshIdleTimeoutMs = 45'000;
 inline constexpr int         kBusyTimeoutMs        = 5'000;
 inline constexpr int         kDebounceQuietMs      = 50;
 inline constexpr int         kDebounceMaxMs        = 500;
 #endif
+
+inline int FrameBytesForFormat(const std::string& format) {
+    if (format == kMonoFormat)
+        return kMonoFrameBytes;
+    if (format == kGrayFormat)
+        return kGrayFrameBytes;
+    if (format == kBwryFormat)
+        return 400 * 300 / 4;
+    return 0;
+}
+
+inline bool IsSupportedFrameFormat(const std::string& format) {
+    return kFourColor ? format == kBwryFormat : (format == kMonoFormat || format == kGrayFormat);
+}
 
 }  // namespace display_profile

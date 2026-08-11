@@ -77,7 +77,8 @@ export function DynamicContentEditor({
     ]
   );
 
-  const savedRendition = content.image_renditions[form.previewFormat];
+  const savedRendition =
+    content.image_renditions[form.previewFormat] ?? content.image_renditions.mono1;
   const savedPreviewEnabled = !!savedRendition.etag;
   const savedPreview = useContentImage(content.id, savedRendition.etag, form.previewFormat);
   const dynamicMeta = form.type ? DYNAMIC_TYPE_META[form.type] : null;

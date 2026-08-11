@@ -118,7 +118,7 @@ function GroupDetailContent({
               <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-stone">
                 设备效果预览
               </p>
-              <FrameFormatToggle value={previewFormat} onChange={setPreviewFormat} />
+              <FrameFormatToggle value={previewFormat} onChange={setPreviewFormat} allowGray />
             </div>
             <SortableGrid
               sensors={sensors}

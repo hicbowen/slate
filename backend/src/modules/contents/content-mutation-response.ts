@@ -10,7 +10,10 @@ export function toContentMutationResponse(
   contentEtag: string,
   imageBwryEtag?: string | null,
   imageBwrySize?: number | null,
-  imageSize = 15000
+  imageSize = 15000,
+  imageGrayEtag?: string | null,
+  imageGraySize?: number | null,
+  displayMode: ContentMutationResponseT['display_mode'] = 'mono1'
 ): ContentMutationResponseT {
   return {
     id: contentId,
@@ -22,7 +25,10 @@ export function toContentMutationResponse(
       imageSize,
       imageBwryEtag,
       imageBwrySize,
+      imageGrayEtag,
+      imageGraySize,
     }),
+    display_mode: displayMode,
     audio_etag: audioEtag,
     manifest_etag: manifestEtag,
   };

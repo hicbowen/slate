@@ -55,6 +55,17 @@ export function drawImagePreview(
   let gray = rgbaToGray(imageData.data, canvas.width, canvas.height, 4);
   gray = autoInvert(gray, canvas.width, canvas.height);
   gray = autoContrast(gray, 1);
+  if (format === 'gray4') {
+    for (let i = 0, j = 0; i < imageData.data.length; i += 4, j++) {
+      const value = Math.min(15, Math.floor((gray[j]! * 15 + 127) / 255)) * 17;
+      imageData.data[i] = value;
+      imageData.data[i + 1] = value;
+      imageData.data[i + 2] = value;
+      imageData.data[i + 3] = 255;
+    }
+    ctx.putImageData(imageData, 0, 0);
+    return;
+  }
   const bin = ditherToBinary(gray, canvas.width, canvas.height, { mode, threshold });
 
   for (let i = 0, j = 0; i < imageData.data.length; i += 4, j++) {

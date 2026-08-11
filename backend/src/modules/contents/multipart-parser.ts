@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { MultipartFile } from '@fastify/multipart';
 import type { FastifyRequest } from 'fastify';
-import { DITHER_MODES, type DitherMode } from 'shared';
+import { DITHER_MODES, ImageDisplayMode, type DitherMode, type ImageDisplayModeT } from 'shared';
 import { ValidationError } from '../../common/errors';
 
 export interface ParsedContentUpload {
@@ -13,6 +13,8 @@ export interface ParsedContentUpload {
   mode?: DitherMode;
   hasFrameName: boolean;
   frameName: string | null;
+  hasDisplayMode: boolean;
+  displayMode: ImageDisplayModeT;
 }
 
 const MODES = DITHER_MODES as readonly string[];
@@ -35,6 +37,8 @@ export class MultipartParser {
       audioBuf: null,
       hasFrameName: false,
       frameName: null,
+      hasDisplayMode: false,
+      displayMode: 'mono1',
     };
     const parts = req.parts();
     for await (const part of parts) {
@@ -65,6 +69,15 @@ export class MultipartParser {
           result.hasFrameName = true;
           const trimmed = val.trim().slice(0, 64);
           result.frameName = trimmed === '' ? null : trimmed;
+        } else if (part.fieldname === 'display_mode') {
+          const parsed = ImageDisplayMode.safeParse(val);
+          if (!parsed.success) {
+            throw new ValidationError('图片显示模式必须是 mono1 或 gray16', {
+              code: 'invalid_display_mode',
+            });
+          }
+          result.hasDisplayMode = true;
+          result.displayMode = parsed.data;
         }
       }
     }

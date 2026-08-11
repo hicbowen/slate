@@ -5,12 +5,14 @@ import {
   BW_THRESHOLD_DEFAULT,
   FRAME_BYTES,
   FRAME_BYTES_BWRY2,
+  FRAME_BYTES_GRAY4,
   FRAME_HEIGHT,
   FRAME_WIDTH,
   autoContrast,
   autoInvert,
   ditherTo1bpp,
   ditherToBwry2bpp,
+  packGrayTo4bpp,
   type DitherMode,
 } from 'shared';
 import { ValidationError } from '../../common/errors';
@@ -125,6 +127,48 @@ export class ImageRendererService {
     return { data, width: W, height: H, fromCache };
   }
 
+  /** 把任意图片量化为 Note4 SSD2683 的 16 级灰度 raw 4bpp 帧。 */
+  async renderTo4bppGray(input: Buffer, options: RenderOptions = {}): Promise<RenderResult> {
+    const W = options.width ?? FRAME_WIDTH;
+    const H = options.height ?? FRAME_HEIGHT;
+    const doAutoInvert = options.autoInvert ?? true;
+    const letterbox = options.letterbox ?? true;
+    if (W % 2 !== 0) throw new ValidationError(`图宽必须是 2 的倍数，当前为 ${W}`);
+    if (W <= 0 || H <= 0) throw new ValidationError(`图片尺寸非法：${W}x${H}`);
+
+    const sourceEtag = options.sourceEtag ?? computeETag(input);
+    const key = this.cache.key({
+      format: 'gray4',
+      sourceEtag,
+      width: W,
+      height: H,
+      threshold: 0,
+      mode: 'gray16',
+      autoInvert: doAutoInvert,
+      letterbox,
+    });
+    const { data, fromCache } = await this.cache.getOrCompute(key, async () => {
+      const { data: rawGray } = await sharp(input)
+        .flatten({ background: { r: 255, g: 255, b: 255 } })
+        .resize(W, H, {
+          fit: letterbox ? 'contain' : 'cover',
+          background: { r: 255, g: 255, b: 255 },
+        })
+        .grayscale()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      if (rawGray.length !== W * H) {
+        throw new ValidationError(`图片解码异常：当前 ${rawGray.length} 字节，期望 ${W * H} 字节`);
+      }
+      let gray: Uint8Array = new Uint8Array(rawGray.buffer, rawGray.byteOffset, rawGray.byteLength);
+      if (doAutoInvert) gray = autoInvert(gray, W, H);
+      gray = autoContrast(gray, 1);
+      const packed = packGrayTo4bpp(gray, W, H);
+      return Buffer.from(packed.buffer, packed.byteOffset, packed.byteLength);
+    });
+    return { data, width: W, height: H, fromCache };
+  }
+
   validateFrameSize(buf: Buffer): void {
     if (buf.length !== FRAME_BYTES) {
       throw new ValidationError(`帧大小不匹配：当前 ${buf.length} 字节，期望 ${FRAME_BYTES} 字节`);
@@ -135,6 +179,14 @@ export class ImageRendererService {
     if (buf.length !== FRAME_BYTES_BWRY2) {
       throw new ValidationError(
         `四色帧大小不匹配：当前 ${buf.length} 字节，期望 ${FRAME_BYTES_BWRY2} 字节`
+      );
+    }
+  }
+
+  validateGrayFrameSize(buf: Buffer): void {
+    if (buf.length !== FRAME_BYTES_GRAY4) {
+      throw new ValidationError(
+        `灰阶帧大小不匹配：当前 ${buf.length} 字节，期望 ${FRAME_BYTES_GRAY4} 字节`
       );
     }
   }

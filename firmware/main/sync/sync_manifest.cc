@@ -56,7 +56,7 @@ bool SyncService::DownloadFramesToStage(cache::CacheWriter& writer, const std::s
     for (const auto& f : manifest.contents) {
         if (f.id.empty() || f.image_etag.empty())
             continue;
-        if (!writer.FrameImageExists(f.seq, f.image_etag))
+        if (!writer.FrameImageExists(f.seq, f.image_etag, f.image_format))
             ++total_updates;
         if (!f.audio_etag.empty() && !writer.FrameAudioExists(f.seq, f.audio_etag))
             ++total_updates;
@@ -96,16 +96,16 @@ bool SyncService::DownloadFramesToStage(cache::CacheWriter& writer, const std::s
             complete = false;
             continue;
         }
-        if (!writer.FrameImageExists(f.seq, f.image_etag)) {
+        if (!writer.FrameImageExists(f.seq, f.image_etag, f.image_format)) {
             bool          nm               = false;
             const int64_t image_started_ms = time_utils::NowMs();
-            const auto    image_if_none    = ExistingImageEtag(gid, f.seq, f.image_etag);
+            const auto    image_if_none    = ExistingImageEtag(gid, f.seq, f.image_etag, f.image_format);
             download_buf_.clear();
-            if (api::DownloadContentImage(f.id, image_if_none, download_buf_, nm)) {
+            if (api::DownloadContentImage(f.id, f.image_format, image_if_none, download_buf_, nm)) {
                 if (nm) {
                     ESP_LOGW(kTag, "frame image unexpected not_modified seq=%d", f.seq);
                     complete = false;
-                } else if (!writer.WriteFrameImage(f.seq, download_buf_, f.image_etag)) {
+                } else if (!writer.WriteFrameImage(f.seq, download_buf_, f.image_etag, f.image_format)) {
                     ESP_LOGW(kTag, "frame image write failed seq=%d", f.seq);
                     complete = false;
                 }
@@ -141,12 +141,13 @@ bool SyncService::DownloadFramesToStage(cache::CacheWriter& writer, const std::s
             post_progress();
         }
 
-        if (writer.FrameImageExists(f.seq, f.image_etag) &&
+        if (writer.FrameImageExists(f.seq, f.image_etag, f.image_format) &&
             (f.audio_etag.empty() || writer.FrameAudioExists(f.seq, f.audio_etag))) {
             cache::FrameMeta fm;
             fm.status_bar_text = f.device_status_bar_text;
             fm.content_etag    = f.content_etag;
             fm.image_etag      = f.image_etag;
+            fm.image_format    = f.image_format;
             fm.audio_etag      = f.audio_etag;
             // next_wake_sec<=0 视为非动态帧(不配 RTC timer)：0 曾被当成动态并被 60s
             // 地板顶起来反复空醒。真正需要定时刷新的帧后端会给 >0 的秒数。
@@ -296,17 +297,18 @@ bool SyncService::SyncCurrentContent(const std::string& gid, const api::ContentM
     next_meta.status_bar_text = f.device_status_bar_text;
     next_meta.content_etag    = f.content_etag;
     next_meta.image_etag      = f.image_etag;
+    next_meta.image_format    = f.image_format;
     next_meta.audio_etag      = f.audio_etag;
     // 同上：next_wake_sec<=0 当非动态帧，避免 0 被 60s 地板顶起来反复空醒。
     next_meta.has_ttl = f.has_next_wake_sec && f.next_wake_sec > 0;
     next_meta.ttl_sec = next_meta.has_ttl ? static_cast<uint32_t>(f.next_wake_sec) : 0;
 
     if (old_meta_ok && !f.content_etag.empty() && old_meta.content_etag == f.content_etag &&
-        cache::FrameImageExists(gid, f.seq, f.image_etag) &&
+        cache::FrameImageExists(gid, f.seq, f.image_etag, f.image_format) &&
         (f.audio_etag.empty() || cache::FrameAudioExists(gid, f.seq, f.audio_etag))) {
         if (old_meta.status_bar_text != next_meta.status_bar_text || old_meta.has_ttl != next_meta.has_ttl ||
             old_meta.ttl_sec != next_meta.ttl_sec || old_meta.image_etag != next_meta.image_etag ||
-            old_meta.audio_etag != next_meta.audio_etag) {
+            old_meta.image_format != next_meta.image_format || old_meta.audio_etag != next_meta.audio_etag) {
             if (!cache::WriteFrameMeta(gid, f.seq, next_meta)) {
                 ESP_LOGW(kTag, "frame meta write failed seq=%d", f.seq);
                 return false;
@@ -314,7 +316,8 @@ bool SyncService::SyncCurrentContent(const std::string& gid, const api::ContentM
         }
         power_state::SetCurrentFrameFromMeta(f.seq, next_meta);
         changed = (!display_profile::kFourColor && old_meta.status_bar_text != next_meta.status_bar_text) ||
-                  (!old_meta.image_etag.empty() && old_meta.image_etag != next_meta.image_etag);
+                  (!old_meta.image_etag.empty() && old_meta.image_etag != next_meta.image_etag) ||
+                  old_meta.image_format != next_meta.image_format;
         return true;
     }
 
@@ -324,16 +327,16 @@ bool SyncService::SyncCurrentContent(const std::string& gid, const api::ContentM
     bool       image_downloaded   = false;
     if (ShouldStop())
         return false;
-    if (!cache::FrameImageExists(gid, f.seq, f.image_etag)) {
+    if (!cache::FrameImageExists(gid, f.seq, f.image_etag, f.image_format)) {
         bool       nm            = false;
-        const auto image_if_none = ExistingImageEtag(gid, f.seq, f.image_etag);
+        const auto image_if_none = ExistingImageEtag(gid, f.seq, f.image_etag, f.image_format);
         download_buf_.clear();
-        if (api::DownloadContentImage(f.id, image_if_none, download_buf_, nm)) {
+        if (api::DownloadContentImage(f.id, f.image_format, image_if_none, download_buf_, nm)) {
             if (nm) {
                 ESP_LOGW(kTag, "frame image unexpected not_modified seq=%d", f.seq);
                 return false;
             }
-            if (!cache::WriteFrameImage(gid, f.seq, download_buf_, f.image_etag)) {
+            if (!cache::WriteFrameImage(gid, f.seq, download_buf_, f.image_etag, f.image_format)) {
                 ESP_LOGW(kTag, "frame image write failed seq=%d", f.seq);
                 return false;
             }

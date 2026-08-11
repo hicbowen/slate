@@ -27,6 +27,25 @@ describe('computeGroupEtags', () => {
     expect(after.manifestEtag).not.toBe(before.manifestEtag);
   });
 
+  it('changes image etags when the Note4 display mode changes', () => {
+    const group = groupInput('previous-etag');
+    const before = computeGroupEtags(group);
+    const after = computeGroupEtags({
+      ...group,
+      contents: [
+        {
+          ...group.contents[0]!,
+          imageGrayEtag: 'gray-etag',
+          imageGraySize: 60_000,
+          displayMode: 'gray16',
+        },
+      ],
+    });
+
+    expect(after.contentEtags[0]!.etag).not.toBe(before.contentEtags[0]!.etag);
+    expect(after.manifestEtag).not.toBe(before.manifestEtag);
+  });
+
   it('changes dynamic content etags when config or pushed data changes', () => {
     const group = {
       ...groupInput('previous-etag'),

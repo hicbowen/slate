@@ -11,6 +11,9 @@ export interface GroupEtagContentRow {
   imageSize: number;
   imageBwryEtag?: string | null;
   imageBwrySize?: number | null;
+  imageGrayEtag?: string | null;
+  imageGraySize?: number | null;
+  displayMode?: string;
   audioEtag: string | null;
   audioSize: number | null;
   audioStatus: string;
@@ -52,6 +55,9 @@ export function computeGroupEtags(group: GroupEtagInput): ComputedGroupEtags {
     imageSize: content.imageSize,
     imageBwryEtag: content.imageBwryEtag ?? '',
     imageBwrySize: content.imageBwrySize ?? '',
+    imageGrayEtag: content.imageGrayEtag ?? '',
+    imageGraySize: content.imageGraySize ?? '',
+    displayMode: content.kind === 'image' ? (content.displayMode ?? 'mono1') : 'mono1',
     audioEtag: content.audioEtag ?? '',
     audioSize: content.audioSize ?? '',
     audioStatus: content.audioStatus,
@@ -76,6 +82,9 @@ export function computeGroupEtags(group: GroupEtagInput): ComputedGroupEtags {
       content.imageSize,
       content.imageBwryEtag,
       content.imageBwrySize,
+      content.imageGrayEtag,
+      content.imageGraySize,
+      content.displayMode,
       content.audioEtag,
       content.audioSize,
       content.audioStatus,

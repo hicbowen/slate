@@ -25,7 +25,7 @@ frontend/src/
 │   └── App.tsx               路由表与 lazy page
 ├── components/
 │   ├── dnd/                  SortableGrid 与拖拽排序 helper
-│   ├── eink/                 mono1 / bwry2 帧预览、设备切换与状态栏 overlay
+│   ├── eink/                 mono1 / gray4 / bwry2 帧预览、设备切换与状态栏 overlay
 │   ├── feedback/             ErrorBoundary、Toast、Confirm
 │   ├── layout/               Layout、PageHeader、Section、RequireRouteParams
 │   └── ui/                   Button、Input、Select、Dialog 等基础组件
@@ -92,11 +92,12 @@ frontend/src/
 
 - 上传图片并裁剪/平移/缩放到 400 x 300。
 - 调整黑白 rendition 的阈值与 dither 模式。
-- 可切换 Note4 黑白与 Note4C 黑白红黄预览，两者共用同一裁剪位置。
+- 为静态图片选择 Note4 显示模式：`黑白快刷` 或 `16 级灰度`；选择会随内容保存。
+- 可切换 Note4 黑白、Note4 16 灰与 Note4C 黑白红黄预览，三者共用同一裁剪位置。
 - 可附加上传音频，或提交 TTS 文案由后端生成音频。
 - 保存时提交 `multipart/form-data`，图片字段是统一裁剪后的彩色 400 x 300 PNG，不会把已抖成黑白的预览当作源图。
 
-后端从彩色源图重新生成最终 mono1 / bwry2 双 rendition，前端预览用于分别校验两种设备效果。内容组卡片、图片编辑和动态编辑共用同一设备格式切换控件。
+后端从彩色源图重新生成最终 mono1 / gray4 / bwry2 rendition，前端预览用于分别校验设备效果。`display_mode=gray16` 只影响 Note4 静态图片，动态内容保持黑白，Note4C 始终使用 bwry2。内容组卡片和图片编辑支持三种预览；动态编辑保持 profile 对应的 mono1 / bwry2 预览。
 
 ### 动态内容
 

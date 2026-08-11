@@ -71,6 +71,29 @@ export function decodeBwry2Image(
   return data;
 }
 
+export function decodeGray4Image(
+  bytes: Uint8Array | ArrayBuffer,
+  width: number = FRAME_WIDTH,
+  height: number = FRAME_HEIGHT
+): ImageData {
+  const byteView = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes;
+  const data = new ImageData(width, height);
+  let dst = 0;
+  for (const byte of byteView) {
+    const left = ((byte >> 4) & 0x0f) * 17;
+    const right = (byte & 0x0f) * 17;
+    data.data[dst++] = left;
+    data.data[dst++] = left;
+    data.data[dst++] = left;
+    data.data[dst++] = 255;
+    data.data[dst++] = right;
+    data.data[dst++] = right;
+    data.data[dst++] = right;
+    data.data[dst++] = 255;
+  }
+  return data;
+}
+
 export function isValidFrameLength(
   bytes: Uint8Array | ArrayBuffer,
   format: FrameFormatT,
@@ -78,7 +101,8 @@ export function isValidFrameLength(
   height: number = FRAME_HEIGHT
 ): boolean {
   const byteLength = bytes instanceof ArrayBuffer ? bytes.byteLength : bytes.length;
-  return byteLength === (width * height) / (format === 'bwry2' ? 4 : 8);
+  const pixelsPerByte = format === 'mono1' ? 8 : format === 'bwry2' ? 4 : 2;
+  return byteLength === (width * height) / pixelsPerByte;
 }
 
 export function decodeFrameImage(
@@ -87,9 +111,9 @@ export function decodeFrameImage(
   width: number = FRAME_WIDTH,
   height: number = FRAME_HEIGHT
 ): ImageData {
-  return format === 'bwry2'
-    ? decodeBwry2Image(bytes, width, height)
-    : decodeBppImage(bytes, width, height);
+  if (format === 'bwry2') return decodeBwry2Image(bytes, width, height);
+  if (format === 'gray4') return decodeGray4Image(bytes, width, height);
+  return decodeBppImage(bytes, width, height);
 }
 
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x0a0b0c0d]).buffer)[0] === 0x0d;

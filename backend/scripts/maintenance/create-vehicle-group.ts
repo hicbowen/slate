@@ -303,6 +303,8 @@ function uploadForVehicle(name: string, imageBuf: Buffer, args: Args): ParsedCon
     audioBuf: null,
     hasFrameName: true,
     frameName: name,
+    hasDisplayMode: true,
+    displayMode: 'mono1',
     mode: args.mode,
     threshold: args.threshold,
   };

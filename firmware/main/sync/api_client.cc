@@ -40,6 +40,7 @@ inline constexpr char kCurrentContentEtag[]  = "current_content_etag";
 inline constexpr char kCurrentGroup[]        = "current_group";
 inline constexpr char kDeviceStatusBarText[] = "device_status_bar_text";
 inline constexpr char kDisplayProfile[]      = "display_profile";
+inline constexpr char kDisplayMode[]         = "display_mode";
 inline constexpr char kDetail[]              = "detail";
 inline constexpr char kDevice[]              = "device";
 inline constexpr char kDeviceSecret[]        = "device_secret";
@@ -181,6 +182,7 @@ void ParseContentMeta(cJSON* item, ContentMeta& out) {
     out.content_etag           = JsonString(item, proto::kContentEtag);
     out.device_status_bar_text = JsonString(item, proto::kDeviceStatusBarText);
     out.image_etag             = JsonString(item, proto::kImageEtag);
+    out.image_format           = display_profile::kFrameFormat;
     out.audio_etag             = JsonString(item, proto::kAudioEtag);
     out.image_size             = JsonInt(item, proto::kImageSize, 0);
     out.audio_size             = JsonInt(item, proto::kAudioSize, 0);
@@ -196,15 +198,36 @@ void ParseContentMeta(cJSON* item, ContentMeta& out) {
         // 新协议一旦声明 renditions 就必须使用当前 profile；不静默回退到顶层 legacy mono etag。
         out.image_etag.clear();
         out.image_size  = 0;
-        cJSON* selected = cJSON_GetObjectItemCaseSensitive(renditions, display_profile::kFrameFormat);
+        std::string selected_format = display_profile::kFrameFormat;
+#if !CONFIG_SLATE_DISPLAY_NOTE4C
+        if (out.kind == "image" && JsonString(item, proto::kDisplayMode) == "gray16")
+            selected_format = display_profile::kGrayFormat;
+#endif
+        cJSON* selected = cJSON_GetObjectItemCaseSensitive(renditions, selected_format.c_str());
         if (cJSON_IsObject(selected)) {
             const std::string selected_etag = JsonString(selected, "etag");
             const int         selected_size = JsonInt(selected, "size", 0);
-            if (!selected_etag.empty() && selected_size == display_profile::kFrameBytes) {
+            if (!selected_etag.empty() && selected_size == display_profile::FrameBytesForFormat(selected_format)) {
                 out.image_etag = selected_etag;
                 out.image_size = selected_size;
+                out.image_format = selected_format;
             }
         }
+        // 旧图片尚无 gray4 时安全降级到 mono1，不发送尺寸不匹配的灰阶请求。
+#if !CONFIG_SLATE_DISPLAY_NOTE4C
+        if (out.image_etag.empty() && selected_format == display_profile::kGrayFormat) {
+            cJSON* mono = cJSON_GetObjectItemCaseSensitive(renditions, display_profile::kMonoFormat);
+            if (cJSON_IsObject(mono)) {
+                const std::string mono_etag = JsonString(mono, "etag");
+                const int mono_size = JsonInt(mono, "size", 0);
+                if (!mono_etag.empty() && mono_size == display_profile::kMonoFrameBytes) {
+                    out.image_etag = mono_etag;
+                    out.image_size = mono_size;
+                    out.image_format = display_profile::kMonoFormat;
+                }
+            }
+        }
+#endif
     }
 }
 
@@ -710,10 +733,13 @@ bool ApiClient::DownloadBinary(const std::string& path, const std::string& if_no
     return !out.empty();
 }
 
-bool ApiClient::DownloadContentImage(const std::string& id, const std::string& if_none_match, std::vector<uint8_t>& out,
+bool ApiClient::DownloadContentImage(const std::string& id, const std::string& format,
+                                     const std::string& if_none_match, std::vector<uint8_t>& out,
                                      bool& not_modified) {
+    if (!display_profile::IsSupportedFrameFormat(format))
+        return false;
     std::string path = std::string(kApiPrefix) + "/contents/" + UrlEncodePathSegment(id) +
-                       "/image?format=" + display_profile::kFrameFormat;
+                       "/image?format=" + format;
     return DownloadBinary(path, if_none_match, out, not_modified);
 }
 
@@ -768,9 +794,9 @@ bool GetManifest(const std::string& group_id, const std::string& if_none_match, 
     return DefaultClient().GetManifest(group_id, if_none_match, out, not_modified);
 }
 
-bool DownloadContentImage(const std::string& id, const std::string& if_none_match, std::vector<uint8_t>& out,
-                          bool& not_modified) {
-    return DefaultClient().DownloadContentImage(id, if_none_match, out, not_modified);
+bool DownloadContentImage(const std::string& id, const std::string& format, const std::string& if_none_match,
+                          std::vector<uint8_t>& out, bool& not_modified) {
+    return DefaultClient().DownloadContentImage(id, format, if_none_match, out, not_modified);
 }
 
 bool DownloadContentAudio(const std::string& id, const std::string& if_none_match, std::vector<uint8_t>& out,

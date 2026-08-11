@@ -5,6 +5,7 @@ import {
   type ContentDetailT,
   type DitherMode,
   type FrameFormatT,
+  type ImageDisplayModeT,
 } from 'shared';
 import { useAudioFormState } from './useAudioFormState';
 import { useCropState } from './useCropState';
@@ -17,10 +18,16 @@ export function useImageContentForm(content?: ContentDetailT) {
   const audio = useAudioFormState(content);
   const [threshold, setThreshold] = useState(BW_THRESHOLD_DEFAULT);
   const [mode, setMode] = useState<DitherMode>(DEFAULT_DITHER_MODE);
-  const [previewFormat, setPreviewFormat] = useState<FrameFormatT>('mono1');
+  const [previewFormat, setPreviewFormat] = useState<FrameFormatT>(
+    content?.display_mode === 'gray16' ? 'gray4' : 'mono1'
+  );
+  const [displayMode, setDisplayModeState] = useState<ImageDisplayModeT>(
+    content?.display_mode ?? 'mono1'
+  );
   const [frameName, setFrameName] = useState(content?.frame_name ?? '');
   const { scale, setScale, offset, setOffset, resetCrop } = useCropState();
   const frameNameChanged = isEdit && frameName !== (content.frame_name ?? '');
+  const displayModeChanged = isEdit && displayMode !== content.display_mode;
   const trimmedTtsText = audio.ttsText.trim();
   const existingTtsText = content?.audio_text?.trim() ?? '';
   const hasExistingTts = isEdit && content?.audio_source === 'tts';
@@ -32,7 +39,7 @@ export function useImageContentForm(content?: ContentDetailT) {
       trimmedTtsText !== existingTtsText ||
       audio.ttsVoice !== content?.audio_voice);
   const hasFilePatch = !!imageFile || !!audio.audioFile;
-  const hasContentPatch = hasFilePatch || frameNameChanged;
+  const hasContentPatch = hasFilePatch || frameNameChanged || displayModeChanged;
   const canCreate = !!imageFile && (audio.audioMode !== 'tts' || trimmedTtsText.length > 0);
   const canEdit =
     (hasContentPatch || wantsTts) && (audio.audioMode !== 'tts' || trimmedTtsText.length > 0);
@@ -45,12 +52,18 @@ export function useImageContentForm(content?: ContentDetailT) {
     [resetCrop]
   );
 
+  const setDisplayMode = useCallback((value: ImageDisplayModeT) => {
+    setDisplayModeState(value);
+    setPreviewFormat(value === 'gray16' ? 'gray4' : 'mono1');
+  }, []);
+
   const reset = useCallback(() => {
     setImageFile(null);
     audio.resetAudio();
     setThreshold(BW_THRESHOLD_DEFAULT);
     setMode(DEFAULT_DITHER_MODE);
     setPreviewFormat('mono1');
+    setDisplayModeState('mono1');
     setFrameName('');
     resetCrop();
   }, [audio, resetCrop]);
@@ -63,6 +76,7 @@ export function useImageContentForm(content?: ContentDetailT) {
     mode,
     scale,
     offset,
+    displayMode,
   });
 
   return {
@@ -93,6 +107,11 @@ export function useImageContentForm(content?: ContentDetailT) {
     preview: {
       format: previewFormat,
       setFormat: setPreviewFormat,
+    },
+    display: {
+      mode: displayMode,
+      setMode: setDisplayMode,
+      changed: displayModeChanged,
     },
     crop: {
       scale,

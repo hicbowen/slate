@@ -9,13 +9,21 @@ import { ValidationError } from '../../common/errors';
 import { eachLimit } from '../../common/utils/each-limit';
 import { KeyedPromiseQueue } from '../../common/worker/keyed-promise-queue';
 
-export type BlobKind = 'image' | 'image_bwry' | 'audio';
+export type BlobKind = 'image' | 'image_bwry' | 'image_gray' | 'audio';
 
-const ext = (kind: BlobKind) => (kind === 'image' ? 'img' : kind === 'image_bwry' ? 'bwry' : 'pcm');
+const ext = (kind: BlobKind) =>
+  kind === 'image'
+    ? 'img'
+    : kind === 'image_bwry'
+      ? 'bwry'
+      : kind === 'image_gray'
+        ? 'gray'
+        : 'pcm';
 const TMP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_BLOB_BYTES: Record<BlobKind, number> = {
   image: 64 * 1024,
   image_bwry: 64 * 1024,
+  image_gray: 64 * 1024,
   audio: 5 * 1024 * 1024,
 };
 

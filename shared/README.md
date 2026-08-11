@@ -8,7 +8,7 @@
 - dashboard 模板 schema
 - 热榜源 catalog
 - 字体测试 catalog
-- 1bpp 黑白 / 2bpp 黑白红黄量化与图像预处理纯函数
+- 1bpp 黑白 / 4bpp 16 灰 / 2bpp 黑白红黄量化与图像预处理纯函数
 
 前端和后端都直接 import `shared/src`，运行期不需要先构建 `dist`。
 
@@ -24,6 +24,7 @@ export * from './types/content.js';
 export * from './types/dynamic.js';
 export * from './dither.js';
 export * from './bwry.js';
+export * from './gray4.js';
 export * from './preprocess.js';
 ```
 
@@ -45,6 +46,7 @@ shared/src/
 ├── api.ts                       API_PREFIX、帧/音频常量、登录注册 schema、错误 envelope
 ├── dither.ts                    1bpp dither 算法
 ├── bwry.ts                      Note4C BWRY 量化、2bpp 打包与 mono fallback
+├── gray4.ts                     Note4 16 灰量化、4bpp 打包与 mono fallback
 ├── preprocess.ts                RGBA/RGB 灰度化、autoInvert、autoContrast
 ├── types/
 │   ├── device.ts                设备注册、poll、DeviceState、claim、reorder
@@ -72,6 +74,7 @@ shared/src/
 | `FRAME_HEIGHT` | `300` | EPD 高度 |
 | `FRAME_BYTES_MONO1` / `FRAME_BYTES` | `15000` | 400 x 300 packed 1bpp |
 | `FRAME_BYTES_BWRY2` | `30000` | 400 x 300 packed 2bpp |
+| `FRAME_BYTES_GRAY4` | `60000` | 400 x 300 packed 4bpp |
 | `BW_THRESHOLD_DEFAULT` | `128` | 默认二值阈值 |
 | `AUDIO_SAMPLE_RATE` | `16000` | 设备 PCM 采样率 |
 | `AUDIO_BITS_PER_SAMPLE` | `16` | PCM 位深 |
@@ -79,7 +82,9 @@ shared/src/
 
 1bpp 字节序约定：MSB-first，bit=1 白，bit=0 黑，与固件 EPD 驱动一致。
 
-2bpp 字节序约定：每字节 4 像素，高位像素在前；`00` 黑、`01` 白、`10` 黄、`11` 红。`FrameFormat = mono1 | bwry2`，`DisplayProfile = note4_mono | note4c_bwry`。
+4bpp 字节序约定：每字节 2 像素，高 nibble 在前；`0` 黑、`15` 白。2bpp 字节序约定：每字节 4 像素，高位像素在前；`00` 黑、`01` 白、`10` 黄、`11` 红。
+
+`FrameFormat = mono1 | gray4 | bwry2`，`ImageDisplayMode = mono1 | gray16`，`DisplayProfile = note4_mono | note4c_bwry`。`gray4` 仅用于 Note4 静态图片；动态内容仍使用 profile 默认格式。
 
 ## Schema 命名约定
 
@@ -121,6 +126,7 @@ export type PollRequestT = z.infer<typeof PollRequest>;
 [src/types/content.ts](src/types/content.ts) 定义：
 
 - `ContentKind = image | dynamic`
+- `ImageDisplayMode = mono1 | gray16`
 - `ContentAudioStatus = none | pending | generating | ready | failed`
 - `ContentAudioSource = upload | tts`
 - `ContentSummary`
@@ -133,7 +139,7 @@ export type PollRequestT = z.infer<typeof PollRequest>;
 
 `ContentSummary` 是设备 manifest 和 `current_content` 共用的轻量结构。`ContentDetail` 是 Web 管理端编辑页使用的完整结构，额外包含 `dynamic_config`、`dynamic_data`、动态渲染状态和音频错误信息。
 
-每个内容包含 `image_renditions.mono1` 与 `image_renditions.bwry2` 的 `etag` / `size`。历史内容若尚无独立四色 blob，后端会把 mono1 映射为只含黑白的合法 bwry2 帧，保证旧数据可继续显示。
+每个内容包含 `image_renditions.mono1` 与 `image_renditions.bwry2`，静态图片还可包含 `image_renditions.gray4`；每个 rendition 都带 `etag` / `size`。`display_mode` 决定 Note4 使用 `mono1` 还是 `gray4`，Note4C 始终使用 `bwry2`。历史内容缺少目标 blob 时，后端会从 mono1 生成合法 fallback，保证旧数据可继续显示。
 
 ## 动态内容配置
 

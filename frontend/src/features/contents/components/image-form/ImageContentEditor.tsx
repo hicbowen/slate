@@ -11,10 +11,7 @@ import { Image as ImageIcon } from 'lucide-react';
 import type { ContentDetailT } from 'shared';
 import { useGenerateContentTts } from '@/features/contents/query/content-audio-queries';
 import { useContentImage } from '@/features/contents/query/content-image-queries';
-import {
-  usePatchContentFrameName,
-  useUpdateImageContent,
-} from '@/features/contents/query/content-mutation-queries';
+import { useUpdateImageContent } from '@/features/contents/query/content-mutation-queries';
 import { useToast } from '@/components/feedback/toast-context';
 import { FormActions } from '@/components/ui/FormActions';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -31,14 +28,12 @@ interface ImageContentEditorProps {
 
 export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorProps) {
   const updateImageContent = useUpdateImageContent(gid);
-  const patchFrameName = usePatchContentFrameName(gid);
   const generateTts = useGenerateContentTts(gid);
-  const submitting =
-    updateImageContent.isPending || patchFrameName.isPending || generateTts.isPending;
+  const submitting = updateImageContent.isPending || generateTts.isPending;
   const toast = useToast();
   const form = useImageContentForm(content);
 
-  const rendition = content.image_renditions[form.preview.format];
+  const rendition = content.image_renditions[form.preview.format] ?? content.image_renditions.mono1;
   const existingImg = useContentImage(
     content.id,
     !form.image.file ? rendition.etag : null,
@@ -48,14 +43,9 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
 
   async function submitContent() {
     try {
-      if (form.hasFilePatch) {
+      if (form.hasContentPatch) {
         const fd = await form.buildFormData();
         await updateImageContent.mutateAsync({ contentId: content.id, form: fd });
-      } else if (form.frameNameChanged) {
-        await patchFrameName.mutateAsync({
-          contentId: content.id,
-          frameName: form.frameName.trim() || null,
-        });
       }
       if (form.audio.wantsTts) {
         try {

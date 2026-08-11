@@ -26,6 +26,7 @@ struct ContentMeta {
     std::string content_etag;
     std::string device_status_bar_text;
     std::string image_etag;
+    std::string image_format;
     std::string audio_etag;
     int         image_size = 0;
     int         audio_size = 0;
@@ -102,8 +103,8 @@ class ApiClient {
 
     bool GetManifest(const std::string& group_id, const std::string& if_none_match, Manifest& out, bool& not_modified);
 
-    bool DownloadContentImage(const std::string& id, const std::string& if_none_match, std::vector<uint8_t>& out,
-                              bool& not_modified);
+    bool DownloadContentImage(const std::string& id, const std::string& format, const std::string& if_none_match,
+                              std::vector<uint8_t>& out, bool& not_modified);
     bool DownloadContentAudio(const std::string& id, const std::string& if_none_match, std::vector<uint8_t>& out,
                               bool& not_modified);
 
@@ -152,8 +153,8 @@ bool SelectGroup(const std::string& gid, DeviceState& out);
 
 bool GetManifest(const std::string& group_id, const std::string& if_none_match, Manifest& out, bool& not_modified);
 
-bool DownloadContentImage(const std::string& id, const std::string& if_none_match, std::vector<uint8_t>& out,
-                          bool& not_modified);
+bool DownloadContentImage(const std::string& id, const std::string& format, const std::string& if_none_match,
+                          std::vector<uint8_t>& out, bool& not_modified);
 bool DownloadContentAudio(const std::string& id, const std::string& if_none_match, std::vector<uint8_t>& out,
                           bool& not_modified);
 
