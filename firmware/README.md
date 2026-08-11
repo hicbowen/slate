@@ -1,6 +1,6 @@
 # Slate / Firmware
 
-ESP-IDF 5.5.x 固件，目标芯片 ESP32-S3。当前只支持 **ZecTrix_Note4_V1.0**（极趣实验室「Ai 便利贴」）：4.2 英寸黑白墨水屏、ES8311 音频、MEMS 麦、3 个按键（确认 / 上 / 下）、单节锂电池。
+ESP-IDF 5.5.x 固件，目标芯片 ESP32-S3，支持 **ZecTrix Note4** 黑白屏与 **ZecTrix Note4C** 黑白红黄四色屏。两者共用主板、音频、按键、电源与业务代码，显示面板通过编译期 profile 选择。
 
 本目录是独立 ESP-IDF 工程，不属于 Bun workspace。
 
@@ -8,19 +8,34 @@ ESP-IDF 5.5.x 固件，目标芯片 ESP32-S3。当前只支持 **ZecTrix_Note4_V
 
 ```bash
 source $IDF_PATH/export.sh
-idf.py -C firmware build
-idf.py -C firmware -p <serial> flash monitor
+
+# Note4 黑白屏（默认）
+idf.py -C firmware -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
+  -D SDKCONFIG_DEFAULTS=sdkconfig.defaults build
+idf.py -C firmware -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
+  -D SDKCONFIG_DEFAULTS=sdkconfig.defaults -p <serial> flash monitor
+
+# Note4C 四色屏
+idf.py -C firmware -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
+  -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults" build
+idf.py -C firmware -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
+  -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults" \
+  -p <serial> flash monitor
 ```
 
 CI 使用 ESP-IDF v5.5.2 构建：
 
 ```bash
-idf.py build
-idf.py merge-bin -o slate-full.bin
-cp build/slate.bin build/slate-ota.bin
+idf.py -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
+  -D SDKCONFIG_DEFAULTS=sdkconfig.defaults build
+idf.py -B build-note4 merge-bin -o slate-note4-full.bin
+
+idf.py -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
+  -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults" build
+idf.py -B build-note4c merge-bin -o slate-note4c-full.bin
 ```
 
-target、Flash、PSRAM、分区表已在 `sdkconfig.defaults` 固化，无需手动 `idf.py set-target`。
+target、Flash、PSRAM、分区表已在 `sdkconfig.defaults` 固化。`sdkconfig.note4c.defaults` 只叠加四色面板选择。两套命令必须同时指定独立的 `SDKCONFIG`，避免先构建的面板配置污染后一个构建。两种面板命令和帧格式不同，不能混刷固件。
 
 ## 工程结构
 
@@ -56,7 +71,7 @@ firmware/
 | 项 | 规格 |
 | --- | --- |
 | MCU | ESP32-S3-WROOM-1 N16R8V，16 MB QIO Flash + 8 MB Octal PSRAM |
-| 显示 | 4.2" 黑白 EPD，400 x 300，SSD2683 控制器，命令兼容 SSD1683 |
+| 显示 | Note4：4.2" 黑白 EPD；Note4C：4.2" 黑白红黄 EPD；均为 400 x 300 |
 | 音频 | ES8311 codec，单声道扬声器，MEMS 麦，差分 D 类 PA |
 | 传感 | PCF8563 RTC、GT23SC6699 NFC |
 | 电源 | 单节 4.2 V 锂电，软锁存主电源，独立 EPD rail 与音频/I2C rail |
@@ -144,7 +159,7 @@ factory  0x10000   0x400000
 storage  0x410000  0xBF0000
 ```
 
-`storage` 是 LittleFS，约 12 MB。按每帧 15 KB image + 可选 PCM 估算，可缓存约数百帧。
+`storage` 是 LittleFS，约 12 MB。Note4 每帧 15 KB，Note4C 每帧 30 KB，另加可选 PCM；切换固件 profile 后，尺寸不匹配的旧图片缓存会自动重新下载。
 
 ## 启动模式
 
@@ -260,7 +275,8 @@ poll telemetry：
     "current_group": "gid",
     "current_content_seq": 3,
     "current_content_etag": "etag",
-    "manifest_etag": "etag"
+    "manifest_etag": "etag",
+    "display_profile": "note4c_bwry"
   }
 }
 ```
@@ -269,6 +285,7 @@ poll telemetry：
 
 - manifest etag 未变：只写当前 state，触发缓存命中 UI。
 - manifest etag 变化：`GET /groups/:gid/manifest`，再增量下载缺失 image/audio。
+- manifest 中按固件 profile 选择 `image_renditions.mono1` 或 `image_renditions.bwry2`；图片下载请求显式带 `?format=mono1|bwry2`。
 - 每个资源请求带 `If-None-Match`，后端命中返回 304。
 - timer wake 且 manifest 未变时，如果后端返回 `current_content`，只更新当前帧。
 - 切组调用 `/devices/current/group/next` 或 `/prev`，然后同步目标组。
@@ -342,14 +359,20 @@ SettingsScene        设置页
 
 ## EPD
 
-关键参数：
+两种 profile：
 
-- 400 x 300，1bpp packed 帧为 15000 bytes。
-- SSD2683 实际刷屏需要 2bpp 传输，1bpp 会膨胀成 30 KB SPI payload。
-- 全刷约 2-3 秒，局刷约 0.3-0.6 秒。
-- 累计多次 partial 后强制 full cleanup，减少残影。
+| profile | 服务端帧 | 刷新策略 | 状态信息策略 |
+| --- | --- | --- | --- |
+| `note4_mono` | 15000 B，1bpp，1=白/0=黑 | 支持局刷；大面积变化或累计局刷后全刷 | 显示实时 Wi-Fi、电量百分比和充电状态 |
+| `note4c_bwry` | 30000 B，2bpp，00 黑/01 白/10 黄/11 红 | 仅全刷；请求合并且相邻刷新至少间隔 12 秒 | 固定 Wi-Fi 与中性电量图标，隐藏百分比 |
+
+Note4C 会忽略信号格、电量采样、充电状态、分钟 tick 和同步进度文案造成的纯状态栏更新；图片 rendition 变化、用户切帧、切组和设置操作仍可触发刷新。动态内容的实际图片发生变化时仍按服务端 `next_wake_sec` 刷新。
+
+共同约束：
+
 - BUSY 极性是 active-low：低=忙，高=空闲。
-- 读屏内温度后写温度补偿寄存器，60 秒内复用温度，避免每次 RX 切换开销。
+- Note4 BUSY 超时 5 秒；Note4C 全刷慢，BUSY 超时 120 秒。
+- Note4 读屏内温度并写补偿寄存器；Note4C 使用独立的四色初始化与 deep-sleep 命令序列。
 
 deep sleep 前只等待已有 EPD refresh 完成，不主动全刷；屏幕内容依靠墨水屏双稳态保留。
 
@@ -394,7 +417,7 @@ ES8311 使用 lazy open：
 
 `SleepManager` 策略：
 
-- 默认闲置 10 分钟 deep sleep，可由 `SLATE_IDLE_DEEP_SLEEP_MIN` 配置。
+- 默认闲置 3 分钟 deep sleep，可由 `SLATE_IDLE_DEEP_SLEEP_MIN` 配置。
 - captive portal 模式禁用 deep sleep。
 - USB/充电存在时暂停 deep sleep。
 - 未绑定后 2 小时内阻止 deep sleep，方便用户在 Web claim 后设备快速响应；低电量会退出 grace。
@@ -424,10 +447,12 @@ GPIO39 上键不是 RTC IO，不能作为 deep sleep ext1 唤醒源。
 
 | 项 | 默认 | 说明 |
 | --- | --- | --- |
+| `SLATE_DISPLAY_NOTE4` | 选中 | Note4 黑白面板，1bpp + 局刷 |
+| `SLATE_DISPLAY_NOTE4C` | 未选 | Note4C 四色面板，2bpp + 仅全刷 |
 | `SLATE_DEFAULT_SERVER_URL` | 空 | captive portal 服务端 URL 预填值 |
 | `SLATE_AP_SSID_PREFIX` | `Slate` | SoftAP SSID 前缀 |
 | `SLATE_DEFAULT_TIMEZONE` | `CST-8` | SNTP 后设置的 POSIX TZ |
-| `SLATE_IDLE_DEEP_SLEEP_MIN` | `10` | 闲置多少分钟进 deep sleep |
+| `SLATE_IDLE_DEEP_SLEEP_MIN` | `3` | 闲置多少分钟进 deep sleep |
 
 `sdkconfig.defaults` 还固化：
 

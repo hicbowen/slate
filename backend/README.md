@@ -16,7 +16,7 @@
 | ORM | Prisma 7 + `@prisma/adapter-mariadb`，直连 MySQL |
 | 校验 | zod 4 + 全局 `ZodValidationPipe` |
 | 日志 | nestjs-pino + pino |
-| 图像 | sharp 0.34 + shared 1bpp dither |
+| 图像 | sharp 0.34 + shared 1bpp mono / 2bpp BWRY 量化 |
 | 音频 | ffmpeg 转 16 kHz mono s16le PCM |
 | 认证 | bcryptjs 密码哈希 + jsonwebtoken JWT |
 
@@ -84,7 +84,7 @@ User
 Device
   mac(unique), secret_hash(unique), pair_code(unique)
   owner_user_id?, selected_group_id?, sort_order
-  last_registered_at?, last_seen_at?, battery_pct?, rssi_dbm?, fw_version?
+  display_profile, last_registered_at?, last_seen_at?, battery_pct?, rssi_dbm?, fw_version?
 
 Group
   name, owner_user_id?, sort_order
@@ -94,7 +94,7 @@ Group
 Content
   group_id, sort_order, frame_name?
   kind = image | dynamic
-  image_etag, image_size, content_etag
+  image_etag, image_size, image_bwry_etag?, image_bwry_size?, content_etag
   audio_etag?, audio_size?, audio_status, audio_source?, audio_voice?, audio_text?
   dynamic_type?, dynamic_config?, dynamic_data?
   dynamic_last_run_at?, dynamic_next_run_at?, dynamic_refresh_due_at?
@@ -179,7 +179,7 @@ GET    /api/v1/dynamic/weather/cities?q=北京
 GET /api/v1/groups/:groupId/contents
 GET /api/v1/groups/:groupId/manifest
 GET /api/v1/contents/:contentId
-GET /api/v1/contents/:contentId/image
+GET /api/v1/contents/:contentId/image?format=mono1|bwry2
 GET /api/v1/contents/:contentId/audio
 ```
 
@@ -204,6 +204,10 @@ manifest response：
     frame_name: string | null;
     device_status_bar_text: string;
     image_etag: string;
+    image_renditions: {
+      mono1: { etag: string; size: number };
+      bwry2: { etag: string; size: number };
+    };
     audio_etag: string | null;
     image_size: number;
     audio_size: number | null;
@@ -345,6 +349,7 @@ device secret 必须是 64 字符 hex bearer token；JWT 与 device secret 不�
 ```text
 {BLOB_DIR}/
 ├── {groupId}/{contentId}.img                   400 x 300 1bpp packed，15000 bytes
+├── {groupId}/{contentId}.bwry                  400 x 300 2bpp BWRY，30000 bytes
 ├── {groupId}/{contentId}.{audioEtag}.pcm       16 kHz mono s16le raw PCM
 └── image-render-cache/{xx}/{key}.bin
 ```
@@ -360,9 +365,9 @@ device secret 必须是 64 字符 hex bearer token；JWT 与 device secret 不�
 3. grayscale raw。
 4. `shared.autoInvert` 四角判断黑底反相。
 5. `shared.autoContrast(cutoff=1)`。
-6. `shared.ditherTo1bpp(mode, threshold)` 输出 packed 1bpp。
+6. 从同一 RGB 源分别生成 `shared.ditherTo1bpp` mono1 与 `shared.ditherToBwry2bpp` bwry2。
 
-输出格式与固件一致：MSB-first，bit=1 白，bit=0 黑。
+mono1 为 MSB-first，bit=1 白/0 黑；bwry2 每字节 4 像素，00 黑/01 白/10 黄/11 红。
 
 ### 动态内容
 
@@ -378,7 +383,7 @@ device secret 必须是 64 字符 hex bearer token；JWT 与 device secret 不�
 - `font_test`
 - `hot_list`
 
-动态帧由 `DynamicFrameRendererService` 直接用 bitmap canvas 和位图字体绘制成 1bpp，不走浏览器或 SVG。`DynamicContentSchedulerService` 在 `BACKGROUND_WORKERS=true` 时启动，每次最多 claim 5 个到期任务，失败后指数退避。
+动态帧由 `DynamicFrameRendererService` 直接用 bitmap canvas 和位图字体同时绘制 mono1 / bwry2，不走浏览器或 SVG；预警、地震等语义重点可使用红黄墨色。`DynamicContentSchedulerService` 在 `BACKGROUND_WORKERS=true` 时启动，每次最多 claim 5 个到期任务，失败后指数退避。
 
 刷新时间语义：
 

@@ -25,7 +25,7 @@ frontend/src/
 │   └── App.tsx               路由表与 lazy page
 ├── components/
 │   ├── dnd/                  SortableGrid 与拖拽排序 helper
-│   ├── eink/                 1bpp 帧预览与状态栏 overlay
+│   ├── eink/                 mono1 / bwry2 帧预览、设备切换与状态栏 overlay
 │   ├── feedback/             ErrorBoundary、Toast、Confirm
 │   ├── layout/               Layout、PageHeader、Section、RequireRouteParams
 │   └── ui/                   Button、Input、Select、Dialog 等基础组件
@@ -91,12 +91,12 @@ frontend/src/
 图片编辑器支持：
 
 - 上传图片并裁剪/平移/缩放到 400 x 300。
-- 调整阈值与 dither 模式。
-- 浏览器端使用 `shared` 的 `rgbaToGray -> autoInvert -> autoContrast -> ditherToBinary` 生成预览。
+- 调整黑白 rendition 的阈值与 dither 模式。
+- 可切换 Note4 黑白与 Note4C 黑白红黄预览，两者共用同一裁剪位置。
 - 可附加上传音频，或提交 TTS 文案由后端生成音频。
-- 保存时提交 `multipart/form-data`，图片字段来自预览 canvas 导出的 PNG。
+- 保存时提交 `multipart/form-data`，图片字段是统一裁剪后的彩色 400 x 300 PNG，不会把已抖成黑白的预览当作源图。
 
-后端仍会重新用 sharp + shared 管线生成最终 1bpp `.img`，前端预览是为了让用户尽量所见即所得。
+后端从彩色源图重新生成最终 mono1 / bwry2 双 rendition，前端预览用于分别校验两种设备效果。内容组卡片、图片编辑和动态编辑共用同一设备格式切换控件。
 
 ### 动态内容
 
@@ -119,7 +119,7 @@ POST /api/v1/contents/preview
 POST /api/v1/contents/:contentId/preview
 ```
 
-响应是 400 x 300 1bpp binary，前端通过 `DynamicFramePreview` 转成 canvas 预览。
+请求使用 `?format=mono1|bwry2`，响应是对应的 400 x 300 packed binary，前端通过 `DynamicFramePreview` 解码成 canvas 预览。
 
 ### Dashboard 推送
 

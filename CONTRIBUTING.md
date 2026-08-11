@@ -59,7 +59,9 @@ bun run --cwd backend test
 
 ```bash
 source $IDF_PATH/export.sh
-idf.py -C firmware build
+idf.py -C firmware -B build-note4 build
+SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.note4c.defaults" \
+  idf.py -C firmware -B build-note4c build
 ```
 
 CI 上 `firmware.yml` 用 v5.5.2 跑构建。涉及 EPD / 电源 / 按键 / 休眠等硬件交互的改动，请在 PR 描述里说明：

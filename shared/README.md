@@ -8,7 +8,7 @@
 - dashboard 模板 schema
 - 热榜源 catalog
 - 字体测试 catalog
-- 1bpp dither 与图像预处理纯函数
+- 1bpp 黑白 / 2bpp 黑白红黄量化与图像预处理纯函数
 
 前端和后端都直接 import `shared/src`，运行期不需要先构建 `dist`。
 
@@ -23,6 +23,7 @@ export * from './types/group.js';
 export * from './types/content.js';
 export * from './types/dynamic.js';
 export * from './dither.js';
+export * from './bwry.js';
 export * from './preprocess.js';
 ```
 
@@ -43,6 +44,7 @@ export * from './preprocess.js';
 shared/src/
 ├── api.ts                       API_PREFIX、帧/音频常量、登录注册 schema、错误 envelope
 ├── dither.ts                    1bpp dither 算法
+├── bwry.ts                      Note4C BWRY 量化、2bpp 打包与 mono fallback
 ├── preprocess.ts                RGBA/RGB 灰度化、autoInvert、autoContrast
 ├── types/
 │   ├── device.ts                设备注册、poll、DeviceState、claim、reorder
@@ -68,13 +70,16 @@ shared/src/
 | `API_PREFIX` | `/api/v1` | 除 `/healthz` 外的 HTTP 前缀 |
 | `FRAME_WIDTH` | `400` | EPD 宽度 |
 | `FRAME_HEIGHT` | `300` | EPD 高度 |
-| `FRAME_BYTES` | `15000` | 400 x 300 packed 1bpp |
+| `FRAME_BYTES_MONO1` / `FRAME_BYTES` | `15000` | 400 x 300 packed 1bpp |
+| `FRAME_BYTES_BWRY2` | `30000` | 400 x 300 packed 2bpp |
 | `BW_THRESHOLD_DEFAULT` | `128` | 默认二值阈值 |
 | `AUDIO_SAMPLE_RATE` | `16000` | 设备 PCM 采样率 |
 | `AUDIO_BITS_PER_SAMPLE` | `16` | PCM 位深 |
 | `AUDIO_CHANNELS` | `1` | 单声道 |
 
 1bpp 字节序约定：MSB-first，bit=1 白，bit=0 黑，与固件 EPD 驱动一致。
+
+2bpp 字节序约定：每字节 4 像素，高位像素在前；`00` 黑、`01` 白、`10` 黄、`11` 红。`FrameFormat = mono1 | bwry2`，`DisplayProfile = note4_mono | note4c_bwry`。
 
 ## Schema 命名约定
 
@@ -108,6 +113,7 @@ export type PollRequestT = z.infer<typeof PollRequest>;
 - `device_secret` 是 64 字符 hex，只在注册响应返回一次。
 - `PairCode` 接受 6 位字母数字并转大写；后端生成时使用去掉易混淆字符的字母表。
 - `PollRequest.telemetry.wake_reason` 为 `timer | button | power_on | charge | other`。
+- 注册与 poll telemetry 可上报 `display_profile`，后端据此记录设备硬件能力。
 - `DeviceState.current_content` 可选，用于固件 timer wake 时只刷新当前动态帧。
 
 ## 内容类型
@@ -126,6 +132,8 @@ export type PollRequestT = z.infer<typeof PollRequest>;
 - `GenerateContentTtsRequest`
 
 `ContentSummary` 是设备 manifest 和 `current_content` 共用的轻量结构。`ContentDetail` 是 Web 管理端编辑页使用的完整结构，额外包含 `dynamic_config`、`dynamic_data`、动态渲染状态和音频错误信息。
+
+每个内容包含 `image_renditions.mono1` 与 `image_renditions.bwry2` 的 `etag` / `size`。历史内容若尚无独立四色 blob，后端会把 mono1 映射为只含黑白的合法 bwry2 帧，保证旧数据可继续显示。
 
 ## 动态内容配置
 

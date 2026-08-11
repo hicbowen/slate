@@ -32,6 +32,7 @@ coverage/
 
 # === ESP-IDF (firmware/) ===
 firmware/build/
+firmware/build-*/
 firmware/managed_components/
 firmware/sdkconfig
 firmware/sdkconfig.old

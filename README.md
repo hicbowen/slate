@@ -1,6 +1,6 @@
 # Slate
 
-Slate（墨笺）是一个面向 400 × 300 黑白墨水屏设备的开源相框 / 信息看板 / 语音玩具项目。把照片、实时资讯和自定义仪表板推送到一块墨水屏上，用按键翻页、用语音朗读。仓库涵盖设备固件、后端 API、Web 管理端和前后端共享 schema，可以完全自托管。
+Slate（墨笺）是一个面向 400 × 300 墨水屏设备的开源相框 / 信息看板 / 语音玩具项目，同时支持 Note4 黑白屏与 Note4C 黑白红黄四色屏。把照片、实时资讯和自定义仪表板推送到一块墨水屏上，用按键翻页、用语音朗读。仓库涵盖设备固件、后端 API、Web 管理端和前后端共享 schema，可以完全自托管。
 
 ![Slate 软件管理、设备同步和墨水屏内容形态总览](readme-hero.png)
 
@@ -10,7 +10,7 @@ Slate（墨笺）是一个面向 400 × 300 黑白墨水屏设备的开源相框
 
 每块屏幕上的内容由「内容组」组织，组内可以混放两大类内容，设备按键翻页轮播：
 
-- **静态图片**：浏览器内裁剪、缩放、抖动预览，后端用 sharp 渲染成 1bpp。支持 6 种抖动算法适配不同画面——
+- **静态图片**：浏览器内统一裁剪、缩放并切换 Note4 / Note4C 预览，后端同时生成 1bpp 黑白帧与 2bpp 黑白红黄帧。黑白帧支持 6 种抖动算法——
   `threshold`（纯黑白线稿）、`bayer4` / `bayer8`（粗 / 细网点）、`floyd`（照片推荐）、`atkinson`（高对比）、`sierra`（柔和）。
 - **动态内容**：后端实时拉取数据并渲染成墨水屏帧，到点自动刷新。共 9 种，见下表。
 
@@ -47,7 +47,7 @@ Slate（墨笺）是一个面向 400 × 300 黑白墨水屏设备的开源相框
 
 ## 技术栈
 
-- `firmware/`：ESP-IDF 5.5.x 固件，目标板为 ZecTrix Note4 V1.0（ESP32-S3 + 4.2" EPD + ES8311 音频 + 按键 + 电池）。
+- `firmware/`：ESP-IDF 5.5.x 固件，目标板为 ZecTrix Note4 / Note4C（ESP32-S3 + 4.2" EPD + ES8311 音频 + 按键 + 电池）。
 - `backend/`：Bun + NestJS 11 + Fastify + Prisma 7 + MySQL 8，负责账号、设备、内容组、内容、动态帧渲染、音频转码和设备同步协议。
 - `frontend/`：React 19 + Vite 8 + Tailwind v4 的 Web 管理端。
 - `shared/`：前后端共享的 zod schema、动态内容配置、dither 和图像预处理纯函数。
@@ -72,7 +72,7 @@ slate/
 | --- | --- |
 | 后端 API、数据模型、环境变量、部署细节 | [backend/README.md](backend/README.md) |
 | Web 管理端、路由、设计系统、数据流 | [frontend/README.md](frontend/README.md) |
-| 共享 schema、动态配置、1bpp 图像管线 | [shared/README.md](shared/README.md) |
+| 共享 schema、动态配置、1bpp / 2bpp 图像管线 | [shared/README.md](shared/README.md) |
 | 固件、硬件规格、GPIO/电源、同步协议、低功耗 | [firmware/README.md](firmware/README.md) |
 
 ## 端到端流程
@@ -92,7 +92,7 @@ slate/
 
 内容管理（内容类型详见上文「功能特性」）
   └─ Web 创建内容组和内容
-     ├─ 图片内容：浏览器预览裁剪 + shared dither，后端 sharp 渲染 1bpp
+     ├─ 图片内容：浏览器统一裁剪，后端生成 mono1 + bwry2 双 rendition
      ├─ 音频：上传音频经 ffmpeg 转 16 kHz mono s16le PCM
      ├─ TTS：OpenAI-compatible TTS 流式返回 PCM，再重采样到设备格式
      └─ 动态内容：后端实时拉取数据渲染成帧，按调度自动刷新
@@ -102,7 +102,7 @@ slate/
      └─ 收到 DeviceState（绑定状态、当前内容组、manifest etag、可选 current_content）
         └─ manifest 变化时 GET /groups/:gid/manifest
            └─ 增量 GET /contents/:id/image 与 /audio，ETag 命中返回 304
-              └─ LittleFS 缓存后本地翻页、局刷 EPD、播放 PCM
+              └─ LittleFS 缓存后本地翻页、按硬件策略刷新 EPD、播放 PCM
 
 低功耗刷新
   └─ 静态帧不定时唤醒
@@ -156,11 +156,22 @@ bun run dev:frontend    # http://localhost:5173，Vite proxy /api 与 /healthz �
 
 ```bash
 source $IDF_PATH/export.sh
-idf.py -C firmware build
-idf.py -C firmware -p <serial> flash monitor
+
+# Note4 黑白屏（默认）
+idf.py -C firmware -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
+  -D SDKCONFIG_DEFAULTS=sdkconfig.defaults build
+idf.py -C firmware -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
+  -D SDKCONFIG_DEFAULTS=sdkconfig.defaults -p <serial> flash monitor
+
+# Note4C 四色屏
+idf.py -C firmware -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
+  -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults" build
+idf.py -C firmware -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
+  -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults" \
+  -p <serial> flash monitor
 ```
 
-target、分区表、Flash/PSRAM 配置已经固化在 `firmware/sdkconfig.defaults`，无需手动 `idf.py set-target`。
+两种屏幕使用不同驱动命令，必须烧录与面板匹配的固件。target、分区表、Flash/PSRAM 配置已经固化，无需手动 `idf.py set-target`。
 
 ## 常用校验
 
@@ -250,8 +261,8 @@ tag body 会作为 GitHub Release notes。详细流程见 [CONTRIBUTING.md](CONT
 | --- | --- | --- |
 | `ci.yml` | PR、push 到 `master`、手动触发 | format + lint、typecheck、backend test、frontend build |
 | `docker.yml` | push 到 `master`、手动触发 | buildx 构建 linux/amd64 + linux/arm64 并推送 GHCR |
-| `firmware.yml` | `firmware/**` 变化、手动触发 | ESP-IDF v5.5.2 构建并上传 `slate-full.bin` / `slate-ota.bin` |
-| `release.yml` | push `vX.Y.Z` tag | 校验版本，推送 release Docker tag，构建固件并创建 GitHub Release |
+| `firmware.yml` | `firmware/**` 变化、手动触发 | ESP-IDF v5.5.2 构建并上传 Note4 / Note4C 的 full 与 OTA 固件 |
+| `release.yml` | push `vX.Y.Z` tag | 校验版本，推送 release Docker tag，构建两种硬件固件并创建 GitHub Release |
 
 ## 贡献
 

@@ -214,21 +214,26 @@ jobs:
       - prepare
       - quality
     outputs:
-      full_name: ${{ steps.package.outputs.full_name }}
-      ota_name: ${{ steps.package.outputs.ota_name }}
+      note4_full_name: ${{ steps.package.outputs.note4_full_name }}
+      note4_ota_name: ${{ steps.package.outputs.note4_ota_name }}
+      note4c_full_name: ${{ steps.package.outputs.note4c_full_name }}
+      note4c_ota_name: ${{ steps.package.outputs.note4c_ota_name }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: ESP-IDF build
+      - name: ESP-IDF build (Note4 + Note4C)
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: 'v5.5.2'
           target: esp32s3
           path: 'firmware'
           command: >-
-            idf.py build &&
-            idf.py merge-bin -o slate-full.bin &&
-            cp build/slate.bin build/slate-ota.bin
+            idf.py -B build-note4 -D SDKCONFIG=build-note4/sdkconfig -D SDKCONFIG_DEFAULTS=sdkconfig.defaults build &&
+            idf.py -B build-note4 merge-bin -o slate-note4-full.bin &&
+            cp build-note4/slate.bin build-note4/slate-note4-ota.bin &&
+            idf.py -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults' build &&
+            idf.py -B build-note4c merge-bin -o slate-note4c-full.bin &&
+            cp build-note4c/slate.bin build-note4c/slate-note4c-ota.bin
 
       - name: Prepare firmware assets
         id: package
@@ -237,28 +242,38 @@ jobs:
         run: |
           set -euo pipefail
 
-          FULL_NAME="slate-zectrix-note4-${RELEASE_TAG}-full.bin"
-          OTA_NAME="slate-zectrix-note4-${RELEASE_TAG}-ota.bin"
+          NOTE4_FULL_NAME="slate-zectrix-note4-${RELEASE_TAG}-full.bin"
+          NOTE4_OTA_NAME="slate-zectrix-note4-${RELEASE_TAG}-ota.bin"
+          NOTE4C_FULL_NAME="slate-zectrix-note4c-${RELEASE_TAG}-full.bin"
+          NOTE4C_OTA_NAME="slate-zectrix-note4c-${RELEASE_TAG}-ota.bin"
 
-          cp firmware/build/slate-full.bin "$RUNNER_TEMP/$FULL_NAME"
-          cp firmware/build/slate-ota.bin "$RUNNER_TEMP/$OTA_NAME"
+          cp firmware/build-note4/slate-note4-full.bin "$RUNNER_TEMP/$NOTE4_FULL_NAME"
+          cp firmware/build-note4/slate-note4-ota.bin "$RUNNER_TEMP/$NOTE4_OTA_NAME"
+          cp firmware/build-note4c/slate-note4c-full.bin "$RUNNER_TEMP/$NOTE4C_FULL_NAME"
+          cp firmware/build-note4c/slate-note4c-ota.bin "$RUNNER_TEMP/$NOTE4C_OTA_NAME"
 
           (
             cd "$RUNNER_TEMP"
-            sha256sum "$FULL_NAME" "$OTA_NAME" > "slate-zectrix-note4-${RELEASE_TAG}-sha256.txt"
+            sha256sum "$NOTE4_FULL_NAME" "$NOTE4_OTA_NAME" > "slate-zectrix-note4-${RELEASE_TAG}-sha256.txt"
+            sha256sum "$NOTE4C_FULL_NAME" "$NOTE4C_OTA_NAME" > "slate-zectrix-note4c-${RELEASE_TAG}-sha256.txt"
           )
 
-          echo "full_name=$FULL_NAME" >> "$GITHUB_OUTPUT"
-          echo "ota_name=$OTA_NAME" >> "$GITHUB_OUTPUT"
+          echo "note4_full_name=$NOTE4_FULL_NAME" >> "$GITHUB_OUTPUT"
+          echo "note4_ota_name=$NOTE4_OTA_NAME" >> "$GITHUB_OUTPUT"
+          echo "note4c_full_name=$NOTE4C_FULL_NAME" >> "$GITHUB_OUTPUT"
+          echo "note4c_ota_name=$NOTE4C_OTA_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v7
         with:
           name: slate-release-firmware
           path: |
-            ${{ runner.temp }}/${{ steps.package.outputs.full_name }}
-            ${{ runner.temp }}/${{ steps.package.outputs.ota_name }}
+            ${{ runner.temp }}/${{ steps.package.outputs.note4_full_name }}
+            ${{ runner.temp }}/${{ steps.package.outputs.note4_ota_name }}
+            ${{ runner.temp }}/${{ steps.package.outputs.note4c_full_name }}
+            ${{ runner.temp }}/${{ steps.package.outputs.note4c_ota_name }}
             ${{ runner.temp }}/slate-zectrix-note4-${{ needs.prepare.outputs.tag }}-sha256.txt
+            ${{ runner.temp }}/slate-zectrix-note4c-${{ needs.prepare.outputs.tag }}-sha256.txt
           if-no-files-found: error
 
   github-release:
@@ -303,9 +318,12 @@ jobs:
           set -euo pipefail
 
           ASSETS=(
-            "$FIRMWARE_DIR/${{ needs.firmware.outputs.full_name }}"
-            "$FIRMWARE_DIR/${{ needs.firmware.outputs.ota_name }}"
+            "$FIRMWARE_DIR/${{ needs.firmware.outputs.note4_full_name }}"
+            "$FIRMWARE_DIR/${{ needs.firmware.outputs.note4_ota_name }}"
+            "$FIRMWARE_DIR/${{ needs.firmware.outputs.note4c_full_name }}"
+            "$FIRMWARE_DIR/${{ needs.firmware.outputs.note4c_ota_name }}"
             "$FIRMWARE_DIR/slate-zectrix-note4-${RELEASE_TAG}-sha256.txt"
+            "$FIRMWARE_DIR/slate-zectrix-note4c-${RELEASE_TAG}-sha256.txt"
             "$DEPLOY_DIR/compose.yml"
             "$DEPLOY_DIR/slate.env.example"
           )
