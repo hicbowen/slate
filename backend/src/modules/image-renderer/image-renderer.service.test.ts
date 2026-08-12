@@ -9,6 +9,7 @@ import {
   FRAME_BYTES_GRAY4,
   FRAME_HEIGHT,
   FRAME_WIDTH,
+  resolveBwryRenderPreset,
 } from 'shared';
 import { ImageRendererService } from './image-renderer.service';
 import { ImageRenderCacheService } from './image-render-cache.service';
@@ -112,13 +113,48 @@ describe('ImageRendererService', () => {
       colors.add((byte >> 4) & 0x03);
       colors.add((byte >> 6) & 0x03);
     }
-    expect(colors).toEqual(new Set([0, 2]));
+    expect(colors.has(2)).toBe(true);
+    expect(colors.has(3)).toBe(false);
   });
 
   it('四色鲜明模式保留纯红色块', async () => {
     const input = await makePng(400, 300, { r: 185, g: 43, b: 39 });
     const { data } = await renderer.renderTo2bpp(input, { preset: 'vivid' });
     expect(data.every((byte) => byte === 0xff)).toBe(true);
+  });
+
+  it('四色鲜明模式保留纯黄色块', async () => {
+    const input = await makePng(400, 300, { r: 217, g: 165, b: 0 });
+    const { data } = await renderer.renderTo2bpp(input, { preset: 'vivid' });
+    expect(data.every((byte) => byte === 0xaa)).toBe(true);
+  });
+
+  it('四色照片把不支持的蓝色降级为黑白明暗，不凭空加入暖色', async () => {
+    const input = await makePng(400, 300, { r: 40, g: 110, b: 200 });
+    const { data } = await renderer.renderTo2bpp(input, { preset: 'photo' });
+    expect(data.every((byte) => (byte & 0xaa) === 0)).toBe(true);
+  });
+
+  it('四色自动模式能区分连续渐变照片与高边缘图文', () => {
+    const width = 120;
+    const height = 90;
+    const gradient = new Uint8Array(width * height * 3);
+    const graphic = new Uint8Array(width * height * 3);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const offset = (y * width + x) * 3;
+        const gray = Math.round((x / (width - 1)) * 255);
+        gradient[offset] = gray;
+        gradient[offset + 1] = gray;
+        gradient[offset + 2] = gray;
+        const block = ((x >> 3) + (y >> 3)) & 1 ? 255 : 0;
+        graphic[offset] = block;
+        graphic[offset + 1] = block;
+        graphic[offset + 2] = block;
+      }
+    }
+    expect(resolveBwryRenderPreset(gradient, width, height, 'auto')).toBe('photo');
+    expect(resolveBwryRenderPreset(graphic, width, height, 'auto')).toBe('graphic');
   });
 
   it('黑图(autoInvert 触发) 仍是白', async () => {

@@ -1,6 +1,6 @@
 // Note4C / SSD2683 的 2bpp 线序：00 黑、01 白、10 黄、11 红。
 
-import { resolveImageRenderPreset, type ImageRenderPreset } from './image-render-preset.js';
+import type { ImageRenderPreset } from './image-render-preset.js';
 
 export const BWRY_PALETTE = [
   [0, 0, 0],
@@ -73,7 +73,7 @@ export function ditherToBwry2bpp(
   return packBwryPixels(ditherToBwryPixels(rgb, width, height, options), width, height);
 }
 
-/** 使用照片风格、感知色距和受限误差扩散生成四色像素。 */
+/** 使用分离的彩墨层和明暗层生成四色像素。 */
 export function renderBwryPixels(
   rgb: Uint8Array | Uint8ClampedArray,
   width: number,
@@ -83,13 +83,38 @@ export function renderBwryPixels(
   if (rgb.length !== width * height * 3) {
     throw new Error(`rgb buffer size mismatch: ${rgb.length} vs ${width * height * 3}`);
   }
-  const gray = new Uint8Array(width * height);
-  for (let src = 0, dst = 0; src < rgb.length; src += 3, dst++) {
-    gray[dst] = (rgb[src]! * 54 + rgb[src + 1]! * 183 + rgb[src + 2]! * 19) >> 8;
+  const resolved = resolveBwryRenderPreset(rgb, width, height, preset);
+  return quantizeBwryLayers(rgb, width, height, resolved);
+}
+
+/** 四色图片额外使用彩色边缘统计，避免把连续色调插画一律误判成照片。 */
+export function resolveBwryRenderPreset(
+  rgb: Uint8Array | Uint8ClampedArray,
+  width: number,
+  height: number,
+  preset: ImageRenderPreset
+): Exclude<ImageRenderPreset, 'auto'> {
+  if (preset !== 'auto') return preset;
+  if (rgb.length !== width * height * 3 || width <= 1 || height <= 1) return 'photo';
+
+  const step = Math.max(1, Math.floor(Math.min(width, height) / 100));
+  let samples = 0;
+  let edges = 0;
+  let hardEdges = 0;
+  for (let y = 0; y + step < height; y += step) {
+    for (let x = 0; x + step < width; x += step) {
+      const pixel = y * width + x;
+      const dx = Math.abs(colorLuma(rgb, pixel) - colorLuma(rgb, pixel + step));
+      const dy = Math.abs(colorLuma(rgb, pixel) - colorLuma(rgb, pixel + step * width));
+      const delta = Math.max(dx, dy);
+      if (delta >= 36) edges++;
+      if (delta >= 64) hardEdges++;
+      samples++;
+    }
   }
-  const resolved = resolveImageRenderPreset(gray, width, height, preset);
-  if (resolved === 'graphic') return quantizeBwryGraphic(rgb, width, height);
-  return quantizeBwryPhoto(rgb, width, height, resolved === 'vivid');
+  const edgeRatio = edges / Math.max(1, samples);
+  const hardEdgeRatio = hardEdges / Math.max(1, samples);
+  return edgeRatio >= 0.12 || (edgeRatio >= 0.09 && hardEdgeRatio >= 0.06) ? 'graphic' : 'photo';
 }
 
 export function renderBwry2bpp(
@@ -159,195 +184,271 @@ function nearestBwry(r: number, g: number, b: number): BwryColor {
   return best;
 }
 
-const DEVICE_LINEAR = BWRY_DEVICE_PALETTE.map((color) => [
-  srgbToLinear(color[0]),
-  srgbToLinear(color[1]),
-  srgbToLinear(color[2]),
-]) as readonly (readonly [number, number, number])[];
+const DEVICE_OKLAB = BWRY_DEVICE_PALETTE.map((color) =>
+  linearRgbToOklab(srgbToLinear(color[0]), srgbToLinear(color[1]), srgbToLinear(color[2]))
+);
 
-const DEVICE_OKLAB = DEVICE_LINEAR.map((color) => linearRgbToOklab(color[0], color[1], color[2]));
+type ResolvedPreset = Exclude<ImageRenderPreset, 'auto'>;
 
-function quantizeBwryGraphic(
-  rgb: Uint8Array | Uint8ClampedArray,
-  width: number,
-  height: number
-): Uint8Array {
-  const out = new Uint8Array(width * height);
-  for (let src = 0, dst = 0; src < rgb.length; src += 3, dst++) {
-    const r = srgbToLinear(rgb[src]!);
-    const g = srgbToLinear(rgb[src + 1]!);
-    const b = srgbToLinear(rgb[src + 2]!);
-    out[dst] = nearestPerceptual(r, g, b, allowedColorInks(rgb, src, 'graphic'), false);
-  }
-  return out;
+interface LabPlanes {
+  l: Float32Array;
+  a: Float32Array;
+  b: Float32Array;
 }
 
-function quantizeBwryPhoto(
+interface InkWeights {
+  black: number;
+  white: number;
+  yellow: number;
+  red: number;
+}
+
+interface LayerConfig {
+  chromaFloor: number;
+  chromaFull: number;
+  colorBoost: number;
+  detail: number;
+  smoothDelta: number;
+}
+
+const LAYER_CONFIG: Record<ResolvedPreset, LayerConfig> = {
+  photo: {
+    chromaFloor: 0.04,
+    chromaFull: 0.155,
+    colorBoost: 0.9,
+    detail: 0.5,
+    smoothDelta: 0.055,
+  },
+  vivid: {
+    chromaFloor: 0.028,
+    chromaFull: 0.125,
+    colorBoost: 1.08,
+    detail: 0.8,
+    smoothDelta: 0.045,
+  },
+  graphic: {
+    chromaFloor: 0.018,
+    chromaFull: 0.13,
+    colorBoost: 1,
+    detail: 1,
+    smoothDelta: 0,
+  },
+};
+
+function quantizeBwryLayers(
   rgb: Uint8Array | Uint8ClampedArray,
   width: number,
   height: number,
-  vivid: boolean
+  preset: ResolvedPreset
 ): Uint8Array {
-  const work = new Float32Array(rgb.length);
-  for (let i = 0; i < rgb.length; i += 3) {
-    const source = vivid ? boostSaturation(rgb[i]!, rgb[i + 1]!, rgb[i + 2]!) : null;
-    work[i] = srgbToLinear(source ? source[0] : rgb[i]!);
-    work[i + 1] = srgbToLinear(source ? source[1] : rgb[i + 1]!);
-    work[i + 2] = srgbToLinear(source ? source[2] : rgb[i + 2]!);
-  }
+  const lab = createLabPlanes(rgb);
+  const filtered = preset === 'graphic' ? lab : smoothLabPlanes(lab, width, height, preset);
   const out = new Uint8Array(width * height);
   for (let y = 0; y < height; y++) {
-    const reverse = (y & 1) === 1;
-    const start = reverse ? width - 1 : 0;
-    const end = reverse ? -1 : width;
-    const step = reverse ? -1 : 1;
-    for (let x = start; x !== end; x += step) {
-      const pixel = y * width + x;
-      const offset = pixel * 3;
-      const r = clamp01(work[offset]!);
-      const g = clamp01(work[offset + 1]!);
-      const b = clamp01(work[offset + 2]!);
-      const colorInks = allowedColorInks(rgb, offset, vivid ? 'vivid' : 'photo');
-      const color = nearestPerceptual(r, g, b, colorInks, vivid);
-      out[pixel] = color;
-      const target = DEVICE_LINEAR[color]!;
-      const edgeScale = isColorEdge(rgb, width, height, x, y) ? 0.2 : 1;
-      let er: number;
-      let eg: number;
-      let eb: number;
-      if (colorInks === 0) {
-        // 中性色只传递亮度误差，避免上游彩色墨的 RGB 误差重新污染灰色邻域。
-        const error = clampError(linearLuma(r, g, b) - linearLuma(...target)) * edgeScale;
-        er = error;
-        eg = error;
-        eb = error;
-      } else {
-        er = clampError(r - target[0]) * edgeScale;
-        eg = clampError(g - target[1]) * edgeScale;
-        eb = clampError(b - target[2]) * edgeScale;
-      }
-      diffuseLinear(work, width, height, x + step, y, er, eg, eb, 7 / 16);
-      diffuseLinear(work, width, height, x - step, y + 1, er, eg, eb, 3 / 16);
-      diffuseLinear(work, width, height, x, y + 1, er, eg, eb, 5 / 16);
-      diffuseLinear(work, width, height, x + step, y + 1, er, eg, eb, 1 / 16);
+    for (let x = 0; x < width; x++) {
+      const index = y * width + x;
+      const config = LAYER_CONFIG[preset];
+      const detailL = filtered.l[index]! + (lab.l[index]! - filtered.l[index]!) * config.detail;
+      const weights = separateInkWeights(
+        toneLightness(detailL, preset),
+        filtered.a[index]!,
+        filtered.b[index]!,
+        preset
+      );
+      out[index] = pickInk(weights, x, y, preset);
     }
   }
   return out;
 }
 
-function nearestPerceptual(
-  r: number,
-  g: number,
-  b: number,
-  colorInks: number,
-  vivid: boolean
-): BwryColor {
-  const source = linearRgbToOklab(r, g, b);
-  let best: BwryColor = 0;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (let raw = 0; raw < DEVICE_OKLAB.length; raw++) {
-    const index = raw as BwryColor;
-    if (index === 2 && (colorInks & YELLOW_INK) === 0) continue;
-    if (index === 3 && (colorInks & RED_INK) === 0) continue;
-    const target = DEVICE_OKLAB[index]!;
-    const dL = source[0] - target[0];
-    const da = source[1] - target[1];
-    const db = source[2] - target[2];
-    const inkPenalty = index >= 2 ? (vivid ? 0.0005 : 0.004) : 0;
-    const distance = dL * dL * 1.2 + da * da + db * db + inkPenalty;
-    if (distance < bestDistance) {
-      best = index;
-      bestDistance = distance;
+function createLabPlanes(rgb: Uint8Array | Uint8ClampedArray): LabPlanes {
+  const pixels = rgb.length / 3;
+  const l = new Float32Array(pixels);
+  const a = new Float32Array(pixels);
+  const b = new Float32Array(pixels);
+  for (let src = 0, dst = 0; src < rgb.length; src += 3, dst++) {
+    const color = linearRgbToOklab(
+      srgbToLinear(rgb[src]!),
+      srgbToLinear(rgb[src + 1]!),
+      srgbToLinear(rgb[src + 2]!)
+    );
+    l[dst] = color[0];
+    a[dst] = color[1];
+    b[dst] = color[2];
+  }
+  return { l, a, b };
+}
+
+function smoothLabPlanes(
+  source: LabPlanes,
+  width: number,
+  height: number,
+  preset: ResolvedPreset
+): LabPlanes {
+  const l = new Float32Array(source.l.length);
+  const a = new Float32Array(source.a.length);
+  const b = new Float32Array(source.b.length);
+  const delta = LAYER_CONFIG[preset].smoothDelta;
+  const neighbors = [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+    [1, 1],
+  ] as const;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = y * width + x;
+      const centerL = source.l[index]!;
+      let sumL = centerL * 4;
+      let sumA = source.a[index]! * 4;
+      let sumB = source.b[index]! * 4;
+      let weight = 4;
+      for (const [dx, dy] of neighbors) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+        const neighbor = ny * width + nx;
+        if (Math.abs(source.l[neighbor]! - centerL) > delta) continue;
+        const neighborWeight = dx === 0 || dy === 0 ? 2 : 1;
+        sumL += source.l[neighbor]! * neighborWeight;
+        sumA += source.a[neighbor]! * neighborWeight;
+        sumB += source.b[neighbor]! * neighborWeight;
+        weight += neighborWeight;
+      }
+      l[index] = sumL / weight;
+      a[index] = sumA / weight;
+      b[index] = sumB / weight;
     }
   }
-  return best;
+  return { l, a, b };
 }
 
-const YELLOW_INK = 1;
-const RED_INK = 2;
-
-type ColorPreset = 'photo' | 'vivid' | 'graphic';
-
-/**
- * 彩墨先按原图的彩度和色相准入，再参与色距比较。
- *
- * 红黄墨的亮度恰好处于黑白之间；若只比较四色距离，暖灰会被黄色当作“中灰”承载。
- * 因此自然照片使用保守阈值，鲜明和图文模式再逐步放宽。高彩度橙色允许红黄混合，
- * 低彩度棕色只允许更接近的单一彩墨，避免红黄共同替代灰阶。
- */
-function allowedColorInks(
-  rgb: Uint8Array | Uint8ClampedArray,
-  offset: number,
-  preset: ColorPreset
-): number {
-  const lab = linearRgbToOklab(
-    srgbToLinear(rgb[offset]!),
-    srgbToLinear(rgb[offset + 1]!),
-    srgbToLinear(rgb[offset + 2]!)
-  );
-  const chroma = Math.hypot(lab[1], lab[2]);
-  const chromaFloor = preset === 'photo' ? 0.075 : preset === 'vivid' ? 0.052 : 0.045;
-  if (chroma < chromaFloor) return 0;
-
-  const hue = (Math.atan2(lab[2], lab[1]) * 180) / Math.PI;
-  if (hue >= -50 && hue < 43) return RED_INK;
-  if (hue > 72 && hue <= 122) return YELLOW_INK;
-  if (hue >= 43 && hue <= 72) {
-    const mixedInkFloor = preset === 'photo' ? 0.105 : 0.085;
-    return chroma >= mixedInkFloor ? RED_INK | YELLOW_INK : YELLOW_INK;
+/** 把彩墨覆盖率与剩余黑白明暗分开求解，彩墨不再被用作“中间灰”。 */
+function separateInkWeights(
+  targetL: number,
+  sourceA: number,
+  sourceB: number,
+  preset: ResolvedPreset
+): InkWeights {
+  const black = DEVICE_OKLAB[0]!;
+  const white = DEVICE_OKLAB[1]!;
+  const yellow = DEVICE_OKLAB[2]!;
+  const red = DEVICE_OKLAB[3]!;
+  const neutralMix = clamp01((targetL - black[0]) / (white[0] - black[0]));
+  const neutralA = black[1] + (white[1] - black[1]) * neutralMix;
+  const neutralB = black[2] + (white[2] - black[2]) * neutralMix;
+  const da = sourceA - neutralA;
+  const db = sourceB - neutralB;
+  const chroma = Math.hypot(da, db);
+  const config = LAYER_CONFIG[preset];
+  const chromaMix = smoothstep(config.chromaFloor, config.chromaFull, chroma);
+  const hue = (Math.atan2(db, da) * 180) / Math.PI;
+  const redAffinity = hueAffinity(hue, 25, 18, 45);
+  const yellowAffinity = hueAffinity(hue, 86, 20, 60);
+  const affinitySum = redAffinity + yellowAffinity;
+  let colorCoverage = chromaMix * Math.max(redAffinity, yellowAffinity) * config.colorBoost;
+  if (affinitySum <= 0 || colorCoverage <= 0) {
+    colorCoverage = 0;
   }
-  return 0;
+  colorCoverage = clamp01(colorCoverage);
+
+  const yellowRatio = affinitySum > 0 ? yellowAffinity / affinitySum : 0;
+  const redRatio = affinitySum > 0 ? redAffinity / affinitySum : 0;
+  const colorL = yellow[0] * yellowRatio + red[0] * redRatio;
+  if (colorCoverage > 0) {
+    const darkLimit = (targetL - black[0]) / Math.max(0.001, colorL - black[0]);
+    const lightLimit = (white[0] - targetL) / Math.max(0.001, white[0] - colorL);
+    const lumaLimited = Math.min(colorCoverage, clamp01(darkLimit), clamp01(lightLimit));
+    const graphicSolidity = preset === 'graphic' ? smoothstep(0.075, 0.145, chroma) : 0;
+    colorCoverage = lumaLimited + (colorCoverage - lumaLimited) * graphicSolidity;
+  }
+
+  const yellowWeight = colorCoverage * yellowRatio;
+  const redWeight = colorCoverage * redRatio;
+  const neutralWeight = 1 - colorCoverage;
+  const whiteWeight = clampRange(
+    (targetL - yellowWeight * yellow[0] - redWeight * red[0] - neutralWeight * black[0]) /
+      (white[0] - black[0]),
+    0,
+    neutralWeight
+  );
+  return {
+    black: neutralWeight - whiteWeight,
+    white: whiteWeight,
+    yellow: yellowWeight,
+    red: redWeight,
+  };
 }
 
-function diffuseLinear(
-  work: Float32Array,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-  er: number,
-  eg: number,
-  eb: number,
-  weight: number
-): void {
-  if (x < 0 || x >= width || y < 0 || y >= height) return;
-  const offset = (y * width + x) * 3;
-  work[offset] = clamp01(work[offset]! + er * weight);
-  work[offset + 1] = clamp01(work[offset + 1]! + eg * weight);
-  work[offset + 2] = clamp01(work[offset + 2]! + eb * weight);
+function pickInk(weights: InkWeights, x: number, y: number, preset: ResolvedPreset): BwryColor {
+  const colorCoverage = weights.yellow + weights.red;
+  const colorThreshold = ditherThreshold(x, y, 0, preset);
+  if (colorThreshold < colorCoverage) {
+    const redRatio = colorCoverage > 0 ? weights.red / colorCoverage : 0;
+    return ditherThreshold(x, y, 1, preset) < redRatio ? 3 : 2;
+  }
+  const neutralCoverage = weights.black + weights.white;
+  const blackRatio = neutralCoverage > 0 ? weights.black / neutralCoverage : 0;
+  return ditherThreshold(x, y, 2, preset) < blackRatio ? 0 : 1;
 }
 
-function linearLuma(r: number, g: number, b: number): number {
-  return r * 0.2126 + g * 0.7152 + b * 0.0722;
+const BAYER_8 = new Uint8Array([
+  0, 48, 12, 60, 3, 51, 15, 63, 32, 16, 44, 28, 35, 19, 47, 31, 8, 56, 4, 52, 11, 59, 7, 55, 40, 24,
+  36, 20, 43, 27, 39, 23, 2, 50, 14, 62, 1, 49, 13, 61, 34, 18, 46, 30, 33, 17, 45, 29, 10, 58, 6,
+  54, 9, 57, 5, 53, 42, 26, 38, 22, 41, 25, 37, 21,
+]);
+
+function ditherThreshold(x: number, y: number, seed: number, preset: ResolvedPreset): number {
+  if (preset === 'graphic') {
+    const sx = (x + seed * 3) & 7;
+    const sy = (y + seed * 5) & 7;
+    return (BAYER_8[sy * 8 + sx]! + 0.5) / 64;
+  }
+  const inner = fractional(0.06711056 * (x + seed * 17) + 0.00583715 * (y + seed * 29));
+  return fractional(52.9829189 * inner);
 }
 
-function isColorEdge(
-  rgb: Uint8Array | Uint8ClampedArray,
-  width: number,
-  height: number,
-  x: number,
-  y: number
-): boolean {
-  const center = colorLuma(rgb, y * width + x);
-  const left = colorLuma(rgb, y * width + Math.max(0, x - 1));
-  const right = colorLuma(rgb, y * width + Math.min(width - 1, x + 1));
-  const up = colorLuma(rgb, Math.max(0, y - 1) * width + x);
-  const down = colorLuma(rgb, Math.min(height - 1, y + 1) * width + x);
-  return Math.max(Math.abs(left - right), Math.abs(up - down), Math.abs(center - left)) >= 48;
+function toneLightness(value: number, preset: ResolvedPreset): number {
+  const l = clamp01(value);
+  if (preset === 'photo') {
+    const position = clamp01((l - 0.12) / 0.88);
+    return clamp01(l + Math.sin(Math.PI * position) * 0.065);
+  }
+  return l;
+}
+
+function hueAffinity(hue: number, center: number, core: number, limit: number): number {
+  const distance = angularDistance(hue, center);
+  if (distance <= core) return 1;
+  if (distance >= limit) return 0;
+  return 1 - smoothstep(core, limit, distance);
+}
+
+function angularDistance(a: number, b: number): number {
+  const distance = Math.abs(a - b) % 360;
+  return Math.min(distance, 360 - distance);
+}
+
+function smoothstep(low: number, high: number, value: number): number {
+  const t = clamp01((value - low) / Math.max(0.0001, high - low));
+  return t * t * (3 - 2 * t);
+}
+
+function fractional(value: number): number {
+  return value - Math.floor(value);
+}
+
+function clampRange(value: number, low: number, high: number): number {
+  return Math.max(low, Math.min(high, value));
 }
 
 function colorLuma(rgb: Uint8Array | Uint8ClampedArray, pixel: number): number {
   const offset = pixel * 3;
   return (rgb[offset]! * 54 + rgb[offset + 1]! * 183 + rgb[offset + 2]! * 19) >> 8;
-}
-
-function boostSaturation(r: number, g: number, b: number): [number, number, number] {
-  const luma = (r * 54 + g * 183 + b * 19) / 256;
-  return [
-    clamp255(luma + (r - luma) * 1.15),
-    clamp255(luma + (g - luma) * 1.15),
-    clamp255(luma + (b - luma) * 1.15),
-  ];
 }
 
 function srgbToLinear(value: number): number {
@@ -366,16 +467,8 @@ function linearRgbToOklab(r: number, g: number, b: number): readonly [number, nu
   ];
 }
 
-function clampError(value: number): number {
-  return Math.max(-0.35, Math.min(0.35, value));
-}
-
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
-}
-
-function clamp255(value: number): number {
-  return Math.max(0, Math.min(255, Math.round(value)));
 }
 
 function diffuse(

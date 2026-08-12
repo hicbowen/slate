@@ -371,7 +371,7 @@ device secret 必须是 64 字符 hex bearer token；JWT 与 device secret 不�
 2. resize 到 400 x 300，默认 `contain` letterbox。
 3. 保存规范化彩色 PNG，供以后无损切换优化风格。
 4. 按 `render_preset` 执行固定的自动对比度、反相与照片色调策略。
-5. mono1 映射到适合风格的二值抖动；gray4 针对实机非线性灰阶做相邻级混合；bwry2 使用 OKLab 感知色距、受限误差扩散和中性色保护。
+5. mono1 映射到适合风格的二值抖动；gray4 针对实机非线性灰阶做相邻级混合；bwry2 在 OKLab 中分离红黄彩墨与黑白明暗，照片经过保边平滑后使用细噪声，图文使用稳定网屏。
 
 mono1 为 MSB-first，bit=1 白/0 黑；gray4 每字节 2 像素且高 nibble 在前，0 黑/15 白；bwry2 每字节 4 像素，00 黑/01 白/10 黄/11 红。`display_mode` 只选择 Note4 静态图片的实际下发格式，不改变 Note4C rendition。渲染缓存键包含算法版本与风格，算法升级不会复用旧结果。
 
