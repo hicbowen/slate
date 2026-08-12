@@ -53,6 +53,18 @@ const contexts: DynamicRenderContext[] = [
     renderedAt,
   },
   {
+    type: 'countdown',
+    frameName: '期末考试周',
+    config: {
+      type: 'countdown',
+      tz,
+      goal: '期末考试周',
+      target_date: '2026-06-18',
+    },
+    data: { remainingDays: 32 },
+    renderedAt,
+  },
+  {
     type: 'weather',
     frameName: '天气',
     config: {

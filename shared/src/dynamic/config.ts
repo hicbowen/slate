@@ -11,6 +11,7 @@ import {
 export const DynamicType = z.enum([
   'daily_calendar',
   'month_calendar',
+  'countdown',
   'weather',
   'history_today',
   'weather_alert',
@@ -61,6 +62,28 @@ export const MonthCalendarConfig = z
   .merge(DynamicAudioOptions)
   .merge(DynamicRefreshOptions);
 export type MonthCalendarConfigT = z.infer<typeof MonthCalendarConfig>;
+
+const DateOnly = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, '请选择有效日期')
+  .refine((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    if (!year || year < 1970 || year > 9999 || !month || !day) return false;
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() + 1 === month &&
+      parsed.getUTCDate() === day
+    );
+  }, '请选择有效日期');
+
+export const CountdownConfig = z.object({
+  type: z.literal('countdown'),
+  tz: Tz,
+  goal: z.string().trim().min(1, '请填写目标').max(32, '目标最多 32 个字符'),
+  target_date: DateOnly,
+});
+export type CountdownConfigT = z.infer<typeof CountdownConfig>;
 
 export const WeatherConfig = z
   .object({
@@ -196,6 +219,7 @@ export type FontTestConfigT = z.infer<typeof FontTestConfig>;
 export const DynamicConfig = z.discriminatedUnion('type', [
   DailyCalendarConfig,
   MonthCalendarConfig,
+  CountdownConfig,
   WeatherConfig,
   HistoryTodayConfig,
   WeatherAlertConfig,

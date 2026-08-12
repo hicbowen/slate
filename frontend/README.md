@@ -105,6 +105,7 @@ frontend/src/
 
 - 日历：`daily_calendar`
 - 月历：`month_calendar`
+- 倒数日：`countdown`
 - 天气：`weather`
 - 历史上的今天：`history_today`
 - 气象预警：`weather_alert`
@@ -121,6 +122,8 @@ POST /api/v1/contents/:contentId/preview
 ```
 
 请求使用 `?format=mono1|bwry2`，响应是对应的 400 x 300 packed binary，前端通过 `DynamicFramePreview` 解码成 canvas 预览。
+
+倒数日配置包含目标名称、`YYYY-MM-DD` 目标日期和浏览器 IANA 时区。服务端按目标时区的自然日计算剩余天数，到期后保持为 0；Note4 使用纯黑白布局，Note4C 使用黄色边框和红色核心数字。
 
 ### Dashboard 推送
 

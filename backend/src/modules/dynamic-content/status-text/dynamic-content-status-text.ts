@@ -2,6 +2,7 @@ import type { ContentKind, Prisma } from '@prisma/client';
 import {
   DASHBOARD_SYSTEM_TEMPLATES,
   DashboardConfig,
+  CountdownConfig,
   FONT_TEST_FONTS,
   HotListConfig,
   hotListSourceShortLabel,
@@ -31,6 +32,8 @@ export function deviceStatusBarText(row: ContentStatusBarSource): string {
     case 'month_calendar':
       if (!row.renderedAt) return row.frameName ?? '';
       return monthCalendarStatusBarText(row.dynamicConfig, row.renderedAt);
+    case 'countdown':
+      return countdownStatusBarText(row.dynamicConfig);
     case 'history_today':
       if (!row.renderedAt) return row.frameName ?? '';
       return historyTodayStatusBarText(row.dynamicData, row.dynamicConfig, row.renderedAt);
@@ -60,6 +63,8 @@ export function defaultDynamicFrameName(
       return '日历';
     case 'month_calendar':
       return '月历';
+    case 'countdown':
+      return countdownStatusBarText(config);
     case 'history_today':
       return '历史上的今天';
     case 'weather_alert':
@@ -77,6 +82,11 @@ export function defaultDynamicFrameName(
     default:
       return null;
   }
+}
+
+function countdownStatusBarText(config: unknown): string {
+  const parsed = CountdownConfig.safeParse(config);
+  return parsed.success ? parsed.data.goal : '倒数日';
 }
 
 function dailyCalendarStatusBarText(

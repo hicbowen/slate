@@ -8,6 +8,7 @@ import { DynamicAudioModule } from './audio/dynamic-audio.module';
 import { DynamicContentRegistry } from './dynamic-content-registry';
 import { DailyCalendarProvider } from './providers/daily-calendar.provider';
 import { MonthCalendarProvider } from './providers/month-calendar.provider';
+import { CountdownProvider } from './providers/countdown.provider';
 import { WeatherProvider } from './providers/weather.provider';
 import { QweatherConfig } from './providers/qweather.config';
 import { HistoryTodayProvider } from './providers/history-today.provider';
@@ -51,6 +52,7 @@ import { DynamicPreviewController } from './dynamic-preview.controller';
     QweatherConfig,
     DailyCalendarProvider,
     MonthCalendarProvider,
+    CountdownProvider,
     WeatherProvider,
     HistoryTodayProvider,
     WeatherAlertProvider,

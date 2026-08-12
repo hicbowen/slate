@@ -7,6 +7,7 @@ import {
   renderMonthCalendarFrame,
 } from './calendar-frame-renderer';
 import { renderDashboardFrame } from './dashboard-frame-renderer';
+import { renderCountdownFrame } from './countdown-frame-renderer';
 import type { DynamicRenderContext } from './dynamic-render-context';
 import { renderEarthquakeReportFrame } from './earthquake-frame-renderer';
 import { FrameDrawKit } from './frame-draw-kit';
@@ -48,6 +49,9 @@ export class DynamicFrameRendererService {
         break;
       case 'month_calendar':
         renderMonthCalendarFrame(c, fonts, ctx, this.drawKit);
+        break;
+      case 'countdown':
+        renderCountdownFrame(c, fonts, ctx, this.drawKit);
         break;
       case 'weather':
         await renderWeatherFrame(c, fonts, ctx, this.drawKit);

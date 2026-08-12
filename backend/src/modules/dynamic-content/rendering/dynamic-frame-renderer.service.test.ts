@@ -132,6 +132,18 @@ describe('DynamicFrameRendererService', () => {
         renderedAt,
       },
       {
+        type: 'countdown',
+        frameName: '期末考试周',
+        config: {
+          type: 'countdown',
+          tz: 'Asia/Shanghai',
+          goal: '期末考试周',
+          target_date: '2026-06-18',
+        },
+        data: { remainingDays: 32 },
+        renderedAt,
+      },
+      {
         type: 'weather',
         frameName: '天气',
         config: { location_label: '北京' },
@@ -301,6 +313,27 @@ describe('DynamicFrameRendererService', () => {
       expect(stats.black).toBeGreaterThan(120);
       expect(stats.white).toBeGreaterThan(120);
     }
+  });
+
+  it('为 Note4C 倒数日使用黄色边框和红色剩余天数', async () => {
+    const renditions = await renderer.renderRenditions({
+      type: 'countdown',
+      frameName: '期末考试周',
+      config: {
+        type: 'countdown',
+        tz: 'Asia/Shanghai',
+        goal: '期末考试周',
+        target_date: '2026-06-18',
+      },
+      data: { remainingDays: 32 },
+      renderedAt,
+    });
+
+    expect(renditions.mono1.byteLength).toBe(FRAME_BYTES);
+    expect(renditions.bwry2.byteLength).toBe(FRAME_BYTES_BWRY2);
+    const colors = countBwryPixels(renditions.bwry2);
+    expect(colors.red).toBeGreaterThan(100);
+    expect(colors.yellow).toBeGreaterThan(20);
   });
 
   it('renders every font-test catalog entry', async () => {

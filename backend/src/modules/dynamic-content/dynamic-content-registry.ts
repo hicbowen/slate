@@ -4,6 +4,7 @@ import type { DynamicContentEntry } from './dynamic-content.types';
 import type { Block, DynamicContentDefinition } from './layout-engine/types';
 import { DailyCalendarProvider } from './providers/daily-calendar.provider';
 import { MonthCalendarProvider } from './providers/month-calendar.provider';
+import { CountdownProvider } from './providers/countdown.provider';
 import { WeatherProvider } from './providers/weather.provider';
 import { HistoryTodayProvider } from './providers/history-today.provider';
 import { WeatherAlertProvider } from './providers/weather-alert.provider';
@@ -13,6 +14,7 @@ import { FontTestProvider } from './providers/font-test.provider';
 import { HotListProvider } from '../hot-list/hot-list.provider';
 import dailyCalendarDefinition from './definitions/daily-calendar.json' with { type: 'json' };
 import monthCalendarDefinition from './definitions/month-calendar.json' with { type: 'json' };
+import countdownDefinition from './definitions/countdown.json' with { type: 'json' };
 import weatherDefinition from './definitions/weather.json' with { type: 'json' };
 import historyTodayDefinition from './definitions/history-today.json' with { type: 'json' };
 import weatherAlertDefinition from './definitions/weather-alert.json' with { type: 'json' };
@@ -35,6 +37,7 @@ export class DynamicContentRegistry implements OnModuleInit {
   constructor(
     private readonly dailyCalendarProvider: DailyCalendarProvider,
     private readonly monthCalendarProvider: MonthCalendarProvider,
+    private readonly countdownProvider: CountdownProvider,
     private readonly weatherProvider: WeatherProvider,
     private readonly historyTodayProvider: HistoryTodayProvider,
     private readonly weatherAlertProvider: WeatherAlertProvider,
@@ -52,6 +55,7 @@ export class DynamicContentRegistry implements OnModuleInit {
   private registerAll(): void {
     this.register(normalizeDefinition(dailyCalendarDefinition), this.dailyCalendarProvider);
     this.register(normalizeDefinition(monthCalendarDefinition), this.monthCalendarProvider);
+    this.register(normalizeDefinition(countdownDefinition), this.countdownProvider);
     this.register(normalizeDefinition(weatherDefinition), this.weatherProvider);
     this.register(normalizeDefinition(historyTodayDefinition), this.historyTodayProvider);
     this.register(normalizeDefinition(weatherAlertDefinition), this.weatherAlertProvider);

@@ -379,6 +379,7 @@ mono1 为 MSB-first，bit=1 白/0 黑；gray4 每字节 2 像素且高 nibble �
 
 - `daily_calendar`
 - `month_calendar`
+- `countdown`
 - `weather`
 - `history_today`
 - `weather_alert`
@@ -395,6 +396,7 @@ mono1 为 MSB-first，bit=1 白/0 黑；gray4 每字节 2 像素且高 nibble �
 - `dynamic_next_run_at` 是下次内容应更新的目标时间。
 - `dynamic_refresh_due_at` 是 worker 提前刷新时间，通常会预留 lead time。
 - manifest 下发 `next_wake_sec`，固件据此配置 RTC timer。
+- `daily_calendar`、`month_calendar`、`history_today` 和 `countdown` 按配置时区的本地零点调度；倒数日到期后保持为 0，不产生小时级刷新。
 
 ### 音频与 TTS
 

@@ -149,6 +149,7 @@ export type PollRequestT = z.infer<typeof PollRequest>;
 [
   'daily_calendar',
   'month_calendar',
+  'countdown',
   'weather',
   'history_today',
   'weather_alert',
@@ -160,6 +161,8 @@ export type PollRequestT = z.infer<typeof PollRequest>;
 ```
 
 `DynamicConfig` 是 discriminated union，各类型的 `type` 字段作为 discriminator。
+
+`CountdownConfig` 使用 `goal`、`target_date`（`YYYY-MM-DD`）与 `tz` 描述倒数目标。目标日期允许在保存后自然过期，服务端将剩余天数钳制为 0。
 
 公共选项：
 

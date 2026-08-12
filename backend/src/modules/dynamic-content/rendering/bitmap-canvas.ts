@@ -168,6 +168,43 @@ export class BitmapCanvas {
     return penX - x;
   }
 
+  drawTextScaled(
+    font: BitmapFont,
+    text: string,
+    x: number,
+    baselineY: number,
+    scale: number,
+    color: number = PIXEL_BLACK
+  ): number {
+    const pixelScale = Math.max(1, Math.floor(scale));
+    let penX = x;
+    for (const ch of text) {
+      const glyph = font.glyphs.get(ch.codePointAt(0)!);
+      if (!glyph) continue;
+      const startX = penX + glyph.ofs_x * pixelScale;
+      const startY = baselineY - (glyph.ofs_y + glyph.box_h) * pixelScale;
+      let bit = glyph.bitmap_index * 8;
+      for (let yy = 0; yy < glyph.box_h; yy++) {
+        for (let xx = 0; xx < glyph.box_w; xx++) {
+          const byte = font.bitmap[bit >> 3] ?? 0;
+          const on = (byte & (0x80 >> (bit & 7))) !== 0;
+          if (on) {
+            this.fillRect(
+              startX + xx * pixelScale,
+              startY + yy * pixelScale,
+              pixelScale,
+              pixelScale,
+              color
+            );
+          }
+          bit++;
+        }
+      }
+      penX += Math.round(glyph.adv_w / 16) * pixelScale;
+    }
+    return penX - x;
+  }
+
   drawMask(mask: BitmapMask, x: number, y: number, color: number = PIXEL_BLACK): void {
     for (let yy = 0; yy < mask.height; yy++) {
       for (let xx = 0; xx < mask.width; xx++) {

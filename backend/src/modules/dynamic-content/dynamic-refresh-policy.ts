@@ -86,6 +86,7 @@ function computeRefreshDueAt(dynamicType: string, nextRunAt: Date | null, now: D
 const DYNAMIC_SCHEDULE_POLICIES: Record<string, DynamicSchedulePolicy> = {
   daily_calendar: 'calendar',
   month_calendar: 'calendar',
+  countdown: 'calendar',
   history_today: 'calendar',
   weather: 'refresh_interval',
   hot_list: 'refresh_interval',

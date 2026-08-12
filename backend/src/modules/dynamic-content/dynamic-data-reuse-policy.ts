@@ -64,6 +64,7 @@ const DEFAULT_DYNAMIC_DATA_REUSE_POLICY: DynamicDataReusePolicyConfig = {
 const DYNAMIC_DATA_REUSE_POLICIES: Record<string, DynamicDataReusePolicyConfig> = {
   daily_calendar: { reuse: 'never', reuseCapSec: 1_800 },
   month_calendar: { reuse: 'never', reuseCapSec: 1_800 },
+  countdown: { reuse: 'never', reuseCapSec: 1_800 },
   history_today: { reuse: 'same_history_today', reuseCapSec: 1_800 },
   weather: { reuse: 'timestamp', reuseCapSec: 43_200 },
   hot_list: { reuse: 'timestamp', reuseCapSec: 3_600 },

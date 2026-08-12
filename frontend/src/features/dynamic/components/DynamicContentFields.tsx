@@ -3,6 +3,7 @@ import { ErrorBoundary } from '@/components/feedback/ErrorBoundary';
 import { FormSection } from '@/components/ui/FormSection';
 import { Input } from '@/components/ui/Input';
 import { DashboardConfigPanel } from '@/features/dynamic/components/config/DashboardConfig';
+import { CountdownConfigPanel } from '@/features/dynamic/components/config/CountdownConfig';
 import { DynamicAudioSection } from './config/DynamicAudioSection';
 import { DynamicRefreshSettings } from './config/RefreshSettings';
 import { FontTestConfigPanel } from './config/FontTestConfig';
@@ -100,6 +101,8 @@ function DynamicConfigFields({
     case 'daily_calendar':
     case 'month_calendar':
       return null;
+    case 'countdown':
+      return <CountdownConfigPanel config={config} onChange={onChange} />;
     case 'weather':
       return <WeatherConfigPanel config={config} onChange={onChange} />;
     case 'history_today':

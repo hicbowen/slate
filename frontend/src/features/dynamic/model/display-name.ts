@@ -15,6 +15,8 @@ export function defaultDynamicFrameName(type: DynamicTypeT, config: DynamicConfi
       return '日历';
     case 'month_calendar':
       return '月历';
+    case 'countdown':
+      return config.type === 'countdown' ? config.goal : '倒数日';
     case 'weather':
       return config.type === 'weather' && config.location_label
         ? `${config.location_label}天气`
@@ -67,6 +69,9 @@ export function frameNameForSyncedDynamicConfigChange(
   ) {
     return defaultDynamicFrameName(next.type, next);
   }
+  if (next.type === 'countdown' && previous.type === 'countdown' && next.goal !== previous.goal) {
+    return defaultDynamicFrameName(next.type, next);
+  }
   if (
     next.type === 'weather_alert' &&
     previous.type === 'weather_alert' &&
@@ -89,6 +94,8 @@ export function dynamicStatusTitle(config: DynamicConfigT | null | undefined): s
       const date = zonedDateParts(new Date(), config.tz);
       return `${date.year}年${date.month}月`;
     }
+    case 'countdown':
+      return config.goal;
     case 'weather':
       return config.location_label ? `${config.location_label}天气` : '天气';
     case 'history_today': {

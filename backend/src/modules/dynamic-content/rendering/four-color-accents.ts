@@ -5,6 +5,7 @@ import type { DynamicRenderContext } from './dynamic-render-context';
 import { CONTENT_SAFE_BOTTOM, CONTENT_SAFE_TOP, STATUS_BAR_H } from './frame-renderer-layout';
 import { dateParts, weekdayFor } from './helpers/frame-date-utils';
 import { isRecord } from './helpers/frame-value-utils';
+import { COUNTDOWN_FRAME } from './countdown-frame-renderer';
 
 /**
  * 只在 bwry2 副本上叠加语义色。调用前 mono1 已经导出，因此这里可以安全地
@@ -17,6 +18,9 @@ export function applyFourColorAccents(c: BitmapCanvas, ctx: DynamicRenderContext
       break;
     case 'month_calendar':
       applyMonthCalendar(c, ctx);
+      break;
+    case 'countdown':
+      applyCountdown(c);
       break;
     case 'weather':
       applyWeather(c);
@@ -34,6 +38,31 @@ export function applyFourColorAccents(c: BitmapCanvas, ctx: DynamicRenderContext
       applyHotList(c, ctx);
       break;
   }
+}
+
+function applyCountdown(c: BitmapCanvas): void {
+  c.replaceColorInRect(
+    COUNTDOWN_FRAME.headerDateX,
+    COUNTDOWN_FRAME.headerY,
+    COUNTDOWN_FRAME.headerW,
+    COUNTDOWN_FRAME.headerH,
+    PIXEL_BLACK,
+    PIXEL_YELLOW
+  );
+  c.drawHLine(
+    COUNTDOWN_FRAME.titleRuleX,
+    COUNTDOWN_FRAME.titleRuleY,
+    COUNTDOWN_FRAME.titleRuleW,
+    PIXEL_YELLOW
+  );
+  c.replaceColorInRect(
+    48,
+    COUNTDOWN_FRAME.numberTop,
+    FRAME_WIDTH - 96,
+    COUNTDOWN_FRAME.numberHeight,
+    PIXEL_BLACK,
+    PIXEL_RED
+  );
 }
 
 function applyDailyCalendar(c: BitmapCanvas): void {

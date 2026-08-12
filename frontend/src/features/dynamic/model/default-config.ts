@@ -4,6 +4,7 @@ import {
   type DynamicConfigT,
   type DynamicTypeT,
 } from 'shared';
+import { zonedDateParts } from '@/features/dynamic/lib/date';
 
 const LOCAL_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
@@ -22,6 +23,13 @@ export function defaultConfig(type: DynamicTypeT): DynamicConfigT {
         tz: LOCAL_TIME_ZONE,
         audio_enabled: false,
         audio_voice: DEFAULT_TTS_VOICE,
+      };
+    case 'countdown':
+      return {
+        type: 'countdown',
+        tz: LOCAL_TIME_ZONE,
+        goal: '重要的日子',
+        target_date: defaultTargetDate(LOCAL_TIME_ZONE),
       };
     case 'weather':
       return {
@@ -76,4 +84,14 @@ export function defaultConfig(type: DynamicTypeT): DynamicConfigT {
         refresh_interval_sec: 600,
       };
   }
+}
+
+function defaultTargetDate(timeZone: string): string {
+  const today = zonedDateParts(new Date(), timeZone);
+  const target = new Date(Date.UTC(today.year, today.month - 1, today.day + 30));
+  return [
+    target.getUTCFullYear(),
+    String(target.getUTCMonth() + 1).padStart(2, '0'),
+    String(target.getUTCDate()).padStart(2, '0'),
+  ].join('-');
 }
