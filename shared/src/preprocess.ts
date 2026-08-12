@@ -5,7 +5,9 @@
 //   2. rgbaToGray  — Rec.709 系数,和 sharp .grayscale() 同步
 //   3. autoInvert  — 四角自适应反相,黑底图整体翻成白底
 //   4. autoContrast — PIL.ImageOps.autocontrast 等价,拉满对比度
-//   5. ditherTo* — 见 dither.ts
+//   5. ditherTo* — 见 dither.ts / gray4.ts / bwry.ts
+
+import { resolveImageRenderPreset, type ImageRenderPreset } from './image-render-preset.js';
 
 /**
  * RGBA → 8-bit 灰度。
@@ -96,6 +98,35 @@ export function autoContrast(gray: Uint8Array, cutoffPct: number): Uint8Array {
     if (v <= lo) out[i] = 0;
     else if (v >= hi) out[i] = 255;
     else out[i] = Math.round((v - lo) * scale);
+  }
+  return out;
+}
+
+/** 按用户可理解的图片风格完成固定预处理，避免在 UI 暴露一组技术参数。 */
+export function preprocessGrayForPreset(
+  gray: Uint8Array,
+  width: number,
+  height: number,
+  preset: ImageRenderPreset
+): { gray: Uint8Array; resolvedPreset: Exclude<ImageRenderPreset, 'auto'> } {
+  const resolvedPreset = resolveImageRenderPreset(gray, width, height, preset);
+  let next = gray;
+  if (resolvedPreset === 'graphic') {
+    next = autoInvert(next, width, height);
+    next = autoContrast(next, 1);
+  } else if (resolvedPreset === 'vivid') {
+    next = autoContrast(next, 0.5);
+    next = adjustContrast(next, 1.1);
+  } else {
+    next = autoContrast(next, 0.25);
+  }
+  return { gray: next, resolvedPreset };
+}
+
+function adjustContrast(gray: Uint8Array, factor: number): Uint8Array {
+  const out = new Uint8Array(gray.length);
+  for (let i = 0; i < gray.length; i++) {
+    out[i] = Math.max(0, Math.min(255, Math.round(128 + (gray[i]! - 128) * factor)));
   }
   return out;
 }

@@ -4,13 +4,16 @@
 //   PreviewCanvas   — 1bpp 预览 + 拖拽/缩放交互
 //   ImageDropzone   — 选图(可选)
 //   AudioDropzone   — 选音频 + 删除已有音频
-//   DitherControls  — 缩放 / 抖动算法 / 阈值
+//   ImageRenderPresetControls — 缩放 / 图片优化风格
 
 import type { FormEvent } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
 import type { ContentDetailT } from 'shared';
 import { useGenerateContentTts } from '@/features/contents/query/content-audio-queries';
-import { useContentImage } from '@/features/contents/query/content-image-queries';
+import {
+  useContentImage,
+  useContentImageSource,
+} from '@/features/contents/query/content-image-queries';
 import { useUpdateImageContent } from '@/features/contents/query/content-mutation-queries';
 import { useToast } from '@/components/feedback/toast-context';
 import { FormActions } from '@/components/ui/FormActions';
@@ -39,6 +42,7 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
     !form.image.file ? rendition.etag : null,
     form.preview.format
   );
+  const existingSource = useContentImageSource(content.id, content.source_available);
   const canSubmit = form.canEdit;
 
   async function submitContent() {
@@ -87,7 +91,10 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
             form={form}
             isEdit
             existingImage={existingImg.data}
-            existingImagePending={existingImg.isPending && !form.image.file}
+            existingSource={!form.image.file ? existingSource.data : undefined}
+            existingImagePending={
+              (existingImg.isPending || existingSource.isPending) && !form.image.file
+            }
             hasExistingAudio={!!content.audio_etag}
             editingContentId={content.id}
             audioStatus={content.audio_status}

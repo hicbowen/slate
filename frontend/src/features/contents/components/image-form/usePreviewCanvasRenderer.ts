@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
-import type { DitherMode, FrameFormatT } from 'shared';
+import type { FrameFormatT, ImageRenderPreset } from 'shared';
 import { clearCanvas, decodeFrameImage, isValidFrameLength } from '@/lib/eink/bpp';
 import { drawImagePreview } from '@/lib/eink/image-preview';
 import { useCanvasPan } from './useCanvasPan';
@@ -12,9 +12,9 @@ interface CanvasOffset {
 
 export function usePreviewCanvasRenderer({
   imageFile,
+  existingSource,
   existingImage,
-  threshold,
-  mode,
+  renderPreset,
   format,
   scale,
   offset,
@@ -22,16 +22,17 @@ export function usePreviewCanvasRenderer({
   canvasRef,
 }: {
   imageFile: File | null;
+  existingSource?: Blob;
   existingImage: ArrayBuffer | undefined;
-  threshold: number;
-  mode: DitherMode;
+  renderPreset: ImageRenderPreset;
   format: FrameFormatT;
   scale: number;
   offset: CanvasOffset;
   onOffsetChange: (offset: CanvasOffset) => void;
   canvasRef: RefObject<HTMLCanvasElement | null>;
 }) {
-  const loadedImage = useLoadedImage(imageFile);
+  const previewSource = imageFile ?? existingSource ?? null;
+  const loadedImage = useLoadedImage(previewSource);
   const drawFrameRef = useRef<number | null>(null);
   const currentOffsetRef = useRef(offset);
 
@@ -45,7 +46,7 @@ export function usePreviewCanvasRenderer({
 
   const drawLoadedImage = useCallback(
     (dither: boolean) => {
-      if (!imageFile || loadedImage?.file !== imageFile) return false;
+      if (!previewSource || loadedImage?.source !== previewSource) return false;
       const canvas = canvasRef.current;
       if (!canvas) return false;
       const ctx = canvas.getContext('2d');
@@ -53,14 +54,13 @@ export function usePreviewCanvasRenderer({
       drawImagePreview(ctx, canvas, loadedImage.image, {
         scale,
         offset: currentOffsetRef.current,
-        threshold,
-        mode,
+        renderPreset,
         format,
         dither,
       });
       return true;
     },
-    [canvasRef, format, imageFile, loadedImage, mode, scale, threshold]
+    [canvasRef, format, loadedImage, previewSource, renderPreset, scale]
   );
 
   const scheduleImageDraw = useCallback(
@@ -75,7 +75,7 @@ export function usePreviewCanvasRenderer({
   );
 
   const pan = useCanvasPan({
-    enabled: !!imageFile && loadedImage?.file === imageFile,
+    enabled: !!imageFile && loadedImage?.source === imageFile,
     offset,
     currentOffsetRef,
     onOffsetChange,
@@ -90,8 +90,8 @@ export function usePreviewCanvasRenderer({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    if (imageFile) {
-      if (loadedImage?.file !== imageFile) {
+    if (previewSource) {
+      if (loadedImage?.source !== previewSource) {
         cancelScheduledDraw();
         clearCanvas(ctx, canvas);
         return;
@@ -125,6 +125,7 @@ export function usePreviewCanvasRenderer({
     isDraggingRef,
     loadedImage,
     offset,
+    previewSource,
     scheduleImageDraw,
   ]);
 

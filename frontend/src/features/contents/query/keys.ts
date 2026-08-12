@@ -7,6 +7,7 @@ export const contentKeys = {
     etag === undefined
       ? (['content-image', contentId] as const)
       : (['content-image', contentId, format, etag] as const),
+  source: (contentId: string) => ['content-image-source', contentId] as const,
   audio: (contentId: string, etag?: string | null) =>
     etag === undefined
       ? (['content-audio', contentId] as const)

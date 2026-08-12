@@ -305,6 +305,8 @@ function uploadForVehicle(name: string, imageBuf: Buffer, args: Args): ParsedCon
     frameName: name,
     hasDisplayMode: true,
     displayMode: 'mono1',
+    hasRenderPreset: true,
+    renderPreset: 'graphic',
     mode: args.mode,
     threshold: args.threshold,
   };

@@ -150,6 +150,25 @@ export class ContentsReadService {
     return { data, etag: content.imageEtag };
   }
 
+  async readImageSource(
+    contentId: string,
+    ownerUserId: string
+  ): Promise<{ data: Buffer; etag: string }> {
+    const content = await this.requireReadableContent(
+      contentId,
+      { userId: ownerUserId },
+      {
+        id: true,
+        groupId: true,
+        imageSourceEtag: true,
+      }
+    );
+    if (!content.imageSourceEtag) throw new NotFoundError('该图片没有可编辑源图，请重新上传');
+    const data = await this.blob.read(content.groupId, content.id, 'image_source');
+    if (!data) throw new NotFoundError('图片源文件丢失');
+    return { data, etag: content.imageSourceEtag };
+  }
+
   async readAudio(
     contentId: string,
     scope: { userId?: string; deviceId?: string }

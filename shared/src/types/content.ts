@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ImageDisplayMode } from '../api.js';
 import { DITHER_MODES } from '../dither.js';
+import { IMAGE_RENDER_PRESETS } from '../image-render-preset.js';
 import { DashboardDataPayload, DynamicConfig, DynamicType, TtsVoice } from './dynamic.js';
 
 export const ImageRendition = z.object({
@@ -24,6 +25,8 @@ export type ContentAudioStatusT = z.infer<typeof ContentAudioStatus>;
 
 export const ContentAudioSource = z.enum(['upload', 'tts']);
 export type ContentAudioSourceT = z.infer<typeof ContentAudioSource>;
+
+export const ImageRenderPresetSchema = z.enum(IMAGE_RENDER_PRESETS);
 
 export const PatchContentRequest = z.object({
   frame_name: z.string().max(64).nullable().optional(),
@@ -58,6 +61,8 @@ export type ContentSummaryT = z.infer<typeof ContentSummary>;
 
 export const ContentDetail = ContentSummary.extend({
   group_id: z.string(),
+  render_preset: ImageRenderPresetSchema,
+  source_available: z.boolean(),
   dynamic_config: DynamicConfig.nullable(),
   dynamic_data: z.unknown().nullable(),
   dynamic_last_rendered_at: z.string().datetime().nullable(),

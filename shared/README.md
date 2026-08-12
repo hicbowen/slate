@@ -26,6 +26,7 @@ export * from './dither.js';
 export * from './bwry.js';
 export * from './gray4.js';
 export * from './preprocess.js';
+export * from './image-render-preset.js';
 ```
 
 `package.json` 同时暴露：
@@ -48,6 +49,7 @@ shared/src/
 ├── bwry.ts                      Note4C BWRY 量化、2bpp 打包与 mono fallback
 ├── gray4.ts                     Note4 16 灰量化、4bpp 打包与 mono fallback
 ├── preprocess.ts                RGBA/RGB 灰度化、autoInvert、autoContrast
+├── image-render-preset.ts       四种用户风格及自动照片/图文判断
 ├── types/
 │   ├── device.ts                设备注册、poll、DeviceState、claim、reorder
 │   ├── group.ts                 内容组 CRUD、summary、reorder
@@ -254,7 +256,13 @@ dashboard 数据推送 schema：
 
 后端运行时对应资产位于 `backend/assets/fonts/bitmap-1bpp/*.json`。
 
-## Dither 算法
+## 图片优化风格与 Dither 算法
+
+图片编辑器使用 `ImageRenderPreset = auto | photo | vivid | graphic`。`auto` 通过色调覆盖和局部平滑度判断连续色调照片或少色图文，其余三个值是稳定、无额外参数的用户预设。每个预设会分别映射到 mono1、gray4 和 bwry2 的内部算法。
+
+`gray4.ts` 使用固件生产波形的 16 个实测亮度，而不是等距 4-bit 灰阶；照片通过相邻实机灰阶的细噪声或受限误差扩散合成缺失亮度。`bwry.ts` 使用 OKLab 感知色距、线性光误差扩散、边缘限幅和中性色保护。
+
+底层 [src/dither.ts](src/dither.ts) 仍提供 6 种 mono1 模式，供预设映射和旧 API 兼容：
 
 [src/dither.ts](src/dither.ts) 提供 6 种模式：
 
@@ -270,7 +278,7 @@ dashboard 数据推送 schema：
 默认值：
 
 - `API_DEFAULT_DITHER_MODE = 'threshold'`：后端 API 未指定 mode 时使用，保证旧调用方行为稳定。
-- `DEFAULT_DITHER_MODE = 'floyd'`：前端新建图片内容的默认值。
+- `DEFAULT_DITHER_MODE = 'floyd'`：底层 1bpp 默认值；图片编辑器默认使用 `DEFAULT_IMAGE_RENDER_PRESET = 'auto'`。
 
 主要函数：
 
@@ -298,9 +306,8 @@ ditherTo1bpp(gray, width, height, options): Uint8Array
 
 1. 解码到 RGB/RGBA。
 2. `rgbaToGray`：Rec.709 系数。
-3. `autoInvert`：四角内一格均值小于 128 时视为黑底并整体反相。
-4. `autoContrast(cutoffPct=1)`：等价 PIL `ImageOps.autocontrast` 的 cutoff 拉伸。
-5. `ditherToBinary` 或 `ditherTo1bpp`。
+3. `preprocessGrayForPreset`：根据已解析风格选择保守照片对比度或图文反相/强对比。
+4. 调用 mono1、gray4 或 bwry2 对应的风格量化函数。
 
 前端图片编辑器和后端 `ImageRendererService` 都应按这个顺序执行，否则 Web 预览和设备显示会不一致。
 
@@ -322,7 +329,7 @@ import {
 
 ```ts
 import type { ContentDetailT, DeviceSummaryT, DynamicConfigT } from 'shared';
-import { DEFAULT_DITHER_MODE, DynamicConfig, ditherToBinary } from 'shared';
+import { DEFAULT_IMAGE_RENDER_PRESET, DynamicConfig, renderBwryPixels } from 'shared';
 ```
 
 ## 校验

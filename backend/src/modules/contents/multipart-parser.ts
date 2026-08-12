@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import type { MultipartFile } from '@fastify/multipart';
 import type { FastifyRequest } from 'fastify';
-import { DITHER_MODES, ImageDisplayMode, type DitherMode, type ImageDisplayModeT } from 'shared';
+import {
+  DITHER_MODES,
+  IMAGE_RENDER_PRESETS,
+  ImageDisplayMode,
+  type DitherMode,
+  type ImageDisplayModeT,
+  type ImageRenderPreset,
+} from 'shared';
 import { ValidationError } from '../../common/errors';
 
 export interface ParsedContentUpload {
@@ -11,6 +18,8 @@ export interface ParsedContentUpload {
   audioBuf: Buffer | null;
   threshold?: number;
   mode?: DitherMode;
+  hasRenderPreset: boolean;
+  renderPreset: ImageRenderPreset;
   hasFrameName: boolean;
   frameName: string | null;
   hasDisplayMode: boolean;
@@ -18,6 +27,7 @@ export interface ParsedContentUpload {
 }
 
 const MODES = DITHER_MODES as readonly string[];
+const RENDER_PRESETS = IMAGE_RENDER_PRESETS as readonly string[];
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
 const DISALLOWED_IMAGE_MIME = new Set(['image/svg+xml']);
@@ -37,6 +47,8 @@ export class MultipartParser {
       audioBuf: null,
       hasFrameName: false,
       frameName: null,
+      hasRenderPreset: false,
+      renderPreset: 'auto',
       hasDisplayMode: false,
       displayMode: 'mono1',
     };
@@ -65,6 +77,14 @@ export class MultipartParser {
           }
         } else if (part.fieldname === 'mode' && MODES.includes(val)) {
           result.mode = val as DitherMode;
+        } else if (part.fieldname === 'render_preset') {
+          if (!RENDER_PRESETS.includes(val)) {
+            throw new ValidationError('图片优化风格无效', {
+              code: 'invalid_render_preset',
+            });
+          }
+          result.hasRenderPreset = true;
+          result.renderPreset = val as ImageRenderPreset;
         } else if (part.fieldname === 'frame_name') {
           result.hasFrameName = true;
           const trimmed = val.trim().slice(0, 64);

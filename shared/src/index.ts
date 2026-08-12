@@ -7,3 +7,4 @@ export * from './dither.js';
 export * from './bwry.js';
 export * from './gray4.js';
 export * from './preprocess.js';
+export * from './image-render-preset.js';

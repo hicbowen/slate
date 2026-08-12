@@ -2,7 +2,11 @@ import { createId } from '@paralleldrive/cuid2';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { ContentAudioSource, ContentKind } from '@prisma/client';
-import { type ContentMutationResponseT } from 'shared';
+import {
+  ImageRenderPresetSchema,
+  type ContentMutationResponseT,
+  type ImageRenderPreset,
+} from 'shared';
 import { BlobService } from '../../infra/blob/blob.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { computeETag } from '../../common/utils/etag';
@@ -33,7 +37,14 @@ interface RenderedImageRendition {
   size: number;
 }
 
+function normalizeRenderPreset(value: string): ImageRenderPreset {
+  const parsed = ImageRenderPresetSchema.safeParse(value);
+  return parsed.success ? parsed.data : 'auto';
+}
+
 interface RenderedImageUpload {
+  source: RenderedImageRendition | null;
+  renderPreset: ImageRenderPreset;
   mono1: RenderedImageRendition;
   bwry2: RenderedImageRendition;
   gray4: RenderedImageRendition;
@@ -85,12 +96,26 @@ export class ContentsService {
     if (content.kind !== 'image') {
       throw new ValidationError('动态内容请使用 JSON 更新');
     }
+    const currentPreset = normalizeRenderPreset(content.imageRenderPreset);
+    const effectivePreset = parsed.hasRenderPreset ? parsed.renderPreset : currentPreset;
+    let existingSource: Buffer | null = null;
+    if (!parsed.hasImage && parsed.hasRenderPreset && parsed.renderPreset !== currentPreset) {
+      if (!content.imageSourceEtag) {
+        throw new ValidationError('旧图片切换优化风格前需要重新上传原图', {
+          code: 'image_source_required',
+        });
+      }
+      existingSource = await this.blob.read(content.groupId, content.id, 'image_source');
+      if (!existingSource) throw new NotFoundError('图片源文件丢失');
+    }
     return this.updateImage(
       content.groupId,
       content.sortOrder,
       contentId,
       parsed,
       content.audioEtag,
+      effectivePreset,
+      existingSource,
       signal
     );
   }
@@ -142,6 +167,7 @@ export class ContentsService {
       this.blob.delete(content.groupId, contentId, 'image'),
       this.blob.delete(content.groupId, contentId, 'image_bwry'),
       this.blob.delete(content.groupId, contentId, 'image_gray'),
+      this.blob.delete(content.groupId, contentId, 'image_source'),
       this.audioBlobs.delete(content.groupId, contentId, content.audioEtag),
     ]);
     const failed = deleted.filter((result) => result.status === 'rejected').length;
@@ -239,7 +265,7 @@ export class ContentsService {
     parsed: ParsedContentUpload,
     signal?: AbortSignal
   ): Promise<ContentMutationResponseT> {
-    const { image, audio } = await this.renderUpload(parsed, signal);
+    const { image, audio } = await this.renderUpload(parsed, signal, parsed.renderPreset);
     if (!image) throw new ValidationError('创建图片内容时必须上传图片');
     const contentId = createId();
     const rollback = new BlobRollbackPlan(this.blob, this.logger);
@@ -248,9 +274,13 @@ export class ContentsService {
       rollback.deleteCreated(gid, contentId, 'image');
       rollback.deleteCreated(gid, contentId, 'image_bwry');
       rollback.deleteCreated(gid, contentId, 'image_gray');
+      rollback.deleteCreated(gid, contentId, 'image_source');
       await this.blob.write(gid, contentId, 'image', image.mono1.bytes);
       await this.blob.write(gid, contentId, 'image_bwry', image.bwry2.bytes);
       await this.blob.write(gid, contentId, 'image_gray', image.gray4.bytes);
+      const source = image.source;
+      if (!source) throw new ValidationError('创建图片内容时源图不能为空');
+      await this.blob.write(gid, contentId, 'image_source', source.bytes);
       if (audio) {
         rollback.deleteCreated(gid, audioBlobContentId(contentId, audio.etag), 'audio');
         await this.blob.write(gid, audioBlobContentId(contentId, audio.etag), 'audio', audio.bytes);
@@ -269,6 +299,9 @@ export class ContentsService {
             imageBwrySize: image.bwry2.size,
             imageGrayEtag: image.gray4.etag,
             imageGraySize: image.gray4.size,
+            imageSourceEtag: source.etag,
+            imageSourceSize: source.size,
+            imageRenderPreset: image.renderPreset,
             displayMode: parsed.displayMode,
             ...(audio ? readyUploadedAudioFields(audio.etag, audio.size) : resetAudioFields()),
             kind: 'image',
@@ -305,20 +338,29 @@ export class ContentsService {
     contentId: string,
     parsed: ParsedContentUpload,
     previousAudioEtag: string | null,
+    effectivePreset: ImageRenderPreset,
+    existingSource: Buffer | null,
     signal?: AbortSignal
   ): Promise<ContentMutationResponseT> {
     const baseData: Prisma.ContentUpdateInput = {};
     if (parsed.hasFrameName) baseData.frameName = parsed.frameName;
     if (parsed.hasDisplayMode) baseData.displayMode = parsed.displayMode;
+    if (parsed.hasRenderPreset) baseData.imageRenderPreset = parsed.renderPreset;
     if (
       parsed.hasFrameName === false &&
       !parsed.hasImage &&
       !parsed.hasAudio &&
-      !parsed.hasDisplayMode
+      !parsed.hasDisplayMode &&
+      !parsed.hasRenderPreset
     ) {
       throw new ValidationError('没有可更新的字段', { code: 'nothing_to_patch' });
     }
-    const { image, audio } = await this.renderUpload(parsed, signal);
+    const { image, audio } = await this.renderUpload(
+      parsed,
+      signal,
+      effectivePreset,
+      existingSource
+    );
 
     const rollback = new BlobRollbackPlan(this.blob, this.logger);
     let dbUpdated = false;
@@ -420,13 +462,21 @@ export class ContentsService {
       await this.blob.write(gid, contentId, 'image', upload.image.mono1.bytes);
       await this.blob.write(gid, contentId, 'image_bwry', upload.image.bwry2.bytes);
       await this.blob.write(gid, contentId, 'image_gray', upload.image.gray4.bytes);
+      if (upload.image.source) {
+        const previousSourceBytes = await this.blob.read(gid, contentId, 'image_source');
+        rollback.restorePrevious(gid, contentId, 'image_source', previousSourceBytes);
+        await this.blob.write(gid, contentId, 'image_source', upload.image.source.bytes);
+        data.imageSourceEtag = upload.image.source.etag;
+        data.imageSourceSize = upload.image.source.size;
+      }
       data.imageEtag = upload.image.mono1.etag;
       data.imageSize = upload.image.mono1.size;
       data.imageBwryEtag = upload.image.bwry2.etag;
       data.imageBwrySize = upload.image.bwry2.size;
       data.imageGrayEtag = upload.image.gray4.etag;
       data.imageGraySize = upload.image.gray4.size;
-      if (!upload.audio && currentAudioEtag) {
+      data.imageRenderPreset = upload.image.renderPreset;
+      if (upload.image.source && !upload.audio && currentAudioEtag) {
         Object.assign(data, resetAudioFields());
       }
     }
@@ -443,7 +493,7 @@ export class ContentsService {
       Object.assign(data, readyUploadedAudioFields(upload.audio.etag, upload.audio.size));
     }
     const nextAudioEtag =
-      upload.audio?.etag ?? (upload.image && currentAudioEtag ? null : currentAudioEtag);
+      upload.audio?.etag ?? (upload.image?.source && currentAudioEtag ? null : currentAudioEtag);
     return {
       data,
       previousAudioEtagForCleanup:
@@ -453,24 +503,35 @@ export class ContentsService {
 
   private async renderUpload(
     parsed: ParsedContentUpload,
-    signal?: AbortSignal
+    signal: AbortSignal | undefined,
+    preset: ImageRenderPreset,
+    existingSource: Buffer | null = null
   ): Promise<RenderedUpload> {
     let image: RenderedImageUpload | null = null;
-    if (parsed.hasImage && parsed.imageBuf) {
-      const sourceEtag = computeETag(parsed.imageBuf);
+    const sourceBytes =
+      parsed.hasImage && parsed.imageBuf
+        ? await this.imageRenderer.normalizeSource(parsed.imageBuf)
+        : existingSource;
+    if (sourceBytes) {
+      const sourceEtag = computeETag(sourceBytes);
       const [mono1, bwry2, gray4] = await Promise.all([
-        this.imageRenderer.renderTo1bpp(parsed.imageBuf, {
+        this.imageRenderer.renderTo1bpp(sourceBytes, {
           threshold: parsed.threshold,
           mode: parsed.mode,
+          preset,
           sourceEtag,
         }),
-        this.imageRenderer.renderTo2bpp(parsed.imageBuf, { sourceEtag }),
-        this.imageRenderer.renderTo4bppGray(parsed.imageBuf, { sourceEtag }),
+        this.imageRenderer.renderTo2bpp(sourceBytes, { sourceEtag, preset }),
+        this.imageRenderer.renderTo4bppGray(sourceBytes, { sourceEtag, preset }),
       ]);
       this.imageRenderer.validateFrameSize(mono1.data);
       this.imageRenderer.validateBwryFrameSize(bwry2.data);
       this.imageRenderer.validateGrayFrameSize(gray4.data);
       image = {
+        source: parsed.hasImage
+          ? { bytes: sourceBytes, etag: sourceEtag, size: sourceBytes.byteLength }
+          : null,
+        renderPreset: preset,
         mono1: {
           bytes: mono1.data,
           etag: computeETag(mono1.data),
@@ -508,6 +569,9 @@ export class ContentsService {
     imageBwrySize: number | null;
     imageGrayEtag: string | null;
     imageGraySize: number | null;
+    imageSourceEtag: string | null;
+    imageSourceSize: number | null;
+    imageRenderPreset: string;
     displayMode: string;
     audioEtag: string | null;
     audioSource: ContentAudioSource | null;
@@ -525,6 +589,9 @@ export class ContentsService {
         imageBwrySize: true,
         imageGrayEtag: true,
         imageGraySize: true,
+        imageSourceEtag: true,
+        imageSourceSize: true,
+        imageRenderPreset: true,
         displayMode: true,
         audioEtag: true,
         audioSource: true,

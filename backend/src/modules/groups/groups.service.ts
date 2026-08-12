@@ -347,6 +347,7 @@ export class GroupsService {
           this.blob.delete(gid, content.id, 'image'),
           this.blob.delete(gid, content.id, 'image_bwry'),
           this.blob.delete(gid, content.id, 'image_gray'),
+          this.blob.delete(gid, content.id, 'image_source'),
           content.audioEtag
             ? this.blob.delete(gid, audioBlobContentId(content.id, content.audioEtag), 'audio')
             : Promise.resolve(),
@@ -387,7 +388,13 @@ export class GroupsService {
     const rows = await this.prisma.content.groupBy({
       by: ['groupId'],
       where: { groupId: { in: groupIds } },
-      _sum: { imageSize: true, imageBwrySize: true, imageGraySize: true, audioSize: true },
+      _sum: {
+        imageSize: true,
+        imageBwrySize: true,
+        imageGraySize: true,
+        imageSourceSize: true,
+        audioSize: true,
+      },
     });
     return sizeMapFromRows(rows);
   }
@@ -396,7 +403,13 @@ export class GroupsService {
     const rows = await this.prisma.content.groupBy({
       by: ['groupId'],
       where: { group: { ownerUserId } },
-      _sum: { imageSize: true, imageBwrySize: true, imageGraySize: true, audioSize: true },
+      _sum: {
+        imageSize: true,
+        imageBwrySize: true,
+        imageGraySize: true,
+        imageSourceSize: true,
+        audioSize: true,
+      },
     });
     return sizeMapFromRows(rows);
   }
@@ -496,6 +509,7 @@ function sizeMapFromRows(
       imageSize: number | null;
       imageBwrySize: number | null;
       imageGraySize: number | null;
+      imageSourceSize: number | null;
       audioSize: number | null;
     };
   }>
@@ -507,6 +521,7 @@ function sizeMapFromRows(
       (row._sum.imageSize ?? 0) +
         (row._sum.imageBwrySize ?? 0) +
         (row._sum.imageGraySize ?? 0) +
+        (row._sum.imageSourceSize ?? 0) +
         (row._sum.audioSize ?? 0)
     );
   }

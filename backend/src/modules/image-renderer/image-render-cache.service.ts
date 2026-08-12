@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { AppConfig } from '../../infra/config/app.config';
 
 export interface CacheKeyParts {
+  rendererVersion: string;
   format: 'mono1' | 'bwry2' | 'gray4';
   sourceEtag: string;
   width: number;
@@ -40,6 +41,7 @@ export class ImageRenderCacheService implements OnModuleInit, OnModuleDestroy {
 
   key(parts: CacheKeyParts): string {
     const raw = [
+      parts.rendererVersion,
       parts.sourceEtag,
       parts.format,
       parts.width,

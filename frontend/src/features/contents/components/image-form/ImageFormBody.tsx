@@ -3,7 +3,7 @@ import { FRAME_HEIGHT, FRAME_WIDTH, type ContentDetailT } from 'shared';
 import { Input } from '@/components/ui/Input';
 import { FormSection } from '@/components/ui/FormSection';
 import { cn } from '@/lib/cn';
-import { DitherControls } from './DitherControls';
+import { ImageRenderPresetControls } from './ImageRenderPresetControls';
 import { ImageAudioBlock } from './ImageAudioBlock';
 import { ImageDropzone } from './ImageDropzone';
 import { PreviewCanvas } from './PreviewCanvas';
@@ -16,6 +16,7 @@ interface ImageFormBodyProps {
   form: ReturnType<typeof useImageContentForm>;
   isEdit: boolean;
   existingImage?: ArrayBuffer;
+  existingSource?: Blob;
   existingImagePending?: boolean;
   hasExistingAudio?: boolean;
   editingContentId?: string | null;
@@ -33,6 +34,7 @@ export function ImageFormBody({
   form,
   isEdit,
   existingImage,
+  existingSource,
   existingImagePending,
   hasExistingAudio = false,
   editingContentId = null,
@@ -68,10 +70,10 @@ export function ImageFormBody({
         <PreviewCanvas
           canvasRef={form.image.previewRef}
           imageFile={form.image.file}
+          existingSource={existingSource}
           existingImage={existingImage}
           existingImagePending={existingImagePending}
-          threshold={form.dither.threshold}
-          mode={form.dither.mode}
+          renderPreset={form.render.preset}
           format={form.preview.format}
           scale={form.crop.scale}
           offset={form.crop.offset}
@@ -98,12 +100,10 @@ export function ImageFormBody({
           <div className="space-y-4">
             <ImageDisplayModeToggle value={form.display.mode} onChange={form.display.setMode} />
             <ImageDropzone isEdit={isEdit} imageFile={form.image.file} onPick={form.image.onPick} />
-            <DitherControls
-              mode={form.dither.mode}
-              onModeChange={form.dither.setMode}
-              threshold={form.dither.threshold}
-              onThresholdChange={form.dither.setThreshold}
-              disabled={isEdit && !form.image.file}
+            <ImageRenderPresetControls
+              preset={form.render.preset}
+              onPresetChange={form.render.setPreset}
+              disabled={isEdit && !form.image.file && !form.render.sourceAvailable}
               hasImage={!!form.image.file}
               scale={form.crop.scale}
               onScaleChange={form.crop.setScale}

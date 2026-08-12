@@ -257,6 +257,7 @@ describe('ContentsService current content refresh', () => {
         },
       } as never,
       {
+        normalizeSource: async (input: Buffer) => input,
         renderTo1bpp: async () => ({ data: Buffer.from([0xff]), width: 8, height: 1 }),
         renderTo2bpp: async () => ({ data: Buffer.from([0x55]), width: 4, height: 1 }),
         renderTo4bppGray: async () => ({ data: Buffer.from([0xff]), width: 2, height: 1 }),
@@ -280,7 +281,7 @@ describe('ContentsService current content refresh', () => {
 
     expect(response.content_etag).toBe('updated-content-etag');
     expect(recomputeCalls).toBe(1);
-    expect(blobWrites).toEqual(['content-1', 'content-1', 'content-1']);
+    expect(blobWrites).toEqual(['content-1', 'content-1', 'content-1', 'content-1']);
   });
 
   it('does not delete the current audio blob when uploaded audio etag is unchanged', async () => {
@@ -396,6 +397,7 @@ describe('ContentsService current content refresh', () => {
         recomputeManifestEtag: async () => 'group-etag',
       } as never,
       {
+        normalizeSource: async (input: Buffer) => input,
         renderTo1bpp: async () => ({ data: Buffer.from([0xff]), width: 8, height: 1 }),
         renderTo2bpp: async () => ({ data: Buffer.from([0x55]), width: 4, height: 1 }),
         renderTo4bppGray: async () => ({ data: Buffer.from([0xff]), width: 2, height: 1 }),

@@ -1,13 +1,12 @@
 import { useCallback } from 'react';
-import { FRAME_HEIGHT, FRAME_WIDTH, type DitherMode, type ImageDisplayModeT } from 'shared';
+import { FRAME_HEIGHT, FRAME_WIDTH, type ImageDisplayModeT, type ImageRenderPreset } from 'shared';
 import { PAPER_HEX } from '@/lib/eink/colors';
 
 export function useImageFormSubmit({
   imageFile,
   audioFile,
   frameName,
-  threshold,
-  mode,
+  renderPreset,
   scale,
   offset,
   displayMode,
@@ -15,8 +14,7 @@ export function useImageFormSubmit({
   imageFile: File | null;
   audioFile: File | null;
   frameName: string;
-  threshold: number;
-  mode: DitherMode;
+  renderPreset: ImageRenderPreset;
   scale: number;
   offset: { x: number; y: number };
   displayMode: ImageDisplayModeT;
@@ -26,14 +24,13 @@ export function useImageFormSubmit({
     if (imageFile) {
       const blob = await exportNormalizedSource(imageFile, scale, offset);
       fd.append('image', blob, 'cropped.png');
-      fd.append('threshold', String(threshold));
-      fd.append('mode', mode);
     }
+    fd.append('render_preset', renderPreset);
     if (audioFile) fd.append('audio', audioFile);
     fd.append('frame_name', frameName.trim());
     fd.append('display_mode', displayMode);
     return fd;
-  }, [audioFile, displayMode, frameName, imageFile, mode, offset, scale, threshold]);
+  }, [audioFile, displayMode, frameName, imageFile, offset, renderPreset, scale]);
 }
 
 async function exportNormalizedSource(

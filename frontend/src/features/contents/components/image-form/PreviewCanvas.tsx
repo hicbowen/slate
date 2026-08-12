@@ -1,5 +1,5 @@
 import { FRAME_WIDTH, FRAME_HEIGHT } from 'shared';
-import type { DitherMode, FrameFormatT } from 'shared';
+import type { FrameFormatT, ImageRenderPreset } from 'shared';
 import type { RefObject } from 'react';
 import { cn } from '@/lib/cn';
 import { StatusBarOverlay } from '@/components/eink/StatusBarOverlay';
@@ -7,10 +7,10 @@ import { usePreviewCanvasRenderer } from './usePreviewCanvasRenderer';
 
 interface PreviewCanvasProps {
   imageFile: File | null;
+  existingSource?: Blob;
   existingImage: ArrayBuffer | undefined;
   existingImagePending?: boolean;
-  threshold: number;
-  mode: DitherMode;
+  renderPreset: ImageRenderPreset;
   format: FrameFormatT;
   scale: number;
   offset: { x: number; y: number };
@@ -22,10 +22,10 @@ interface PreviewCanvasProps {
 
 export function PreviewCanvas({
   imageFile,
+  existingSource,
   existingImage,
   existingImagePending,
-  threshold,
-  mode,
+  renderPreset,
   format,
   scale,
   offset,
@@ -36,9 +36,9 @@ export function PreviewCanvas({
 }: PreviewCanvasProps) {
   const pan = usePreviewCanvasRenderer({
     imageFile,
+    existingSource,
     existingImage,
-    threshold,
-    mode,
+    renderPreset,
     format,
     scale,
     offset,
@@ -53,7 +53,7 @@ export function PreviewCanvas({
           <span className="font-serif italic text-[13px] text-stone-light">加载中…</span>
         </div>
       )}
-      {!imageFile && !existingImage && !existingImagePending && (
+      {!imageFile && !existingSource && !existingImage && !existingImagePending && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="font-serif italic text-[13px] text-stone-light">选图后显示预览</span>
         </div>

@@ -1,6 +1,7 @@
 import type { ContentAudioSource, ContentAudioStatus, ContentKind, Prisma } from '@prisma/client';
 import {
   DynamicConfig,
+  ImageRenderPresetSchema,
   TtsVoice,
   type ContentDetailT,
   type ContentSummaryT,
@@ -22,6 +23,9 @@ export interface ContentRow {
   imageBwrySize?: number | null;
   imageGrayEtag?: string | null;
   imageGraySize?: number | null;
+  imageSourceEtag?: string | null;
+  imageSourceSize?: number | null;
+  imageRenderPreset?: string;
   displayMode?: string;
   audioSize: number | null;
   audioStatus: ContentAudioStatus;
@@ -86,9 +90,12 @@ export function contentToDetail(
   }
 ): ContentDetailT {
   const config = row.dynamicConfig ? DynamicConfig.safeParse(row.dynamicConfig) : null;
+  const renderPreset = ImageRenderPresetSchema.safeParse(row.imageRenderPreset);
   return {
     ...contentToSummary(row),
     group_id: row.groupId,
+    render_preset: renderPreset.success ? renderPreset.data : 'auto',
+    source_available: !!row.imageSourceEtag && !!row.imageSourceSize,
     dynamic_config: config?.success ? config.data : null,
     dynamic_data: row.dynamicData ?? null,
     dynamic_last_rendered_at: row.dynamicLastRunAt?.toISOString() ?? null,

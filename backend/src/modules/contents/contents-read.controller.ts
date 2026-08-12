@@ -72,6 +72,17 @@ export class ContentsReadController {
     respondWithEtag(req, reply, r.etag, r.data, 'application/octet-stream');
   }
 
+  @Get('contents/:contentId/source')
+  async source(
+    @Param('contentId') contentId: string,
+    @CurrentUser() user: WebUserContext,
+    @Req() req: FastifyRequest,
+    @Res() reply: FastifyReply
+  ): Promise<void> {
+    const result = await this.reads.readImageSource(contentId, user.userId);
+    respondWithEtag(req, reply, result.etag, result.data, 'image/png');
+  }
+
   @Public()
   @UseGuards(JwtOrDeviceAuthGuard)
   @Get('contents/:contentId/audio')

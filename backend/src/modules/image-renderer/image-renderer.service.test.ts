@@ -73,6 +73,35 @@ describe('ImageRendererService', () => {
     expect(() => renderer.validateGrayFrameSize(Buffer.alloc(100))).toThrow();
   });
 
+  it('16 灰照片会在实机相邻灰阶间混合以填补亮度空洞', async () => {
+    const input = await makePng(400, 300, { r: 74, g: 74, b: 74 });
+    const { data } = await renderer.renderTo4bppGray(input, { preset: 'photo' });
+    const levels = new Set<number>();
+    for (const byte of data) {
+      levels.add(byte >> 4);
+      levels.add(byte & 0x0f);
+    }
+    expect(levels).toEqual(new Set([4, 5]));
+  });
+
+  it('16 灰图文模式按实机响应选择最近灰阶并保持纯色块', async () => {
+    const input = await makePng(400, 300, { r: 200, g: 200, b: 200 });
+    const { data } = await renderer.renderTo4bppGray(input, { preset: 'graphic' });
+    expect(data.every((byte) => byte === 0xcc)).toBe(true);
+  });
+
+  it('四色照片对中性灰启用黑白保护，不产生伪红或伪黄', async () => {
+    const input = await makePng(400, 300, { r: 128, g: 128, b: 128 });
+    const { data } = await renderer.renderTo2bpp(input, { preset: 'photo' });
+    expect(data.every((byte) => (byte & 0xaa) === 0)).toBe(true);
+  });
+
+  it('四色鲜明模式保留纯红色块', async () => {
+    const input = await makePng(400, 300, { r: 185, g: 43, b: 39 });
+    const { data } = await renderer.renderTo2bpp(input, { preset: 'vivid' });
+    expect(data.every((byte) => byte === 0xff)).toBe(true);
+  });
+
   it('黑图(autoInvert 触发) 仍是白', async () => {
     const input = await makePng(800, 600, { r: 0, g: 0, b: 0 });
     const { data } = await renderer.renderTo1bpp(input);

@@ -13,7 +13,11 @@ import {
   ditherTo1bpp,
   ditherToBwry2bpp,
   packGrayTo4bpp,
+  preprocessGrayForPreset,
+  quantizeGrayTo4bpp,
+  renderBwry2bpp,
   type DitherMode,
+  type ImageRenderPreset,
 } from 'shared';
 import { ValidationError } from '../../common/errors';
 import { computeETag } from '../../common/utils/etag';
@@ -24,6 +28,7 @@ export interface RenderOptions {
   height?: number;
   threshold?: number;
   mode?: DitherMode;
+  preset?: ImageRenderPreset;
   autoInvert?: boolean;
   letterbox?: boolean;
   sourceEtag?: string;
@@ -35,6 +40,8 @@ export interface RenderResult {
   height: number;
   fromCache: boolean;
 }
+
+const IMAGE_RENDERER_VERSION = '3';
 
 /**
  * 把任意格式图片(PNG/JPG/WebP/...)转成 EPD 1bpp 帧缓冲。
@@ -51,6 +58,19 @@ export interface RenderResult {
 @Injectable()
 export class ImageRendererService {
   constructor(private readonly cache: ImageRenderCacheService) {}
+
+  /** 持久化编辑源统一为白底 400×300 PNG，保证后续切换风格时可稳定重渲染。 */
+  async normalizeSource(input: Buffer): Promise<Buffer> {
+    return sharp(input)
+      .flatten({ background: { r: 255, g: 255, b: 255 } })
+      .resize(FRAME_WIDTH, FRAME_HEIGHT, {
+        fit: 'contain',
+        background: { r: 255, g: 255, b: 255 },
+      })
+      .removeAlpha()
+      .png()
+      .toBuffer();
+  }
 
   async renderTo1bpp(input: Buffer, options: RenderOptions = {}): Promise<RenderResult> {
     const W = options.width ?? FRAME_WIDTH;
@@ -69,17 +89,26 @@ export class ImageRendererService {
 
     const sourceEtag = options.sourceEtag ?? computeETag(input);
     const key = this.cache.key({
+      rendererVersion: IMAGE_RENDERER_VERSION,
       format: 'mono1',
       sourceEtag,
       width: W,
       height: H,
       threshold,
-      mode,
+      mode: options.preset ? `preset-${options.preset}` : mode,
       autoInvert: doAutoInvert,
       letterbox,
     });
     const { data, fromCache } = await this.cache.getOrCompute(key, async () => {
-      return runSharpPipeline(input, { W, H, mode, threshold, doAutoInvert, letterbox });
+      return runSharpPipeline(input, {
+        W,
+        H,
+        mode,
+        threshold,
+        preset: options.preset,
+        doAutoInvert,
+        letterbox,
+      });
     });
 
     return { data, width: W, height: H, fromCache };
@@ -95,12 +124,13 @@ export class ImageRendererService {
 
     const sourceEtag = options.sourceEtag ?? computeETag(input);
     const key = this.cache.key({
+      rendererVersion: IMAGE_RENDERER_VERSION,
       format: 'bwry2',
       sourceEtag,
       width: W,
       height: H,
       threshold: 0,
-      mode: 'floyd-bwry',
+      mode: options.preset ? `preset-${options.preset}` : 'floyd-bwry',
       autoInvert: false,
       letterbox,
     });
@@ -117,11 +147,10 @@ export class ImageRendererService {
       if (rgb.length !== W * H * 3) {
         throw new ValidationError(`图片解码异常：当前 ${rgb.length} 字节，期望 ${W * H * 3} 字节`);
       }
-      const packed = ditherToBwry2bpp(
-        new Uint8Array(rgb.buffer, rgb.byteOffset, rgb.byteLength),
-        W,
-        H
-      );
+      const source = new Uint8Array(rgb.buffer, rgb.byteOffset, rgb.byteLength);
+      const packed = options.preset
+        ? renderBwry2bpp(source, W, H, options.preset)
+        : ditherToBwry2bpp(source, W, H);
       return Buffer.from(packed.buffer, packed.byteOffset, packed.byteLength);
     });
     return { data, width: W, height: H, fromCache };
@@ -138,12 +167,13 @@ export class ImageRendererService {
 
     const sourceEtag = options.sourceEtag ?? computeETag(input);
     const key = this.cache.key({
+      rendererVersion: IMAGE_RENDERER_VERSION,
       format: 'gray4',
       sourceEtag,
       width: W,
       height: H,
       threshold: 0,
-      mode: 'gray16',
+      mode: options.preset ? `preset-${options.preset}` : 'gray16',
       autoInvert: doAutoInvert,
       letterbox,
     });
@@ -161,9 +191,15 @@ export class ImageRendererService {
         throw new ValidationError(`图片解码异常：当前 ${rawGray.length} 字节，期望 ${W * H} 字节`);
       }
       let gray: Uint8Array = new Uint8Array(rawGray.buffer, rawGray.byteOffset, rawGray.byteLength);
-      if (doAutoInvert) gray = autoInvert(gray, W, H);
-      gray = autoContrast(gray, 1);
-      const packed = packGrayTo4bpp(gray, W, H);
+      let packed: Uint8Array;
+      if (options.preset) {
+        const prepared = preprocessGrayForPreset(gray, W, H, options.preset);
+        packed = quantizeGrayTo4bpp(prepared.gray, W, H, prepared.resolvedPreset);
+      } else {
+        if (doAutoInvert) gray = autoInvert(gray, W, H);
+        gray = autoContrast(gray, 1);
+        packed = packGrayTo4bpp(gray, W, H);
+      }
       return Buffer.from(packed.buffer, packed.byteOffset, packed.byteLength);
     });
     return { data, width: W, height: H, fromCache };
@@ -199,6 +235,7 @@ async function runSharpPipeline(
     H: number;
     mode: DitherMode;
     threshold: number;
+    preset?: ImageRenderPreset;
     doAutoInvert: boolean;
     letterbox: boolean;
   }
@@ -217,9 +254,23 @@ async function runSharpPipeline(
     throw new ValidationError(`图片解码异常：当前 ${rawGray.length} 字节，期望 ${o.W * o.H} 字节`);
   }
   let gray: Uint8Array = new Uint8Array(rawGray.buffer, rawGray.byteOffset, rawGray.byteLength);
-  if (o.doAutoInvert) gray = autoInvert(gray, o.W, o.H);
-  gray = autoContrast(gray, 1);
+  let mode = o.mode;
+  let threshold = o.threshold;
+  if (o.preset) {
+    const prepared = preprocessGrayForPreset(gray, o.W, o.H, o.preset);
+    gray = prepared.gray;
+    mode =
+      prepared.resolvedPreset === 'graphic'
+        ? 'threshold'
+        : prepared.resolvedPreset === 'vivid'
+          ? 'atkinson'
+          : 'floyd';
+    threshold = 128;
+  } else {
+    if (o.doAutoInvert) gray = autoInvert(gray, o.W, o.H);
+    gray = autoContrast(gray, 1);
+  }
 
-  const packed = ditherTo1bpp(gray, o.W, o.H, { mode: o.mode, threshold: o.threshold });
+  const packed = ditherTo1bpp(gray, o.W, o.H, { mode, threshold });
   return Buffer.from(packed.buffer, packed.byteOffset, packed.byteLength);
 }

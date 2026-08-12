@@ -95,6 +95,7 @@ Content
   group_id, sort_order, frame_name?
   kind = image | dynamic
   image_etag, image_size, image_gray_etag?, image_gray_size?
+  image_source_etag?, image_source_size?, image_render_preset
   image_bwry_etag?, image_bwry_size?, display_mode, content_etag
   audio_etag?, audio_size?, audio_status, audio_source?, audio_voice?, audio_text?
   dynamic_type?, dynamic_config?, dynamic_data?
@@ -171,7 +172,7 @@ GET    /api/v1/dynamic/weather/cities?q=北京
 
 `POST /groups/:groupId/contents` 和 `PATCH /contents/:contentId` 支持两种 content type：
 
-- `multipart/form-data`：图片内容。字段包括 `image`、`audio`、`threshold`、`mode`、`frame_name`、`display_mode=mono1|gray16`。
+- `multipart/form-data`：图片内容。字段包括 `image`、`audio`、`render_preset=auto|photo|vivid|graphic`、`frame_name`、`display_mode=mono1|gray16`；`threshold` / `mode` 仅保留旧客户端兼容。
 - `application/json`：动态内容。body 符合 `shared` 的 `CreateDynamicContentRequest` 或 `PatchDynamicContentRequest`。
 
 ### 内容读取与设备资源下发（JWT 或 device secret）
@@ -181,10 +182,11 @@ GET /api/v1/groups/:groupId/contents
 GET /api/v1/groups/:groupId/manifest
 GET /api/v1/contents/:contentId
 GET /api/v1/contents/:contentId/image?format=mono1|gray4|bwry2
+GET /api/v1/contents/:contentId/source
 GET /api/v1/contents/:contentId/audio
 ```
 
-这些端点由 `JwtOrDeviceAuthGuard` 保护，Web 预览和固件同步共用同一套读取路径。manifest、image、audio 都支持 ETag；ETag 命中时返回 304。
+manifest、image、audio 由 `JwtOrDeviceAuthGuard` 保护，Web 预览和固件同步共用读取路径；source 仅 JWT Web 用户可读。所有二进制端点都支持 ETag，命中时返回 304。
 
 manifest response：
 
@@ -354,6 +356,7 @@ device secret 必须是 64 字符 hex bearer token；JWT 与 device secret 不�
 ├── {groupId}/{contentId}.img                   400 x 300 1bpp packed，15000 bytes
 ├── {groupId}/{contentId}.gray                  400 x 300 4bpp 16 灰，60000 bytes
 ├── {groupId}/{contentId}.bwry                  400 x 300 2bpp BWRY，30000 bytes
+├── {groupId}/{contentId}.source.png            规范化彩色编辑源，400 x 300 PNG
 ├── {groupId}/{contentId}.{audioEtag}.pcm       16 kHz mono s16le raw PCM
 └── image-render-cache/{xx}/{key}.bin
 ```
@@ -366,12 +369,11 @@ device secret 必须是 64 字符 hex bearer token；JWT 与 device secret 不�
 
 1. sharp 解码，白底 flatten。
 2. resize 到 400 x 300，默认 `contain` letterbox。
-3. grayscale raw。
-4. `shared.autoInvert` 四角判断黑底反相。
-5. `shared.autoContrast(cutoff=1)`。
-6. 从同一 RGB 源分别生成 `shared.ditherTo1bpp` mono1、`shared.packGrayTo4bpp` gray4 与 `shared.ditherToBwry2bpp` bwry2。
+3. 保存规范化彩色 PNG，供以后无损切换优化风格。
+4. 按 `render_preset` 执行固定的自动对比度、反相与照片色调策略。
+5. mono1 映射到适合风格的二值抖动；gray4 针对实机非线性灰阶做相邻级混合；bwry2 使用 OKLab 感知色距、受限误差扩散和中性色保护。
 
-mono1 为 MSB-first，bit=1 白/0 黑；gray4 每字节 2 像素且高 nibble 在前，0 黑/15 白；bwry2 每字节 4 像素，00 黑/01 白/10 黄/11 红。`display_mode` 只选择 Note4 静态图片的实际下发格式，不改变 Note4C rendition。
+mono1 为 MSB-first，bit=1 白/0 黑；gray4 每字节 2 像素且高 nibble 在前，0 黑/15 白；bwry2 每字节 4 像素，00 黑/01 白/10 黄/11 红。`display_mode` 只选择 Note4 静态图片的实际下发格式，不改变 Note4C rendition。渲染缓存键包含算法版本与风格，算法升级不会复用旧结果。
 
 ### 动态内容
 

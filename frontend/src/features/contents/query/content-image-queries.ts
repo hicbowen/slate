@@ -21,3 +21,17 @@ export function useContentImage(
     enabled: !!contentId && !!etag,
   });
 }
+
+export function useContentImageSource(contentId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: contentKeys.source(contentId),
+    queryFn: async () => {
+      const { data } = await api.get<Blob>(`${API_PREFIX}/contents/${contentId}/source`, {
+        responseType: 'blob',
+      });
+      return data;
+    },
+    staleTime: Infinity,
+    enabled: !!contentId && enabled,
+  });
+}
