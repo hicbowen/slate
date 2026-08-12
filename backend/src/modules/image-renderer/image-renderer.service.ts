@@ -41,7 +41,7 @@ export interface RenderResult {
   fromCache: boolean;
 }
 
-const IMAGE_RENDERER_VERSION = '6';
+const IMAGE_RENDERER_VERSION = '7';
 
 /**
  * 把任意格式图片(PNG/JPG/WebP/...)转成 EPD 1bpp 帧缓冲。

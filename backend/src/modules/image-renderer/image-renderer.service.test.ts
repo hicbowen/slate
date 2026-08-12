@@ -193,6 +193,53 @@ describe('ImageRendererService', () => {
     expect(colors).toEqual(new Set([2, 3]));
   });
 
+  it('四色照片保护平坦高彩度橙色，不在色块内部加入黑白盐点', () => {
+    const width = 64;
+    const height = 64;
+    const rgb = new Uint8Array(width * height * 3);
+    for (let offset = 0; offset < rgb.length; offset += 3) {
+      rgb[offset] = 230;
+      rgb[offset + 1] = 150;
+      rgb[offset + 2] = 40;
+    }
+    const colors = new Set(renderBwryPixels(rgb, width, height, 'photo'));
+    expect(colors).toEqual(new Set([2, 3]));
+  });
+
+  it('四色图文不会把低彩度米色背景误判成大面积黄墨', () => {
+    const width = 64;
+    const height = 64;
+    const rgb = new Uint8Array(width * height * 3);
+    for (let offset = 0; offset < rgb.length; offset += 3) {
+      rgb[offset] = 220;
+      rgb[offset + 1] = 190;
+      rgb[offset + 2] = 150;
+    }
+    const colors = new Set(renderBwryPixels(rgb, width, height, 'graphic'));
+    expect(colors).toEqual(new Set([0, 1]));
+  });
+
+  it('四色蓝噪声在每个完整阈值块保持一致覆盖率', () => {
+    const width = 64;
+    const height = 64;
+    const rgb = new Uint8Array(width * height * 3);
+    rgb.fill(128);
+    const pixels = renderBwryPixels(rgb, width, height, 'graphic');
+    const tileCounts = new Set<number>();
+    for (let tileY = 0; tileY < height; tileY += 16) {
+      for (let tileX = 0; tileX < width; tileX += 16) {
+        let black = 0;
+        for (let y = tileY; y < tileY + 16; y++) {
+          for (let x = tileX; x < tileX + 16; x++) {
+            if (pixels[y * width + x] === 0) black++;
+          }
+        }
+        tileCounts.add(black);
+      }
+    }
+    expect(tileCounts.size).toBe(1);
+  });
+
   it('黑图(autoInvert 触发) 仍是白', async () => {
     const input = await makePng(800, 600, { r: 0, g: 0, b: 0 });
     const { data } = await renderer.renderTo1bpp(input);

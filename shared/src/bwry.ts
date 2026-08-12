@@ -217,6 +217,9 @@ interface LayerConfig {
   colorBoost: number;
   detail: number;
   smoothDelta: number;
+  flatnessStart: number;
+  flatColorStart: number;
+  flatColorFull: number;
 }
 
 const LAYER_CONFIG: Record<ResolvedPreset, LayerConfig> = {
@@ -226,6 +229,9 @@ const LAYER_CONFIG: Record<ResolvedPreset, LayerConfig> = {
     colorBoost: 0.9,
     detail: 0.5,
     smoothDelta: 0.055,
+    flatnessStart: 0.82,
+    flatColorStart: 0.68,
+    flatColorFull: 0.8,
   },
   vivid: {
     chromaFloor: 0.028,
@@ -233,15 +239,44 @@ const LAYER_CONFIG: Record<ResolvedPreset, LayerConfig> = {
     colorBoost: 1.08,
     detail: 0.8,
     smoothDelta: 0.045,
+    flatnessStart: 0.7,
+    flatColorStart: 0.58,
+    flatColorFull: 0.72,
   },
   graphic: {
-    chromaFloor: 0.018,
-    chromaFull: 0.13,
+    chromaFloor: 0.065,
+    chromaFull: 0.145,
     colorBoost: 1,
     detail: 0.25,
     smoothDelta: 0.06,
+    flatnessStart: 0.55,
+    flatColorStart: 0.45,
+    flatColorFull: 0.62,
   },
 };
+
+// 16x16 void-and-cluster rank tile。每个 16x16 区块恰好覆盖一次 0..255，
+// 区块间再做旋转/镜像，既保持局部蓝噪声分布，也避免整屏出现固定斜纹。
+const BLUE_NOISE_RANK_16 = new Uint8Array([
+  172, 28, 84, 122, 191, 90, 46, 119, 27, 59, 112, 10, 170, 68, 16, 143, 216, 105, 204, 15, 54, 245,
+  214, 78, 167, 221, 94, 236, 130, 211, 100, 45, 120, 66, 239, 177, 153, 109, 11, 136, 192, 17, 146,
+  52, 159, 76, 193, 235, 161, 8, 141, 39, 81, 226, 163, 37, 242, 85, 205, 35, 248, 1, 150, 32, 252,
+  189, 96, 200, 134, 61, 185, 99, 55, 131, 173, 104, 187, 117, 89, 58, 108, 72, 228, 24, 213, 2,
+  254, 124, 219, 9, 232, 71, 20, 224, 206, 176, 140, 31, 125, 56, 169, 113, 77, 30, 160, 199, 43,
+  144, 166, 129, 47, 13, 218, 181, 244, 152, 91, 233, 179, 142, 63, 87, 115, 249, 29, 82, 240, 157,
+  95, 51, 110, 18, 198, 49, 22, 210, 237, 184, 50, 175, 217, 107, 194, 69, 5, 230, 190, 83, 222,
+  139, 102, 121, 12, 97, 151, 3, 133, 57, 23, 126, 174, 132, 34, 155, 7, 60, 250, 164, 41, 207, 243,
+  80, 186, 156, 255, 203, 148, 64, 246, 116, 212, 178, 88, 196, 75, 137, 111, 26, 229, 42, 98, 74,
+  234, 40, 93, 168, 73, 38, 149, 25, 223, 53, 165, 202, 65, 123, 215, 21, 106, 209, 188, 19, 241,
+  127, 231, 114, 183, 14, 238, 101, 145, 6, 158, 182, 128, 4, 138, 62, 103, 201, 0, 67, 92, 135, 36,
+  79, 180, 247, 86, 48, 70, 251, 162, 225, 33, 147, 171, 208, 253, 154, 195, 220, 44, 118, 227, 197,
+]);
+
+const BLUE_NOISE_OFFSETS = [
+  [0, 0],
+  [5, 9],
+  [11, 3],
+] as const;
 
 function quantizeBwryLayers(
   rgb: Uint8Array | Uint8ClampedArray,
@@ -253,19 +288,19 @@ function quantizeBwryLayers(
   const firstPass = smoothLabPlanes(lab, width, height, preset);
   const filtered =
     preset === 'graphic' ? smoothLabPlanes(firstPass, width, height, preset) : firstPass;
+  const flatness = createFlatnessPlane(lab, width, height);
   const out = new Uint8Array(width * height);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const index = y * width + x;
       const config = LAYER_CONFIG[preset];
       const detailL = filtered.l[index]! + (lab.l[index]! - filtered.l[index]!) * config.detail;
-      if (preset === 'graphic') {
-        const color = pickGraphicColor(detailL, filtered.a[index]!, filtered.b[index]!, x, y);
-        out[index] = color ?? pickNeutralTone(detailL, x, y);
-        continue;
-      }
-      const weights = separateInkWeights(
-        toneLightness(detailL, preset),
+      const targetL = toneLightness(detailL, preset);
+      let weights = separateInkWeights(targetL, filtered.a[index]!, filtered.b[index]!, preset);
+      weights = protectFlatColor(
+        weights,
+        flatness[index]!,
+        targetL,
         filtered.a[index]!,
         filtered.b[index]!,
         preset
@@ -292,6 +327,38 @@ function createLabPlanes(rgb: Uint8Array | Uint8ClampedArray): LabPlanes {
     b[dst] = color[2];
   }
   return { l, a, b };
+}
+
+/**
+ * 估算每个像素周围的局部平坦度。使用原始 OKLab 而不是滤波结果，防止边缘被平滑后
+ * 误判为色块内部；亮度和色度任一变化明显都会降低保护强度。
+ */
+function createFlatnessPlane(source: LabPlanes, width: number, height: number): Float32Array {
+  const flatness = new Float32Array(source.l.length);
+  const neighbors = [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+  ] as const;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = y * width + x;
+      let variation = 0;
+      for (const [dx, dy] of neighbors) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+        const neighbor = ny * width + nx;
+        const deltaL = Math.abs(source.l[index]! - source.l[neighbor]!);
+        const deltaA = source.a[index]! - source.a[neighbor]!;
+        const deltaB = source.b[index]! - source.b[neighbor]!;
+        variation = Math.max(variation, deltaL + Math.hypot(deltaA, deltaB) * 0.65);
+      }
+      flatness[index] = 1 - smoothstep(0.008, 0.05, variation);
+    }
+  }
+  return flatness;
 }
 
 function smoothLabPlanes(
@@ -401,6 +468,53 @@ function separateInkWeights(
   };
 }
 
+/**
+ * 高彩度且局部平坦的暖色色块优先使用红/黄彩墨本身表达，逐渐压低其中的纸白和黑点。
+ * 低彩度、肤色、暖灰以及纹理/边缘仍保留原有明暗层，不会被强制染成红黄。
+ */
+function protectFlatColor(
+  weights: InkWeights,
+  flatness: number,
+  targetL: number,
+  sourceA: number,
+  sourceB: number,
+  preset: ResolvedPreset
+): InkWeights {
+  const colorCoverage = weights.yellow + weights.red;
+  const neutralCoverage = weights.black + weights.white;
+  if (colorCoverage <= 0 || neutralCoverage <= 0) return weights;
+
+  const config = LAYER_CONFIG[preset];
+  const strength =
+    smoothstep(config.flatnessStart, 1, flatness) *
+    smoothstep(config.flatColorStart, config.flatColorFull, colorCoverage);
+  if (strength <= 0) return weights;
+
+  const protectedCoverage = colorCoverage + (1 - colorCoverage) * strength;
+  const black = DEVICE_OKLAB[0]!;
+  const white = DEVICE_OKLAB[1]!;
+  const neutralMix = clamp01((targetL - black[0]) / (white[0] - black[0]));
+  const hue =
+    (Math.atan2(
+      sourceB - (black[2] + (white[2] - black[2]) * neutralMix),
+      sourceA - (black[1] + (white[1] - black[1]) * neutralMix)
+    ) *
+      180) /
+    Math.PI;
+  const hueRedMix = 1 - smoothstep(42, 78, hue);
+  const lumaFactor = 0.3 + 0.7 * clamp01((0.92 - targetL) / 0.22);
+  const protectedRedRatio = clamp01(hueRedMix * lumaFactor);
+  const originalRedRatio = weights.red / colorCoverage;
+  const redRatio = originalRedRatio + (protectedRedRatio - originalRedRatio) * strength;
+  const neutralScale = (1 - protectedCoverage) / neutralCoverage;
+  return {
+    black: weights.black * neutralScale,
+    white: weights.white * neutralScale,
+    yellow: protectedCoverage * (1 - redRatio),
+    red: protectedCoverage * redRatio,
+  };
+}
+
 function pickInk(weights: InkWeights, x: number, y: number): BwryColor {
   const colorCoverage = weights.yellow + weights.red;
   const colorThreshold = ditherThreshold(x, y, 0);
@@ -413,42 +527,21 @@ function pickInk(weights: InkWeights, x: number, y: number): BwryColor {
   return ditherThreshold(x, y, 2) < blackRatio ? 0 : 1;
 }
 
-/** 图文风格的高彩度暖色只在红黄彩墨之间混合，不在平坦色块中铺满纸白噪点。 */
-function pickGraphicColor(
-  targetL: number,
-  sourceA: number,
-  sourceB: number,
-  x: number,
-  y: number
-): Extract<BwryColor, 2 | 3> | null {
-  const black = DEVICE_OKLAB[0]!;
-  const white = DEVICE_OKLAB[1]!;
-  const neutralMix = clamp01((targetL - black[0]) / (white[0] - black[0]));
-  const da = sourceA - (black[1] + (white[1] - black[1]) * neutralMix);
-  const db = sourceB - (black[2] + (white[2] - black[2]) * neutralMix);
-  const chroma = Math.hypot(da, db);
-  const hue = (Math.atan2(db, da) * 180) / Math.PI;
-  const redAffinity = hueAffinity(hue, 25, 18, 45);
-  const yellowAffinity = hueAffinity(hue, 86, 20, 60);
-  if (chroma >= 0.07 && (redAffinity > 0 || yellowAffinity > 0)) {
-    const hueRedMix = 1 - smoothstep(42, 78, hue);
-    const lumaFactor = 0.3 + 0.7 * clamp01((0.92 - targetL) / 0.22);
-    const redMix = clamp01(hueRedMix * lumaFactor);
-    return ditherThreshold(x, y, 1) < redMix ? 3 : 2;
-  }
-  return null;
-}
-
-function pickNeutralTone(targetL: number, x: number, y: number): Extract<BwryColor, 0 | 1> {
-  const blackL = DEVICE_OKLAB[0]![0];
-  const whiteL = DEVICE_OKLAB[1]![0];
-  const blackCoverage = 1 - clamp01((targetL - blackL) / (whiteL - blackL));
-  return ditherThreshold(x, y, 2) < blackCoverage ? 0 : 1;
-}
-
+/** 从蓝噪声 rank tile 取阈值；分层使用不同偏移，区块使用不同朝向以降低重复纹理。 */
 function ditherThreshold(x: number, y: number, seed: number): number {
-  const inner = fractional(0.06711056 * (x + seed * 17) + 0.00583715 * (y + seed * 29));
-  return fractional(52.9829189 * inner);
+  const blockX = x >> 4;
+  const blockY = y >> 4;
+  let localX = x & 15;
+  let localY = y & 15;
+  const transform =
+    (Math.imul(blockX + seed * 17, 0x45d9f3b) ^ Math.imul(blockY + seed * 29, 0x119de1f3)) & 7;
+  if (transform & 1) [localX, localY] = [localY, localX];
+  if (transform & 2) localX = 15 - localX;
+  if (transform & 4) localY = 15 - localY;
+  const offset = BLUE_NOISE_OFFSETS[seed] ?? BLUE_NOISE_OFFSETS[0];
+  localX = (localX + offset[0]) & 15;
+  localY = (localY + offset[1]) & 15;
+  return (BLUE_NOISE_RANK_16[localY * 16 + localX]! + 0.5) / 256;
 }
 
 function toneLightness(value: number, preset: ResolvedPreset): number {
@@ -475,10 +568,6 @@ function angularDistance(a: number, b: number): number {
 function smoothstep(low: number, high: number, value: number): number {
   const t = clamp01((value - low) / Math.max(0.0001, high - low));
   return t * t * (3 - 2 * t);
-}
-
-function fractional(value: number): number {
-  return value - Math.floor(value);
 }
 
 function clampRange(value: number, low: number, high: number): number {
