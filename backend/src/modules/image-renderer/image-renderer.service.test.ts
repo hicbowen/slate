@@ -9,6 +9,7 @@ import {
   FRAME_BYTES_GRAY4,
   FRAME_HEIGHT,
   FRAME_WIDTH,
+  renderBwryPixels,
   resolveBwryRenderPreset,
 } from 'shared';
 import { ImageRendererService } from './image-renderer.service';
@@ -155,6 +156,41 @@ describe('ImageRendererService', () => {
     }
     expect(resolveBwryRenderPreset(gradient, width, height, 'auto')).toBe('photo');
     expect(resolveBwryRenderPreset(graphic, width, height, 'auto')).toBe('graphic');
+  });
+
+  it('四色自动图文对浅黄平坦色块使用实色而不是纸白噪点', () => {
+    const width = 120;
+    const height = 90;
+    const rgb = new Uint8Array(width * height * 3);
+    rgb.fill(255);
+    for (let y = 20; y < 70; y++) {
+      for (let x = 30; x < 90; x++) {
+        const offset = (y * width + x) * 3;
+        rgb[offset] = 254;
+        rgb[offset + 1] = 220;
+        rgb[offset + 2] = 102;
+      }
+    }
+    expect(resolveBwryRenderPreset(rgb, width, height, 'auto')).toBe('graphic');
+    const pixels = renderBwryPixels(rgb, width, height, 'auto');
+    const blockColors = new Set<number>();
+    for (let y = 22; y < 68; y++) {
+      for (let x = 32; x < 88; x++) blockColors.add(pixels[y * width + x]!);
+    }
+    expect(blockColors).toEqual(new Set([2]));
+  });
+
+  it('四色图文使用红黄彩墨合成橙色而不掺入纸白', () => {
+    const width = 64;
+    const height = 64;
+    const rgb = new Uint8Array(width * height * 3);
+    for (let offset = 0; offset < rgb.length; offset += 3) {
+      rgb[offset] = 253;
+      rgb[offset + 1] = 159;
+      rgb[offset + 2] = 42;
+    }
+    const colors = new Set(renderBwryPixels(rgb, width, height, 'graphic'));
+    expect(colors).toEqual(new Set([2, 3]));
   });
 
   it('黑图(autoInvert 触发) 仍是白', async () => {

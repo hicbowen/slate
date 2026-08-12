@@ -101,9 +101,14 @@ export function resolveBwryRenderPreset(
   let samples = 0;
   let edges = 0;
   let hardEdges = 0;
+  let paper = 0;
   for (let y = 0; y + step < height; y += step) {
     for (let x = 0; x + step < width; x += step) {
       const pixel = y * width + x;
+      const offset = pixel * 3;
+      const min = Math.min(rgb[offset]!, rgb[offset + 1]!, rgb[offset + 2]!);
+      const max = Math.max(rgb[offset]!, rgb[offset + 1]!, rgb[offset + 2]!);
+      if (min >= 250 && max - min <= 8) paper++;
       const dx = Math.abs(colorLuma(rgb, pixel) - colorLuma(rgb, pixel + step));
       const dy = Math.abs(colorLuma(rgb, pixel) - colorLuma(rgb, pixel + step * width));
       const delta = Math.max(dx, dy);
@@ -114,7 +119,10 @@ export function resolveBwryRenderPreset(
   }
   const edgeRatio = edges / Math.max(1, samples);
   const hardEdgeRatio = hardEdges / Math.max(1, samples);
-  return edgeRatio >= 0.12 || (edgeRatio >= 0.09 && hardEdgeRatio >= 0.06) ? 'graphic' : 'photo';
+  const paperRatio = paper / Math.max(1, samples);
+  return paperRatio >= 0.45 || edgeRatio >= 0.12 || (edgeRatio >= 0.09 && hardEdgeRatio >= 0.06)
+    ? 'graphic'
+    : 'photo';
 }
 
 export function renderBwry2bpp(
@@ -230,8 +238,8 @@ const LAYER_CONFIG: Record<ResolvedPreset, LayerConfig> = {
     chromaFloor: 0.018,
     chromaFull: 0.13,
     colorBoost: 1,
-    detail: 1,
-    smoothDelta: 0,
+    detail: 0.25,
+    smoothDelta: 0.06,
   },
 };
 
@@ -242,20 +250,27 @@ function quantizeBwryLayers(
   preset: ResolvedPreset
 ): Uint8Array {
   const lab = createLabPlanes(rgb);
-  const filtered = preset === 'graphic' ? lab : smoothLabPlanes(lab, width, height, preset);
+  const firstPass = smoothLabPlanes(lab, width, height, preset);
+  const filtered =
+    preset === 'graphic' ? smoothLabPlanes(firstPass, width, height, preset) : firstPass;
   const out = new Uint8Array(width * height);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const index = y * width + x;
       const config = LAYER_CONFIG[preset];
       const detailL = filtered.l[index]! + (lab.l[index]! - filtered.l[index]!) * config.detail;
+      if (preset === 'graphic') {
+        const color = pickGraphicColor(detailL, filtered.a[index]!, filtered.b[index]!, x, y);
+        out[index] = color ?? pickNeutralTone(detailL, x, y);
+        continue;
+      }
       const weights = separateInkWeights(
         toneLightness(detailL, preset),
         filtered.a[index]!,
         filtered.b[index]!,
         preset
       );
-      out[index] = pickInk(weights, x, y, preset);
+      out[index] = pickInk(weights, x, y);
     }
   }
   return out;
@@ -347,8 +362,10 @@ function separateInkWeights(
   const config = LAYER_CONFIG[preset];
   const chromaMix = smoothstep(config.chromaFloor, config.chromaFull, chroma);
   const hue = (Math.atan2(db, da) * 180) / Math.PI;
-  const redAffinity = hueAffinity(hue, 25, 18, 45);
-  const yellowAffinity = hueAffinity(hue, 86, 20, 60);
+  let redAffinity = hueAffinity(hue, 25, 18, 45);
+  let yellowAffinity = hueAffinity(hue, 86, 20, 60);
+  if (redAffinity < yellowAffinity * 0.25) redAffinity = 0;
+  if (yellowAffinity < redAffinity * 0.25) yellowAffinity = 0;
   const affinitySum = redAffinity + yellowAffinity;
   let colorCoverage = chromaMix * Math.max(redAffinity, yellowAffinity) * config.colorBoost;
   if (affinitySum <= 0 || colorCoverage <= 0) {
@@ -384,30 +401,52 @@ function separateInkWeights(
   };
 }
 
-function pickInk(weights: InkWeights, x: number, y: number, preset: ResolvedPreset): BwryColor {
+function pickInk(weights: InkWeights, x: number, y: number): BwryColor {
   const colorCoverage = weights.yellow + weights.red;
-  const colorThreshold = ditherThreshold(x, y, 0, preset);
+  const colorThreshold = ditherThreshold(x, y, 0);
   if (colorThreshold < colorCoverage) {
     const redRatio = colorCoverage > 0 ? weights.red / colorCoverage : 0;
-    return ditherThreshold(x, y, 1, preset) < redRatio ? 3 : 2;
+    return ditherThreshold(x, y, 1) < redRatio ? 3 : 2;
   }
   const neutralCoverage = weights.black + weights.white;
   const blackRatio = neutralCoverage > 0 ? weights.black / neutralCoverage : 0;
-  return ditherThreshold(x, y, 2, preset) < blackRatio ? 0 : 1;
+  return ditherThreshold(x, y, 2) < blackRatio ? 0 : 1;
 }
 
-const BAYER_8 = new Uint8Array([
-  0, 48, 12, 60, 3, 51, 15, 63, 32, 16, 44, 28, 35, 19, 47, 31, 8, 56, 4, 52, 11, 59, 7, 55, 40, 24,
-  36, 20, 43, 27, 39, 23, 2, 50, 14, 62, 1, 49, 13, 61, 34, 18, 46, 30, 33, 17, 45, 29, 10, 58, 6,
-  54, 9, 57, 5, 53, 42, 26, 38, 22, 41, 25, 37, 21,
-]);
-
-function ditherThreshold(x: number, y: number, seed: number, preset: ResolvedPreset): number {
-  if (preset === 'graphic') {
-    const sx = (x + seed * 3) & 7;
-    const sy = (y + seed * 5) & 7;
-    return (BAYER_8[sy * 8 + sx]! + 0.5) / 64;
+/** 图文风格的高彩度暖色只在红黄彩墨之间混合，不在平坦色块中铺满纸白噪点。 */
+function pickGraphicColor(
+  targetL: number,
+  sourceA: number,
+  sourceB: number,
+  x: number,
+  y: number
+): Extract<BwryColor, 2 | 3> | null {
+  const black = DEVICE_OKLAB[0]!;
+  const white = DEVICE_OKLAB[1]!;
+  const neutralMix = clamp01((targetL - black[0]) / (white[0] - black[0]));
+  const da = sourceA - (black[1] + (white[1] - black[1]) * neutralMix);
+  const db = sourceB - (black[2] + (white[2] - black[2]) * neutralMix);
+  const chroma = Math.hypot(da, db);
+  const hue = (Math.atan2(db, da) * 180) / Math.PI;
+  const redAffinity = hueAffinity(hue, 25, 18, 45);
+  const yellowAffinity = hueAffinity(hue, 86, 20, 60);
+  if (chroma >= 0.07 && (redAffinity > 0 || yellowAffinity > 0)) {
+    const hueRedMix = 1 - smoothstep(42, 78, hue);
+    const lumaFactor = 0.3 + 0.7 * clamp01((0.92 - targetL) / 0.22);
+    const redMix = clamp01(hueRedMix * lumaFactor);
+    return ditherThreshold(x, y, 1) < redMix ? 3 : 2;
   }
+  return null;
+}
+
+function pickNeutralTone(targetL: number, x: number, y: number): Extract<BwryColor, 0 | 1> {
+  const blackL = DEVICE_OKLAB[0]![0];
+  const whiteL = DEVICE_OKLAB[1]![0];
+  const blackCoverage = 1 - clamp01((targetL - blackL) / (whiteL - blackL));
+  return ditherThreshold(x, y, 2) < blackCoverage ? 0 : 1;
+}
+
+function ditherThreshold(x: number, y: number, seed: number): number {
   const inner = fractional(0.06711056 * (x + seed * 17) + 0.00583715 * (y + seed * 29));
   return fractional(52.9829189 * inner);
 }
