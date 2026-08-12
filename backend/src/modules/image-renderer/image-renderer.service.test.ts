@@ -96,6 +96,25 @@ describe('ImageRendererService', () => {
     expect(data.every((byte) => (byte & 0xaa) === 0)).toBe(true);
   });
 
+  it('四色照片不会把低彩度暖灰当成黄色中间调', async () => {
+    const input = await makePng(400, 300, { r: 180, g: 165, b: 150 });
+    const { data } = await renderer.renderTo2bpp(input, { preset: 'photo' });
+    expect(data.every((byte) => (byte & 0xaa) === 0)).toBe(true);
+  });
+
+  it('四色照片的低彩度棕色不混入红墨来代替暗部', async () => {
+    const input = await makePng(400, 300, { r: 180, g: 130, b: 80 });
+    const { data } = await renderer.renderTo2bpp(input, { preset: 'photo' });
+    const colors = new Set<number>();
+    for (const byte of data) {
+      colors.add(byte & 0x03);
+      colors.add((byte >> 2) & 0x03);
+      colors.add((byte >> 4) & 0x03);
+      colors.add((byte >> 6) & 0x03);
+    }
+    expect(colors).toEqual(new Set([0, 2]));
+  });
+
   it('四色鲜明模式保留纯红色块', async () => {
     const input = await makePng(400, 300, { r: 185, g: 43, b: 39 });
     const { data } = await renderer.renderTo2bpp(input, { preset: 'vivid' });

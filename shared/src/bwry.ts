@@ -177,7 +177,7 @@ function quantizeBwryGraphic(
     const r = srgbToLinear(rgb[src]!);
     const g = srgbToLinear(rgb[src + 1]!);
     const b = srgbToLinear(rgb[src + 2]!);
-    out[dst] = nearestPerceptual(r, g, b, !isNeutral(rgb, src), false);
+    out[dst] = nearestPerceptual(r, g, b, allowedColorInks(rgb, src, 'graphic'), false);
   }
   return out;
 }
@@ -207,13 +207,25 @@ function quantizeBwryPhoto(
       const r = clamp01(work[offset]!);
       const g = clamp01(work[offset + 1]!);
       const b = clamp01(work[offset + 2]!);
-      const color = nearestPerceptual(r, g, b, !isNeutral(rgb, offset), vivid);
+      const colorInks = allowedColorInks(rgb, offset, vivid ? 'vivid' : 'photo');
+      const color = nearestPerceptual(r, g, b, colorInks, vivid);
       out[pixel] = color;
       const target = DEVICE_LINEAR[color]!;
       const edgeScale = isColorEdge(rgb, width, height, x, y) ? 0.2 : 1;
-      const er = clampError(r - target[0]) * edgeScale;
-      const eg = clampError(g - target[1]) * edgeScale;
-      const eb = clampError(b - target[2]) * edgeScale;
+      let er: number;
+      let eg: number;
+      let eb: number;
+      if (colorInks === 0) {
+        // 中性色只传递亮度误差，避免上游彩色墨的 RGB 误差重新污染灰色邻域。
+        const error = clampError(linearLuma(r, g, b) - linearLuma(...target)) * edgeScale;
+        er = error;
+        eg = error;
+        eb = error;
+      } else {
+        er = clampError(r - target[0]) * edgeScale;
+        eg = clampError(g - target[1]) * edgeScale;
+        eb = clampError(b - target[2]) * edgeScale;
+      }
       diffuseLinear(work, width, height, x + step, y, er, eg, eb, 7 / 16);
       diffuseLinear(work, width, height, x - step, y + 1, er, eg, eb, 3 / 16);
       diffuseLinear(work, width, height, x, y + 1, er, eg, eb, 5 / 16);
@@ -227,7 +239,7 @@ function nearestPerceptual(
   r: number,
   g: number,
   b: number,
-  allowColor: boolean,
+  colorInks: number,
   vivid: boolean
 ): BwryColor {
   const source = linearRgbToOklab(r, g, b);
@@ -235,7 +247,8 @@ function nearestPerceptual(
   let bestDistance = Number.POSITIVE_INFINITY;
   for (let raw = 0; raw < DEVICE_OKLAB.length; raw++) {
     const index = raw as BwryColor;
-    if (!allowColor && index >= 2) continue;
+    if (index === 2 && (colorInks & YELLOW_INK) === 0) continue;
+    if (index === 3 && (colorInks & RED_INK) === 0) continue;
     const target = DEVICE_OKLAB[index]!;
     const dL = source[0] - target[0];
     const da = source[1] - target[1];
@@ -248,6 +261,42 @@ function nearestPerceptual(
     }
   }
   return best;
+}
+
+const YELLOW_INK = 1;
+const RED_INK = 2;
+
+type ColorPreset = 'photo' | 'vivid' | 'graphic';
+
+/**
+ * 彩墨先按原图的彩度和色相准入，再参与色距比较。
+ *
+ * 红黄墨的亮度恰好处于黑白之间；若只比较四色距离，暖灰会被黄色当作“中灰”承载。
+ * 因此自然照片使用保守阈值，鲜明和图文模式再逐步放宽。高彩度橙色允许红黄混合，
+ * 低彩度棕色只允许更接近的单一彩墨，避免红黄共同替代灰阶。
+ */
+function allowedColorInks(
+  rgb: Uint8Array | Uint8ClampedArray,
+  offset: number,
+  preset: ColorPreset
+): number {
+  const lab = linearRgbToOklab(
+    srgbToLinear(rgb[offset]!),
+    srgbToLinear(rgb[offset + 1]!),
+    srgbToLinear(rgb[offset + 2]!)
+  );
+  const chroma = Math.hypot(lab[1], lab[2]);
+  const chromaFloor = preset === 'photo' ? 0.075 : preset === 'vivid' ? 0.052 : 0.045;
+  if (chroma < chromaFloor) return 0;
+
+  const hue = (Math.atan2(lab[2], lab[1]) * 180) / Math.PI;
+  if (hue >= -50 && hue < 43) return RED_INK;
+  if (hue > 72 && hue <= 122) return YELLOW_INK;
+  if (hue >= 43 && hue <= 72) {
+    const mixedInkFloor = preset === 'photo' ? 0.105 : 0.085;
+    return chroma >= mixedInkFloor ? RED_INK | YELLOW_INK : YELLOW_INK;
+  }
+  return 0;
 }
 
 function diffuseLinear(
@@ -268,10 +317,8 @@ function diffuseLinear(
   work[offset + 2] = clamp01(work[offset + 2]! + eb * weight);
 }
 
-function isNeutral(rgb: Uint8Array | Uint8ClampedArray, offset: number): boolean {
-  const min = Math.min(rgb[offset]!, rgb[offset + 1]!, rgb[offset + 2]!);
-  const max = Math.max(rgb[offset]!, rgb[offset + 1]!, rgb[offset + 2]!);
-  return max - min < 24;
+function linearLuma(r: number, g: number, b: number): number {
+  return r * 0.2126 + g * 0.7152 + b * 0.0722;
 }
 
 function isColorEdge(
