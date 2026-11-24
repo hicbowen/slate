@@ -974,7 +974,9 @@
             "percentage": "{primary_used_percent}",
             "labelFontSize": 16,
             "valueFontSize": 16,
-            "barHeight": 14
+            "barHeight": 14,
+            "warningAt": 80,
+            "criticalAt": 100
           },
           {
             "type": "progress",
@@ -991,7 +993,9 @@
             "percentage": "{secondary_used_percent}",
             "labelFontSize": 16,
             "valueFontSize": 16,
-            "barHeight": 14
+            "barHeight": 14,
+            "warningAt": 80,
+            "criticalAt": 100
           },
           {
             "type": "line",

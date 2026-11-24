@@ -56,6 +56,24 @@ func TestCustomTemplateFillsBlockDefaults(t *testing.T) {
 	}
 }
 
+func TestProgressColorThresholds(t *testing.T) {
+	prefix := `{"type":"dashboard","template":{"kind":"custom","template":{"blocks":[{"type":"progress","x":20,"y":50,"w":300,"h":22,"label":"限额","percentage":87,`
+	suffix := `}]}}}`
+	cfg, err := NormalizeConfig(json.RawMessage(prefix + `"warningAt":80,"criticalAt":100` + suffix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := cfg.Template.Template.Blocks[0]
+	if block.WarningAt == nil || *block.WarningAt != 80 || block.CriticalAt == nil || *block.CriticalAt != 100 {
+		t.Fatalf("thresholds lost: %+v", block)
+	}
+	for _, thresholds := range []string{`"warningAt":0`, `"criticalAt":101`, `"warningAt":90,"criticalAt":80`} {
+		if _, err := NormalizeConfig(json.RawMessage(prefix + thresholds + suffix)); err == nil {
+			t.Errorf("invalid thresholds accepted: %s", thresholds)
+		}
+	}
+}
+
 func TestScheduleCalendarWakesAfterLocalMidnight(t *testing.T) {
 	now := time.Date(2026, 10, 26, 15, 0, 0, 0, time.UTC) // 23:00 in Shanghai
 	next, due := schedule(api.DynamicConfig{Type: api.DynamicTypeDailyCalendar, TZ: "Asia/Shanghai"}, now)

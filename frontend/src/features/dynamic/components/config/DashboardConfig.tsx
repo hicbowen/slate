@@ -37,7 +37,7 @@ export function DashboardConfigPanel({
   const activeDescription =
     ref?.kind === 'system'
       ? (systemTemplate(ref.id)?.description ?? '')
-      : '编辑 JSON 模板；数据由新建初始数据或推送接口提供，模板保存在内容配置中。';
+      : '编辑 JSON 模板。进度条可用 warningAt、criticalAt 设置 Note4C 的黄、红阈值（%）。';
   const updateCustomTemplate = useCallback(
     (template: DashboardTemplate) => {
       onChange({ ...config, template: { kind: 'custom', template } });

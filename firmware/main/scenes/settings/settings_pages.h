@@ -12,7 +12,8 @@
 
 class ConfirmActionPage : public SettingsPageBase {
    public:
-    ConfirmActionPage(std::string name, std::string caption, std::string warning);
+    ConfirmActionPage(std::string name, std::string caption, std::string warning,
+                      const char* danger_label = nullptr);
     ~ConfirmActionPage() override;
 
     const char* Name() const override {
@@ -29,6 +30,7 @@ class ConfirmActionPage : public SettingsPageBase {
     std::string name_;
     std::string caption_;
     std::string warning_;
+    const char* danger_label_;
 };
 
 class VolumePage : public SettingsPageBase {

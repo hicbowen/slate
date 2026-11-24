@@ -30,7 +30,7 @@ func New() (*Renderer, error) {
 // Render returns a packed 400×300 frame. The status bar strip stays white for the
 // firmware to draw over.
 func (r *Renderer) Render(in Input) ([]byte, error) {
-	c, err := r.draw(in)
+	c, err := r.draw(in, false)
 	if err != nil {
 		return nil, err
 	}
@@ -39,16 +39,20 @@ func (r *Renderer) Render(in Input) ([]byte, error) {
 
 // RenderFrames renders both renditions from the same snapshot and layout.
 func (r *Renderer) RenderFrames(in Input) (mono, color []byte, err error) {
-	c, err := r.draw(in)
+	c, err := r.draw(in, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	return c.Packed(), c.PackedColor(), nil
+	colorCanvas, err := r.draw(in, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c.Packed(), colorCanvas.PackedColor(), nil
 }
 
-func (r *Renderer) draw(in Input) (*Canvas, error) {
+func (r *Renderer) draw(in Input, color bool) (*Canvas, error) {
 	c := NewCanvas(frameW, frameH)
-	d := drawer{c, r.fonts}
+	d := drawer{c: c, fonts: r.fonts, color: color}
 	loc := Location(in.Config.TZ)
 	var err error
 	switch in.Type {

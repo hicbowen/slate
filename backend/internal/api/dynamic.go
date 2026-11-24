@@ -89,6 +89,8 @@ type DashboardBlock struct {
 	LabelFontSize int             `json:"labelFontSize,omitempty"`
 	ValueFontSize int             `json:"valueFontSize,omitempty"`
 	BarHeight     int             `json:"barHeight,omitempty"`
+	WarningAt     *float64        `json:"warningAt,omitempty"`
+	CriticalAt    *float64        `json:"criticalAt,omitempty"`
 	Style         string          `json:"style,omitempty"`
 	Stroke        *bool           `json:"stroke,omitempty"`
 	Fill          string          `json:"fill,omitempty"`

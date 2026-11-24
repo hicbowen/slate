@@ -347,6 +347,8 @@ export interface DashboardBlock {
   labelFontSize?: number /* int */;
   valueFontSize?: number /* int */;
   barHeight?: number /* int */;
+  warningAt?: number /* float64 */;
+  criticalAt?: number /* float64 */;
   style?: string;
   stroke?: boolean;
   fill?: string;

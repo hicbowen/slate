@@ -235,7 +235,7 @@ void FrameScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
             break;
         }
         case UiEventKind::kMinuteTick:
-            if (!current_gray_)
+            if (!display_profile::kFourColor && !current_gray_)
                 RefreshStatusBarAndRender(ctx, status_bar_.get());
             break;
         case UiEventKind::kUnbound: {
@@ -384,7 +384,7 @@ void FrameScene::LoadFrame(SceneContext& ctx, int idx, bool force_full, AudioBeh
     ESP_LOGD(kTag, "lvgl refresh begin scene=frame idx=%d", idx);
     ApplyEmptyState();
     if (status_bar_) {
-        if (display_profile::IsGrayFrameSize(raw.size()) || current_gray_)
+        if (display_profile::kFourColor || display_profile::IsGrayFrameSize(raw.size()) || current_gray_)
             RefreshStatusBarFromSensors(ctx, *status_bar_);
         status_bar_->SetCaption(meta.status_bar_text);
     }

@@ -10,10 +10,6 @@ namespace {
 // 选 6 行 + 42 行高:行间不空,设置页 6 项可完整放进一屏。
 // thumb track 区 [pad_top, root_h - pad_bot] 自然对称,顶/底间距相等。
 // 右侧 thumb 几何定义在 theme.h,与 DeviceInfoPage 共用。
-lv_color_t ItemColor(MenuList::Tone tone) {
-    return tone == MenuList::Tone::kDanger ? theme::Danger() : theme::Ink();
-}
-
 lv_color_t CursorColor(MenuList::Tone tone) {
     return tone == MenuList::Tone::kDanger ? theme::Danger() : theme::Accent();
 }
@@ -64,14 +60,25 @@ MenuList::MenuList(lv_obj_t* parent, std::vector<Item> items, int initial_cursor
         // 主文字
         auto* lbl = lv_label_create(row);
         lv_obj_set_style_text_font(lbl, &Zfull_16, 0);
-        lv_obj_set_style_text_color(lbl, ItemColor(items_[i].tone), 0);
+        lv_obj_set_style_text_color(lbl, theme::Ink(), 0);
         lv_label_set_text(lbl, items_[i].title.c_str());
         lv_obj_align(lbl, LV_ALIGN_LEFT_MID, theme::kMenuRowPadLeft, 0);
+
+        if (items_[i].tone == Tone::kDanger) {
+            auto* warning = lv_label_create(row);
+            lv_obj_set_style_text_font(warning, &Zfull_16, 0);
+            lv_obj_set_style_text_color(warning, theme::Paper(), 0);
+            lv_obj_set_style_bg_color(warning, theme::Danger(), 0);
+            lv_obj_set_style_bg_opa(warning, LV_OPA_COVER, 0);
+            lv_obj_set_style_pad_hor(warning, 4, 0);
+            lv_label_set_text(warning, "!");
+            lv_obj_align(warning, LV_ALIGN_RIGHT_MID, -theme::kMenuRowPadRight - 20, 0);
+        }
 
         // 右侧 chevron(用 ASCII '>' 配合现有 16px 字体即可,不必引大字号)
         auto* chev = lv_label_create(row);
         lv_obj_set_style_text_font(chev, &Zfull_16, 0);
-        lv_obj_set_style_text_color(chev, ItemColor(items_[i].tone), 0);
+        lv_obj_set_style_text_color(chev, theme::Ink(), 0);
         lv_label_set_text(chev, ">");
         lv_obj_align(chev, LV_ALIGN_RIGHT_MID, -theme::kMenuRowPadRight, 0);
     }

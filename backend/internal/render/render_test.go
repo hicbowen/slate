@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"image"
+	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -57,32 +58,84 @@ func TestFramesMatchGolden(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			data, _ := json.Marshal(tc.data)
-			frame, err := r.Render(Input{Type: tc.cfg.Type, Config: tc.cfg, Data: data, RenderedAt: renderedAt})
+			frame, color, err := r.RenderFrames(Input{Type: tc.cfg.Type, Config: tc.cfg, Data: data, RenderedAt: renderedAt})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(frame) != api.FrameBytes {
-				t.Fatalf("frame is %d bytes", len(frame))
+			if len(frame) != api.FrameBytes || len(color) != api.ColorFrameBytes {
+				t.Fatalf("unexpected frame sizes: mono %d, color %d", len(frame), len(color))
 			}
-			path := filepath.Join("testdata", "frames", name+".png")
-			if *update {
-				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, framePNG(frame), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				return
-			}
-			want, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("missing golden; run with -update: %v", err)
-			}
-			if !bytes.Equal(framePNG(frame), want) {
-				t.Fatalf("frame differs from %s; run with -update and review the image", path)
+			assertGolden(t, name, framePNG(frame))
+			switch name {
+			case "daily_calendar", "month_calendar", "weather", "hot_list":
+				assertGolden(t, name+"_bwry", colorFramePNG(color))
 			}
 		})
 	}
+
+	variants := map[string]struct {
+		cfg  api.DynamicConfig
+		data any
+	}{
+		"weather_alert_levels": {api.DynamicConfig{Type: api.DynamicTypeWeatherAlert}, WeatherAlertData{
+			Items: []WeatherAlertItem{
+				{Title: "浙江省杭州市气象台发布暴雨红色预警信号", IssuedAt: &issued},
+				{Title: "杭州市气象台发布高温橙色预警信号"},
+				{Title: "杭州市气象台发布雷电黄色预警信号"},
+				{Title: "中央气象台发布大风蓝色预警"},
+			},
+		}},
+		"dashboard_quota": {api.DynamicConfig{Type: api.DynamicTypeDashboard, Template: &api.DashboardTemplateRef{Kind: "system", ID: "ai_quota_monitor"}},
+			map[string]any{"service_label": "Codex", "plan_label": "Pro", "status_label": "已达限额",
+				"primary_window_label": "5小时", "primary_used_percent": 87, "secondary_window_label": "每周", "secondary_used_percent": 100,
+				"primary_reset_at_label": "14:00", "secondary_reset_at_label": "周四 09:00", "updated_label": "10-26 10:30"}},
+		"countdown":     {api.DynamicConfig{Type: api.DynamicTypeCountdown, Goal: "开学", TargetDate: "2026-10-29"}, CountdownData{RemainingDays: 3}},
+		"countdown_due": {api.DynamicConfig{Type: api.DynamicTypeCountdown, Goal: "开学", TargetDate: "2026-10-26"}, CountdownData{}},
+	}
+	for name, tc := range variants {
+		t.Run(name, func(t *testing.T) {
+			data, _ := json.Marshal(tc.data)
+			_, color, err := r.RenderFrames(Input{Type: tc.cfg.Type, Config: tc.cfg, Data: data, RenderedAt: renderedAt})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertGolden(t, name+"_bwry", colorFramePNG(color))
+		})
+	}
+}
+
+func assertGolden(t *testing.T, name string, got []byte) {
+	t.Helper()
+	path := filepath.Join("testdata", "frames", name+".png")
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("missing golden; run with -update: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("frame differs from %s; run with -update and review the image", path)
+	}
+}
+
+func colorFramePNG(frame []byte) []byte {
+	img := image.NewPaletted(image.Rect(0, 0, api.FrameWidth, api.FrameHeight), color.Palette{
+		color.RGBA{20, 17, 13, 255}, color.RGBA{245, 243, 237, 255},
+		color.RGBA{217, 165, 0, 255}, color.RGBA{185, 43, 39, 255},
+	})
+	for i := range img.Pix {
+		img.Pix[i] = frame[i>>2] >> (6 - (i&3)*2) & 3
+	}
+	var buf bytes.Buffer
+	_ = (&png.Encoder{CompressionLevel: png.BestCompression}).Encode(&buf, img)
+	return buf.Bytes()
 }
 
 func TestPackedColorWireOrder(t *testing.T) {

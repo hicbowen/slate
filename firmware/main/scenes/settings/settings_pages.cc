@@ -63,8 +63,10 @@ std::vector<uint8_t> MakeTestTone() {
 }
 }  // namespace
 
-ConfirmActionPage::ConfirmActionPage(std::string name, std::string caption, std::string warning)
-    : name_(std::move(name)), caption_(std::move(caption)), warning_(std::move(warning)) {
+ConfirmActionPage::ConfirmActionPage(std::string name, std::string caption, std::string warning,
+                                     const char* danger_label)
+    : name_(std::move(name)), caption_(std::move(caption)), warning_(std::move(warning)),
+      danger_label_(danger_label) {
 }
 
 ConfirmActionPage::~ConfirmActionPage() = default;
@@ -81,7 +83,19 @@ void ConfirmActionPage::OnEnter(SceneContext& ctx) {
     lv_obj_set_width(warn, LV_HOR_RES - 64);
     lv_label_set_long_mode(warn, LV_LABEL_LONG_WRAP);
     lv_label_set_text(warn, warning_.c_str());
-    lv_obj_align(warn, LV_ALIGN_CENTER, 0, -8);
+    lv_obj_align(warn, LV_ALIGN_CENTER, 0, danger_label_ ? 12 : -8);
+
+    if (danger_label_) {
+        auto* badge = lv_label_create(RootObj());
+        lv_obj_set_style_text_font(badge, &Zfull_16, 0);
+        lv_obj_set_style_text_color(badge, theme::Paper(), 0);
+        lv_obj_set_style_bg_color(badge, theme::Danger(), 0);
+        lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_hor(badge, 8, 0);
+        lv_obj_set_style_pad_ver(badge, 4, 0);
+        lv_label_set_text(badge, danger_label_);
+        lv_obj_align_to(badge, warn, LV_ALIGN_OUT_TOP_MID, 0, -10);
+    }
 
     CreateBottomHint("按确认 返回   长按确认 执行");
     FinishSettingsScaffoldEnter(ctx);
@@ -130,7 +144,7 @@ void VolumePage::OnEnter(SceneContext& ctx) {
     bar_fill_ = lv_obj_create(bar_track_);
     lv_obj_set_size(bar_fill_, 0, kBarHeight - 2);
     lv_obj_set_pos(bar_fill_, 0, 0);
-    lv_obj_set_style_bg_color(bar_fill_, lv_color_black(), 0);
+    lv_obj_set_style_bg_color(bar_fill_, theme::Accent(), 0);
     lv_obj_set_style_bg_opa(bar_fill_, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(bar_fill_, 0, 0);
     lv_obj_set_style_radius(bar_fill_, 0, 0);
@@ -242,6 +256,7 @@ DeviceInfoPage::~DeviceInfoPage() = default;
 
 void DeviceInfoPage::OnEnter(SceneContext& ctx) {
     LoadStaticInfo();
+    last_text_.clear();
 
     if (!ctx.epd->Lock(2000))
         return;
@@ -317,6 +332,8 @@ void DeviceInfoPage::OnEvent(SceneContext& ctx, const UiEvent& e) {
         case UiEventKind::kBatteryUpdated:
         case UiEventKind::kWifiStateChanged:
         case UiEventKind::kMinuteTick:
+            if (display_profile::kFourColor)
+                break;  // 四色屏在进入本页时读取一份完整状态。
             SyncRenderIfChanged(
                 ctx,
                 [this, &ctx]() {
@@ -383,8 +400,7 @@ bool DeviceInfoPage::Refresh(SceneContext& ctx) {
     if (!info_)
         return false;
 
-    if (status_bar_)
-        RefreshStatusBarFromSensors(ctx, *status_bar_);
+    const bool status_changed = status_bar_ && RefreshStatusBarFromSensors(ctx, *status_bar_);
 
     const bool        wifi_on        = ctx.wifi_connected ? ctx.wifi_connected() : false;
     const int         rssi_raw       = ctx.wifi_rssi ? ctx.wifi_rssi() : 0;
@@ -448,7 +464,7 @@ bool DeviceInfoPage::Refresh(SceneContext& ctx) {
                   static_cast<unsigned>(fs_free_pct), CONFIG_APP_PROJECT_VER, mac_str_,
                   server_url_.empty() ? "-" : server_url_.c_str());
     if (last_text_ == buf)
-        return false;
+        return status_changed;
     last_text_.assign(buf);
     lv_label_set_text(info_, buf);
     return true;
@@ -475,7 +491,8 @@ FactoryResetPage::FactoryResetPage()
                         "Wi-Fi 配置、设备绑定\n"
                         "小智配置及内容缓存\n"
                         "将全部清除\n"
-                        "重启后进入配网模式") {
+                        "重启后进入配网模式",
+                        "将清除设备配置") {
 }
 
 FactoryResetPage::~FactoryResetPage() = default;

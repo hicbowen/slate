@@ -128,7 +128,16 @@ func (d drawer) progress(b api.DashboardBlock, data map[string]any, x, y, w, h i
 	d.textCenteredY(labelFont, label, x, float64(centerY), textOpts{maxWidth: labelW - 6, ellipsis: true})
 	d.c.StrokeRect(barX, barY, barW, barH, Black)
 	if fillW := max(0, min(barW-2, round(float64(barW-2)*pct/100))); fillW > 0 {
-		d.c.FillRect(barX+1, barY+1, fillW, barH-2, Black)
+		ink := Black
+		if d.color {
+			switch {
+			case b.CriticalAt != nil && pct >= *b.CriticalAt:
+				ink = Red
+			case b.WarningAt != nil && pct >= *b.WarningAt:
+				ink = Yellow
+			}
+		}
+		d.c.FillRect(barX+1, barY+1, fillW, barH-2, ink)
 	}
 	if valueText != "" {
 		d.textCenteredY(valueFont, valueText, x+w, float64(centerY), textOpts{align: alignRight, maxWidth: valueW, ellipsis: true})

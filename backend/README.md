@@ -159,6 +159,8 @@ POST /api/contents/{id}/data
 | `secondary_reset_at_label` | `周四 09:00` | 重置时间 |
 | `updated_label` | `10-27 16:10` | 更新时间 |
 
+自定义模板可在 `progress` 区块设置 `warningAt` 和 `criticalAt`（可选，0 < 阈值 ≤ 100）。Note4C 的填充达到提醒阈值用黄墨，达到临界阈值用红墨。内置「AI 限额监控」使用 80% 和 100%。
+
 ### 设备协议 v2
 
 | 接口 | 请求体 |

@@ -42,6 +42,7 @@ func (o textOpts) withDefaults() textOpts {
 type drawer struct {
 	c     *Canvas
 	fonts *Fonts
+	color bool
 }
 
 func widthFallback(f, fb *Font, text string) int {
@@ -334,11 +335,9 @@ func (d drawer) sparkline(x, y, w, h int, values []float64) {
 	}
 }
 
-func (d drawer) badge(label string, x, y, w, h int, filled bool, ink uint8) {
-	color := ink
+func (d drawer) badge(label string, x, y, w, h int, filled bool, ink, text uint8) {
 	if filled {
 		d.c.FillRect(x, y, w, h, ink)
-		color = White
 	} else {
 		d.c.StrokeRect(x, y, w, h, ink)
 	}
@@ -349,5 +348,5 @@ func (d drawer) badge(label string, x, y, w, h int, filled bool, ink uint8) {
 	case d.fonts.Sans12.Width(label) <= w-4:
 		f = d.fonts.Sans12
 	}
-	d.textInBox(f, label, x, y, w, h, color)
+	d.textInBox(f, label, x, y, w, h, text)
 }

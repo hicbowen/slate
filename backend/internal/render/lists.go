@@ -27,12 +27,10 @@ func (d drawer) hotList(data HotListData) {
 		}
 		rank = min(99, max(1, rank))
 		color := Black
-		if i < 3 {
-			accent := Yellow
-			if i == 0 {
-				accent = Red
-			}
-			d.c.FillRect(contentLeft, rankY, rankW, rankH, accent)
+		if d.color && i == 0 {
+			d.c.FillRect(contentLeft, rankY, rankW, rankH, Yellow)
+		} else if !d.color && i < 3 {
+			d.c.FillRect(contentLeft, rankY, rankW, rankH, Black)
 			color = White
 		} else {
 			d.c.StrokeRect(contentLeft, rankY, rankW, rankH, Black)
@@ -89,7 +87,11 @@ func (d drawer) earthquake(data EarthquakeData, now time.Time) {
 	for i, item := range rest {
 		y := startY + i*rowH
 		fields := quakeFields(item)
-		d.badge("M"+or(item.Magnitude, "--"), contentLeft, y+11, 52, 24, i == 0, Red)
+		text := Black
+		if i == 0 {
+			text = White
+		}
+		d.badge("M"+or(item.Magnitude, "--"), contentLeft, y+11, 52, 24, i == 0, Red, text)
 		d.text(f.Sans16, or(item.Location, fallbackText), contentLeft+66, y+5, textOpts{maxWidth: contentRight - contentLeft - 66, ellipsis: true})
 		if fields.time != "" {
 			d.text(f.Metric12, fields.time, contentLeft+66, y+26, textOpts{maxWidth: 62, ellipsis: true})

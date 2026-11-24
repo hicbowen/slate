@@ -338,6 +338,14 @@ func normalizeBlock(b *api.DashboardBlock) error {
 		if rect.BarHeight < 4 || rect.BarHeight > 24 {
 			return fmt.Errorf("barHeight 须为 4-24")
 		}
+		if (b.WarningAt != nil && (*b.WarningAt <= 0 || *b.WarningAt > 100)) ||
+			(b.CriticalAt != nil && (*b.CriticalAt <= 0 || *b.CriticalAt > 100)) {
+			return fmt.Errorf("warningAt 和 criticalAt 须大于 0 且不超过 100")
+		}
+		if b.WarningAt != nil && b.CriticalAt != nil && *b.WarningAt >= *b.CriticalAt {
+			return fmt.Errorf("warningAt 须小于 criticalAt")
+		}
+		rect.WarningAt, rect.CriticalAt = b.WarningAt, b.CriticalAt
 	case "sparkline":
 		if err = checkSeries("values", b.Values, true); err != nil {
 			return err
