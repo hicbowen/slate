@@ -85,7 +85,9 @@ EpdSsd1683::~EpdSsd1683() {
     heap_caps_free(snapshot_);
     heap_caps_free(prev_snapshot_);
     heap_caps_free(lvgl_render_buf_);
-    buffer_ = snapshot_ = prev_snapshot_ = lvgl_render_buf_ = nullptr;
+    heap_caps_free(gray_buffer_);
+    heap_caps_free(gray_snapshot_);
+    buffer_ = snapshot_ = prev_snapshot_ = lvgl_render_buf_ = gray_buffer_ = gray_snapshot_ = nullptr;
 }
 
 void EpdSsd1683::Init() {
@@ -113,7 +115,15 @@ void EpdSsd1683::Init() {
     buffer_        = (uint8_t*)heap_caps_malloc(kBufferLen, MALLOC_CAP_SPIRAM);
     snapshot_      = (uint8_t*)heap_caps_malloc(kBufferLen, MALLOC_CAP_SPIRAM);
     prev_snapshot_ = (uint8_t*)heap_caps_malloc(kBufferLen, MALLOC_CAP_SPIRAM);
-    if (!buffer_ || !snapshot_ || !prev_snapshot_) {
+#if !CONFIG_SLATE_DISPLAY_NOTE4C
+    gray_buffer_   = (uint8_t*)heap_caps_malloc(display_profile::kGrayFrameBytes, MALLOC_CAP_SPIRAM);
+    gray_snapshot_ = (uint8_t*)heap_caps_malloc(display_profile::kGrayFrameBytes, MALLOC_CAP_SPIRAM);
+#endif
+    if (!buffer_ || !snapshot_ || !prev_snapshot_
+#if !CONFIG_SLATE_DISPLAY_NOTE4C
+        || !gray_buffer_ || !gray_snapshot_
+#endif
+    ) {
         ESP_LOGE(kTag, "init failed reason=framebuffer_alloc action=restart");
         esp_restart();
     }
@@ -220,7 +230,7 @@ bool EpdSsd1683::IsRefreshPending() {
     xSemaphoreTake(dirty_mutex_, portMAX_DELAY);
     // force_full_refresh_ 直到全刷完成才清，覆盖整个「main 调 RequestUrgentFullRefresh
     // → LVGL 渲染 → flush_cb notify → refresh_task 全刷」的等待窗口。
-    bool b = pending_ || urgent_refresh_ || force_full_refresh_ || refresh_in_progress_;
+    bool b = pending_ || urgent_refresh_ || force_full_refresh_ || gray_refresh_pending_ || refresh_in_progress_;
     xSemaphoreGive(dirty_mutex_);
     return b;
 }
@@ -245,6 +255,8 @@ void EpdSsd1683::RequestUrgentPartialRefresh() {
     // RefreshTaskLoop 头部的 sliding debounce（50 ms 内有新 notify 就续 50 ms，
     // 最长 500 ms）会自然吸收「ShowCar 后 LVGL 50 ms 才 flush」这一段时间。
     xSemaphoreTake(dirty_mutex_, portMAX_DELAY);
+    gray_selected_        = false;
+    gray_refresh_pending_ = false;
     urgent_refresh_      = true;
     refresh_in_progress_ = true;
     const bool pending   = pending_;
@@ -256,10 +268,16 @@ void EpdSsd1683::RequestUrgentPartialRefresh() {
         xTaskNotifyGive(refresh_task_);
 }
 
-void EpdSsd1683::RequestUrgentFullRefresh() {
+void EpdSsd1683::RequestUrgentFullRefresh(bool preserve_gray) {
     // 同上:设 force_full + notify,立即返回。debounce 吸收 LVGL flush。
     xSemaphoreTake(dirty_mutex_, portMAX_DELAY);
-    force_full_refresh_  = true;
+    if (preserve_gray && gray_selected_) {
+        gray_refresh_pending_ = true;
+    } else {
+        gray_selected_        = false;
+        gray_refresh_pending_ = false;
+        force_full_refresh_   = true;
+    }
     refresh_in_progress_ = true;
     const bool pending   = pending_;
     const bool urgent    = urgent_refresh_;
@@ -268,6 +286,44 @@ void EpdSsd1683::RequestUrgentFullRefresh() {
              refresh_task_);
     if (refresh_task_)
         xTaskNotifyGive(refresh_task_);
+}
+
+bool EpdSsd1683::RequestGray16FullRefresh(const uint8_t* data, size_t len) {
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    (void)data;
+    (void)len;
+    return false;
+#else
+    if (!data || !display_profile::IsGrayFrameSize(len) || !gray_buffer_ || !refresh_task_)
+        return false;
+    xSemaphoreTake(dirty_mutex_, portMAX_DELAY);
+    memcpy(gray_buffer_, data, len);
+    // 灰阶图片仍保留 Slate 的 24px 状态栏；LVGL framebuffer 是 mono1，映射到 0/15。
+    for (int y = 0; y < epd::kStatusBarSnapshotHeight; ++y) {
+        for (int x = 0; x < kWidth; ++x) {
+            const size_t mono_index = static_cast<size_t>(y) * (kWidth / 8) + x / 8;
+            const bool white = (buffer_[mono_index] & (0x80u >> (x & 7))) != 0;
+            const size_t pixel = static_cast<size_t>(y) * kWidth + x;
+            uint8_t& packed = gray_buffer_[pixel / 2];
+            if ((pixel & 1u) == 0)
+                packed = static_cast<uint8_t>((packed & 0x0F) | (white ? 0xF0 : 0x00));
+            else
+                packed = static_cast<uint8_t>((packed & 0xF0) | (white ? 0x0F : 0x00));
+        }
+    }
+    gray_selected_        = true;
+    gray_refresh_pending_ = true;
+    refresh_in_progress_  = true;
+    // 此请求代表完整画面，丢弃在 LVGL 合成状态栏时产生的 mono 刷新请求。
+    pending_            = false;
+    urgent_refresh_     = false;
+    force_full_refresh_ = false;
+    dirty_              = {0, 0, 0, 0};
+    xSemaphoreGive(dirty_mutex_);
+    ESP_LOGI(kTag, "refresh request type=gray16 bytes=%u", static_cast<unsigned>(len));
+    xTaskNotifyGive(refresh_task_);
+    return true;
+#endif
 }
 
 void EpdSsd1683::WriteRawFrame(int x, int y, int w, int h, const uint8_t* data, size_t len) {
@@ -380,7 +436,7 @@ void EpdSsd1683::DebounceRefreshNotify() {
              static_cast<unsigned long>(xTaskGetTickCount() - first_tick));
 }
 
-bool EpdSsd1683::TakeRefreshRequest(bool& urgent, bool& force_full) {
+bool EpdSsd1683::TakeRefreshRequest(bool& urgent, bool& force_full, bool& gray_refresh) {
     // read-and-clear at start:防止 refresh_task 跑刷新期间又有
     // RequestUrgentXxxRefresh 设 flag 时,本轮完成时把它误清。
     xSemaphoreTake(dirty_mutex_, portMAX_DELAY);
@@ -389,6 +445,11 @@ bool EpdSsd1683::TakeRefreshRequest(bool& urgent, bool& force_full) {
         xSemaphoreGive(dirty_mutex_);
         ESP_LOGD(kTag, "refresh request stop");
         return false;
+    }
+    gray_refresh = gray_refresh_pending_;
+    if (gray_refresh) {
+        memcpy(gray_snapshot_, gray_buffer_, display_profile::kGrayFrameBytes);
+        gray_refresh_pending_ = false;
     }
     urgent              = urgent_refresh_;
     urgent_refresh_     = false;
@@ -399,7 +460,8 @@ bool EpdSsd1683::TakeRefreshRequest(bool& urgent, bool& force_full) {
         dirty_   = {0, 0, 0, 0};
     }
     xSemaphoreGive(dirty_mutex_);
-    ESP_LOGD(kTag, "refresh request take urgent=%d force_full=%d", urgent ? 1 : 0, force_full ? 1 : 0);
+    ESP_LOGD(kTag, "refresh request take urgent=%d force_full=%d gray=%d", urgent ? 1 : 0, force_full ? 1 : 0,
+             gray_refresh ? 1 : 0);
     return true;
 }
 
@@ -439,7 +501,7 @@ bool EpdSsd1683::CaptureRefreshSnapshot(bool force_full, epd::DiffResult& diff, 
     last_sample_tick_ = xTaskGetTickCount();
 
     diff = epd::Diff(prev_snapshot_, snapshot_, kBufferLen);
-    if (diff.bits == 0 && !force_full) {
+    if (diff.bits == 0 && !force_full && prev_synced) {
         ESP_LOGD(kTag, "snapshot unchanged force_full=0 prev_synced=%d", prev_synced ? 1 : 0);
         MarkRefreshIdle();
         return false;
@@ -491,6 +553,16 @@ void EpdSsd1683::RunRefresh(bool full_refresh) {
              static_cast<long long>((esp_timer_get_time() - start_us) / 1000));
 }
 
+void EpdSsd1683::RunGray16Refresh() {
+#if !CONFIG_SLATE_DISPLAY_NOTE4C
+    const int64_t start_us = esp_timer_get_time();
+    ESP_LOGI(kTag, "refresh begin type=gray16 passes=5");
+    EpdDisplayGray16();
+    ESP_LOGI(kTag, "refresh done type=gray16 elapsed_ms=%lld",
+             static_cast<long long>((esp_timer_get_time() - start_us) / 1000));
+#endif
+}
+
 void EpdSsd1683::FinishRefreshSnapshot() {
     xSemaphoreTake(dirty_mutex_, portMAX_DELAY);
     memcpy(prev_snapshot_, snapshot_, kBufferLen);
@@ -509,6 +581,7 @@ void EpdSsd1683::MarkRefreshIdle() {
 
 void EpdSsd1683::RefreshTaskLoop() {
     ESP_LOGD(kTag, "task start name=epd_refresh");
+    bool gray_displayed = false;
     while (true) {
         // 第一次阻塞等 notify。来源:flush_cb / RequestUrgentXxxRefresh / 周期采样(已废)。
         if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY) == 0)
@@ -520,11 +593,29 @@ void EpdSsd1683::RefreshTaskLoop() {
 
         DebounceRefreshNotify();
 
-        bool urgent     = false;
-        bool force_full = false;
-        if (!TakeRefreshRequest(urgent, force_full))
+        bool urgent       = false;
+        bool force_full   = false;
+        bool gray_refresh = false;
+        if (!TakeRefreshRequest(urgent, force_full, gray_refresh))
             break;
 
+        if (gray_refresh) {
+            RunGray16Refresh();
+            gray_displayed = true;
+            xSemaphoreTake(dirty_mutex_, portMAX_DELAY);
+            prev_snapshot_synced_ = false;
+            refresh_in_progress_  = false;
+            partial_since_full_   = 0;
+            xSemaphoreGive(dirty_mutex_);
+            continue;
+        }
+
+        // Ignore automatic LVGL refreshes while a grayscale photograph is displayed.
+        // A scene change or an explicit frame request can replace it.
+        if (gray_displayed && !urgent && !force_full) {
+            MarkRefreshIdle();
+            continue;
+        }
         if (!ThrottleRefreshSampling(urgent, force_full))
             continue;
 
@@ -534,6 +625,7 @@ void EpdSsd1683::RefreshTaskLoop() {
             continue;
 
         RunRefresh(ShouldUseFullRefresh(diff, force_full, prev_synced));
+        gray_displayed = false;
 
         // force_full_refresh_ 已在 start 处清(read-and-clear)。这里不要重设,
         // 否则会覆盖全刷期间又有新 RequestUrgentFullRefresh 设的 true。

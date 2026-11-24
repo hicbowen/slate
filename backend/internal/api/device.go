@@ -17,6 +17,8 @@ type DeviceRegisterResponse struct {
 
 // DeviceSyncRequest reports telemetry. The manifest is returned only when
 // ManifestVersion differs from the selected group's current version.
+// FrameFormat may also be supplied as a query parameter for compatibility with
+// servers that do not accept additional JSON fields.
 type DeviceSyncRequest struct {
 	Protocol        int             `json:"protocol"`
 	ManifestVersion string          `json:"manifestVersion"`
@@ -34,6 +36,7 @@ type DeviceTelemetry struct {
 	CurrentContentID string `json:"currentContentId,omitempty"`
 }
 
+// DeviceGroupRequest uses the same frame format negotiation as DeviceSyncRequest.
 type DeviceGroupRequest struct {
 	Protocol        int    `json:"protocol"`
 	Action          string `json:"action" tstype:"'next' | 'prev' | 'select'"`

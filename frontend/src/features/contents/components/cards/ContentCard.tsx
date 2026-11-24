@@ -26,7 +26,11 @@ export const ContentCard = memo(function ContentCard({ gid, content, onEdit }: C
     gid,
     content,
   });
-  const img = useBlob(content.imageHash);
+  const img = useBlob(
+    content.displayMode === 'gray16'
+      ? (content.grayImageHash ?? content.imageHash)
+      : content.imageHash
+  );
   const { attributes, listeners, setNodeRef, style, isDragging } = useSortableStyle(content.id);
   const refreshContent = useMutationAction<string>({
     isPending: refresh.isPending,

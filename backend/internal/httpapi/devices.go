@@ -352,7 +352,7 @@ func (a *API) syncDevice(w http.ResponseWriter, r *http.Request) error {
 	if t.WakeReason == "timer" && t.CurrentContentID != "" {
 		a.refreshCurrentFrame(r.Context(), id, t.CurrentContentID)
 	}
-	state, err := a.deviceState(r.Context(), id, req.ManifestVersion, req.FrameFormat)
+	state, err := a.deviceState(r.Context(), id, req.ManifestVersion, deviceFrameFormat(r, req.FrameFormat))
 	if err != nil {
 		return err
 	}
@@ -448,11 +448,20 @@ func (a *API) changeDeviceGroup(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	state, err := a.deviceState(r.Context(), id, req.ManifestVersion, req.FrameFormat)
+	state, err := a.deviceState(r.Context(), id, req.ManifestVersion, deviceFrameFormat(r, req.FrameFormat))
 	if err != nil {
 		return err
 	}
 	return ok(w, state)
+}
+
+// The query parameter lets Note4 request gray frames from this server while
+// still sending a JSON body that an unmodified v2 server accepts.
+func deviceFrameFormat(r *http.Request, explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	return r.URL.Query().Get("frameFormat")
 }
 
 func (a *API) deviceState(ctx context.Context, id, knownVersion, frameFormat string) (api.DeviceState, error) {

@@ -519,7 +519,8 @@ bool ApiClient::Sync(const std::string& manifest_version, const Telemetry& tel, 
                 cJSON_AddStringToObject(t, proto::kCurrentContentId, tel.current_content_id.c_str());
         }
     }
-    return PostJson("/api/device/sync", PrintBody(root), /*need_auth=*/true,
+    const char* path = display_profile::kFourColor ? "/api/device/sync" : "/api/device/sync?frameFormat=gray4";
+    return PostJson(path, PrintBody(root), /*need_auth=*/true,
                     [&](cJSON* data) { return ParseDeviceState(data, out); });
 }
 
@@ -537,7 +538,8 @@ bool ApiClient::ChangeGroup(GroupAction action, const std::string& group_id, con
         if (display_profile::kFourColor)
             cJSON_AddStringToObject(root, proto::kFrameFormat, display_profile::kFrameFormat);
     }
-    return PostJson("/api/device/group", PrintBody(root), /*need_auth=*/true,
+    const char* path = display_profile::kFourColor ? "/api/device/group" : "/api/device/group?frameFormat=gray4";
+    return PostJson(path, PrintBody(root), /*need_auth=*/true,
                     [&](cJSON* data) { return ParseDeviceState(data, out); });
 }
 

@@ -17,7 +17,7 @@ const DYNAMIC_CONTENT_TYPE_META = Object.fromEntries(
 export const TYPE_META: Record<AllContentType, TypeMeta> = {
   image: {
     label: '图片',
-    hint: '上传图片，生成黑白和四色帧',
+    hint: '上传图片，生成黑白、16 灰和四色帧',
     description: '上传图片并配置抖动 / 阈值；可附音频或 TTS。',
     hasConfigurableParams: true,
     supportsAudio: true,

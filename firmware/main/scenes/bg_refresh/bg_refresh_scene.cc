@@ -28,7 +28,7 @@ constexpr int  kBpr   = display_profile::kBytesPerRow;
 // 后台刷新整体硬截止：从进场到完成的总时长上限。WiFi 连接 + poll + 拉帧 + EPD 刷新
 // 都算在内。超时直接投 kBgRefreshDone 回睡，不再依赖 10min idle Tick 兜底，封住
 // 「sync 卡住 → 持续亮屏连网耗电」的窗口。
-constexpr int kBgRefreshDeadlineMs = display_profile::kFourColor ? 150'000 : 40'000;
+constexpr int kBgRefreshDeadlineMs = display_profile::kFourColor ? 150'000 : 75'000;
 
 void PostBgRefreshDone() {
     evt::PostSimple(UiEventKind::kBgRefreshDone);
@@ -213,7 +213,7 @@ bool BgRefreshScene::RenderChangedFrame(SceneContext& ctx) {
         return RenderEmptyState(ctx);
 
     std::vector<uint8_t> raw;
-    if (!cache::ReadFrameImage(gid, seq, raw) || raw.size() != static_cast<size_t>(FrameView::kRawBytes)) {
+    if (!cache::ReadFrameImage(gid, seq, raw)) {
         ESP_LOGW(kTag, "render skipped reason=image_miss seq=%d bytes=%u", seq, static_cast<unsigned>(raw.size()));
         return false;
     }
@@ -234,6 +234,14 @@ bool BgRefreshScene::RenderChangedFrame(SceneContext& ctx) {
     status_bar_->SetCaption(meta.status_bar_text);
     RefreshStatusBarFromSensors(ctx, *status_bar_);
     lv_refr_now(NULL);
+
+    if (display_profile::IsGrayFrameSize(raw.size())) {
+        const bool queued = ctx.epd->RequestGray16FullRefresh(raw.data(), raw.size());
+        ctx.epd->Unlock();
+        if (queued)
+            StartWatcher(ctx.epd);
+        return queued;
+    }
 
     // Background refresh uses LVGL only for the status bar. The frame body is
     // written in the panel frame format so it exactly matches the cached screen format.

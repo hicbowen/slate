@@ -93,7 +93,7 @@ bool WriteFrameImage(const std::string& gid, int idx, const std::vector<uint8_t>
     (void)hash;
     if (!display_profile::IsWireFrameSize(bytes.size())) {
         ESP_LOGW(internal::kTag, "frame image refused idx=%d bytes=%u expected=%u", idx,
-                 static_cast<unsigned>(bytes.size()), static_cast<unsigned>(internal::kFrameImageBytes));
+                 static_cast<unsigned>(bytes.size()), static_cast<unsigned>(internal::kMaxFrameImageBytes));
         return false;
     }
     internal::DirEnsure(internal::GroupDir(gid));
@@ -102,7 +102,7 @@ bool WriteFrameImage(const std::string& gid, int idx, const std::vector<uint8_t>
 }
 
 bool ReadFrameImage(const std::string& gid, int idx, std::vector<uint8_t>& out) {
-    if (!internal::ReadAll(internal::ImagePath(gid, idx), out, internal::kFrameImageBytes) ||
+    if (!internal::ReadAll(internal::ImagePath(gid, idx), out, internal::kMaxFrameImageBytes) ||
         !display_profile::IsWireFrameSize(out.size()))
         return false;
     if (display_profile::kFourColor && out.size() == display_profile::kMonoFrameBytes) {
@@ -194,7 +194,7 @@ bool WriteStagedFrameImage(const std::string& gid, int idx, const std::vector<ui
                            const std::string& hash) {
     if (!display_profile::IsWireFrameSize(bytes.size())) {
         ESP_LOGW(internal::kTag, "staged frame image refused idx=%d bytes=%u expected=%u", idx,
-                 static_cast<unsigned>(bytes.size()), static_cast<unsigned>(internal::kFrameImageBytes));
+                 static_cast<unsigned>(bytes.size()), static_cast<unsigned>(internal::kMaxFrameImageBytes));
         return false;
     }
     internal::DirEnsure(internal::StageDir(gid));

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
-import type { BwryPreset } from '@/lib/eink/bwry';
+import type { ImageRenderPreset } from '@/lib/eink/render-preset';
 import type { DitherMode } from '@/lib/eink/dither';
 import { clearCanvas, decodeBppImage, isValidBppLength } from '@/lib/eink/bpp';
-import { drawImagePreview } from '@/lib/eink/image-preview';
+import { drawImagePreview, type ImageFrameFormat } from '@/lib/eink/image-preview';
 import { useCanvasPan } from './useCanvasPan';
 import { useLoadedImage } from './useLoadedImage';
 
@@ -14,8 +14,8 @@ interface CanvasOffset {
 export function usePreviewCanvasRenderer({
   imageFile,
   existingImage,
-  color,
-  bwryPreset,
+  format,
+  renderPreset,
   threshold,
   mode,
   scale,
@@ -25,8 +25,8 @@ export function usePreviewCanvasRenderer({
 }: {
   imageFile: File | null;
   existingImage: ArrayBuffer | undefined;
-  color: boolean;
-  bwryPreset: BwryPreset;
+  format: ImageFrameFormat;
+  renderPreset: ImageRenderPreset;
   threshold: number;
   mode: DitherMode;
   scale: number;
@@ -59,12 +59,12 @@ export function usePreviewCanvasRenderer({
         threshold,
         mode,
         dither,
-        color,
-        bwryPreset,
+        format,
+        renderPreset,
       });
       return true;
     },
-    [bwryPreset, canvasRef, color, imageFile, loadedImage, mode, scale, threshold]
+    [renderPreset, canvasRef, format, imageFile, loadedImage, mode, scale, threshold]
   );
 
   const scheduleImageDraw = useCallback(

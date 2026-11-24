@@ -1,6 +1,6 @@
 # Slate / Firmware
 
-ESP-IDF 5.5.x 固件，目标芯片 ESP32-S3，支持 **ZecTrix Note4 V1.0** 黑白屏和 **ZecTrix Note4C** 黑白红黄四色屏。构建时选择屏幕型号。
+ESP-IDF 5.5.x 固件，目标芯片 ESP32-S3，支持 **ZecTrix Note4 V1.0** 黑白及 16 灰屏和 **ZecTrix Note4C** 黑白红黄四色屏。构建时选择屏幕型号。
 
 本目录是独立的 ESP-IDF 工程。
 
@@ -10,7 +10,7 @@ ESP-IDF 5.5.x 固件，目标芯片 ESP32-S3，支持 **ZecTrix Note4 V1.0** 黑
 source $IDF_PATH/export.sh
 cd firmware
 
-# Note4 黑白屏
+# Note4 黑白和 16 灰
 idf.py -B build-note4 -D SDKCONFIG=build-note4/sdkconfig build
 
 # Note4C 四色屏
@@ -20,7 +20,7 @@ idf.py -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
 
 - 使用对应型号的同一组构建参数，将 `build` 换成 `-p <serial> flash monitor` 即可烧录。两种屏幕固件需按型号选择。
 - CI 使用 v5.5.6 分别构建 Note4 和 Note4C，完整烧录包以 `-full.bin` 结尾，应用包以 `-ota.bin` 结尾。
-- 分区表和设备密钥键沿用 v0.2.0。只更新应用可使用 `app-flash` 保留 NVS；旧 fork 的多 Wi-Fi 列表会优先读取上次连通的配置，重新配网后使用新保存的单条配置。首次升级到新缓存版本时，Note4C 会重建 LittleFS 帧缓存并重新下载；服务端需使用本分支的 v2 实现。
+- 分区表和设备密钥键沿用 v0.2.0。只更新应用可使用 `app-flash` 保留 NVS；旧 fork 的多 Wi-Fi 列表会优先读取上次连通的配置，重新配网后使用新保存的单条配置。升级到本分支的缓存版本时，设备会按机型检查并重建 LittleFS 帧缓存。16 灰和四色同步需要本分支的 v2 服务端。
 
 ## 代码结构
 
@@ -161,6 +161,7 @@ Flash 为 QIO、PSRAM 为 Octal，所以 `CONFIG_ESPTOOLPY_OCT_FLASH=n` 配合 `
 
 - 每次 `sync` / `group` 请求都带上本地缓存的 `manifestVersion`。版本一致时服务端不返回 manifest，设备不下载任何内容。
 - 版本变化时响应里直接带新 manifest。设备按 sha256 只下载缺失或变化的图片和音频（`GET /api/device/blobs/{hash}`），并校验大小和哈希。
+- Note4 在同步与切组时带 `?frameFormat=gray4`，保留 v2 JSON 请求体。服务端只对选了 16 灰的静态图片提供灰阶帧；原版 v2 服务端仍可提供黑白帧。
 - Note4C 在同步与切组时请求 `frameFormat: "bwry2"`。收到 30000 字节四色帧时直接显示，收到 15000 字节旧黑白帧时在上屏前展开为黑白像素。LittleFS 保留原始下载字节及其哈希。
 - 服务端返回 426 表示固件协议版本过旧，需要升级固件。
 
@@ -215,7 +216,9 @@ Flash 为 QIO、PSRAM 为 Octal，所以 `CONFIG_ESPTOOLPY_OCT_FLASH=n` 配合 `
 
 ## 显示
 
-- 1bpp 帧为 15000 字节；SSD2683 按 2bpp 传输，SPI 数据量是 30 KB。
+- Note4 黑白帧为 15000 字节；SSD2683 按 2bpp 传输，SPI 数据量是 30 KB。
+- Note4 16 灰帧为 60000 字节。驱动先写入全白底，再使用五段波形全刷。灰阶驻留期间暂停状态栏局刷，离开灰阶时先全刷，再恢复普通局刷。上、下键同时按会按当前格式清除残影。
+- 灰阶波形和初始化来自 Zectrix Lab 示例，许可见 [第三方声明](THIRD_PARTY_NOTICES.md)。Note4 灰阶刷新等待上限为 45 秒。
 - 全刷约 2–3 秒，局刷约 0.3–0.6 秒；连续局刷 8 次后做一次全刷清残影。
 - 温度补偿读数缓存 60 秒。
 - 深睡前只等待进行中的刷新完成，不额外刷屏，画面靠墨水屏自身保持。

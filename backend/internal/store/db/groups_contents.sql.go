@@ -16,7 +16,7 @@ SELECT EXISTS (
     SELECT 1 FROM devices dv JOIN groups g ON g.id = dv.group_id AND g.owner_id = dv.owner_id
     JOIN contents c ON c.group_id = g.id
     LEFT JOIN content_audio a ON a.content_id = c.id
-    WHERE dv.id = $1 AND (c.image_hash = $2 OR c.color_image_hash = $2 OR a.hash = $2)
+    WHERE dv.id = $1 AND (c.image_hash = $2 OR c.color_image_hash = $2 OR c.gray_image_hash = $2 OR a.hash = $2)
 )
 `
 
@@ -36,7 +36,7 @@ const blobVisibleToUser = `-- name: BlobVisibleToUser :one
 SELECT EXISTS (
     SELECT 1 FROM contents c JOIN groups g ON g.id = c.group_id
     LEFT JOIN content_audio a ON a.content_id = c.id
-    WHERE g.owner_id = $1 AND (c.image_hash = $2 OR c.color_image_hash = $2 OR a.hash = $2)
+    WHERE g.owner_id = $1 AND (c.image_hash = $2 OR c.color_image_hash = $2 OR c.gray_image_hash = $2 OR a.hash = $2)
 )
 `
 
@@ -75,8 +75,8 @@ func (q *Queries) CountGroups(ctx context.Context, ownerID string) (int32, error
 }
 
 const createContent = `-- name: CreateContent :exec
-INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, gray_image_hash, display_mode)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::text, 'mono1'))
 `
 
 type CreateContentParams struct {
@@ -87,6 +87,8 @@ type CreateContentParams struct {
 	FrameName      *string
 	ImageHash      string
 	ColorImageHash *string
+	GrayImageHash  *string
+	DisplayMode    *string
 }
 
 func (q *Queries) CreateContent(ctx context.Context, arg CreateContentParams) error {
@@ -98,6 +100,8 @@ func (q *Queries) CreateContent(ctx context.Context, arg CreateContentParams) er
 		arg.FrameName,
 		arg.ImageHash,
 		arg.ColorImageHash,
+		arg.GrayImageHash,
+		arg.DisplayMode,
 	)
 	return err
 }
@@ -162,7 +166,7 @@ func (q *Queries) FirstGroupID(ctx context.Context, ownerID string) (string, err
 }
 
 const getContent = `-- name: GetContent :one
-SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash,
+SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash, c.gray_image_hash, c.display_mode,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
        d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
@@ -184,6 +188,8 @@ type GetContentRow struct {
 	FrameName      *string
 	ImageHash      string
 	ColorImageHash *string
+	GrayImageHash  *string
+	DisplayMode    string
 	DynamicType    *string
 	DynamicConfig  json.RawMessage
 	DynamicData    json.RawMessage
@@ -213,6 +219,8 @@ func (q *Queries) GetContent(ctx context.Context, id string) (GetContentRow, err
 		&i.FrameName,
 		&i.ImageHash,
 		&i.ColorImageHash,
+		&i.GrayImageHash,
+		&i.DisplayMode,
 		&i.DynamicType,
 		&i.DynamicConfig,
 		&i.DynamicData,
@@ -276,7 +284,7 @@ func (q *Queries) ListContentIDs(ctx context.Context, groupID string) ([]string,
 }
 
 const listContents = `-- name: ListContents :many
-SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash,
+SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash, c.gray_image_hash, c.display_mode,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
        d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
@@ -297,6 +305,8 @@ type ListContentsRow struct {
 	FrameName      *string
 	ImageHash      string
 	ColorImageHash *string
+	GrayImageHash  *string
+	DisplayMode    string
 	DynamicType    *string
 	DynamicConfig  json.RawMessage
 	DynamicData    json.RawMessage
@@ -331,6 +341,8 @@ func (q *Queries) ListContents(ctx context.Context, groupID string) ([]ListConte
 			&i.FrameName,
 			&i.ImageHash,
 			&i.ColorImageHash,
+			&i.GrayImageHash,
+			&i.DisplayMode,
 			&i.DynamicType,
 			&i.DynamicConfig,
 			&i.DynamicData,
@@ -465,6 +477,8 @@ SELECT image_hash::text AS hash FROM contents
 UNION
 SELECT color_image_hash::text FROM contents WHERE color_image_hash IS NOT NULL
 UNION
+SELECT gray_image_hash::text FROM contents WHERE gray_image_hash IS NOT NULL
+UNION
 SELECT hash::text FROM content_audio WHERE hash IS NOT NULL
 `
 
@@ -517,17 +531,25 @@ func (q *Queries) SetContentFrameName(ctx context.Context, arg SetContentFrameNa
 }
 
 const setContentImage = `-- name: SetContentImage :exec
-UPDATE contents SET image_hash = $2, color_image_hash = $3, updated_at = now() WHERE id = $1
+UPDATE contents SET image_hash = $2, color_image_hash = $3, gray_image_hash = $4,
+    display_mode = CASE WHEN $4::char(64) IS NULL THEN 'mono1' ELSE display_mode END,
+    updated_at = now() WHERE id = $1
 `
 
 type SetContentImageParams struct {
 	ID             string
 	ImageHash      string
 	ColorImageHash *string
+	GrayImageHash  *string
 }
 
 func (q *Queries) SetContentImage(ctx context.Context, arg SetContentImageParams) error {
-	_, err := q.db.Exec(ctx, setContentImage, arg.ID, arg.ImageHash, arg.ColorImageHash)
+	_, err := q.db.Exec(ctx, setContentImage,
+		arg.ID,
+		arg.ImageHash,
+		arg.ColorImageHash,
+		arg.GrayImageHash,
+	)
 	return err
 }
 
@@ -561,4 +583,23 @@ type SetGroupSortOrdersParams struct {
 func (q *Queries) SetGroupSortOrders(ctx context.Context, arg SetGroupSortOrdersParams) error {
 	_, err := q.db.Exec(ctx, setGroupSortOrders, arg.OwnerID, arg.Ids)
 	return err
+}
+
+const setImageDisplayMode = `-- name: SetImageDisplayMode :execrows
+UPDATE contents SET display_mode = $1, updated_at = now()
+WHERE id = $2 AND kind = 'image'
+  AND ($1 = 'mono1' OR gray_image_hash IS NOT NULL)
+`
+
+type SetImageDisplayModeParams struct {
+	DisplayMode string
+	ID          string
+}
+
+func (q *Queries) SetImageDisplayMode(ctx context.Context, arg SetImageDisplayModeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setImageDisplayMode, arg.DisplayMode, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

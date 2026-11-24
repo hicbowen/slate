@@ -1,5 +1,6 @@
+import type { ImageFrameFormat } from '@/lib/eink/image-preview';
 import { FrameWidth, FrameHeight } from '@/api';
-import type { BwryPreset } from '@/lib/eink/bwry';
+import type { ImageRenderPreset } from '@/lib/eink/render-preset';
 import type { DitherMode } from '@/lib/eink/dither';
 import type { RefObject } from 'react';
 import { cn } from '@/lib/cn';
@@ -9,8 +10,8 @@ import { usePreviewCanvasRenderer } from './usePreviewCanvasRenderer';
 interface PreviewCanvasProps {
   imageFile: File | null;
   existingImage: ArrayBuffer | undefined;
-  color: boolean;
-  bwryPreset: BwryPreset;
+  format: ImageFrameFormat;
+  renderPreset: ImageRenderPreset;
   existingImagePending?: boolean;
   threshold: number;
   mode: DitherMode;
@@ -25,8 +26,8 @@ interface PreviewCanvasProps {
 export function PreviewCanvas({
   imageFile,
   existingImage,
-  color,
-  bwryPreset,
+  format,
+  renderPreset,
   existingImagePending,
   threshold,
   mode,
@@ -40,8 +41,8 @@ export function PreviewCanvas({
   const pan = usePreviewCanvasRenderer({
     imageFile,
     existingImage,
-    color,
-    bwryPreset,
+    format,
+    renderPreset,
     threshold,
     mode,
     scale,

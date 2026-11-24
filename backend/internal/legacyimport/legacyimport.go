@@ -189,9 +189,20 @@ func importDevices(ctx context.Context, src *sql.DB, q *db.Queries, users, group
 }
 
 func importContents(ctx context.Context, src *sql.DB, q *db.Queries, groups map[string]bool, blobDir string, blobs *blob.Store) (int, int, error) {
+	var hasDisplayMode bool
+	if err := src.QueryRowContext(ctx, `SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE()
+            AND table_name = 'contents' AND column_name = 'display_mode'
+    )`).Scan(&hasDisplayMode); err != nil {
+		return 0, 0, err
+	}
+	displayMode := "'mono1'"
+	if hasDisplayMode {
+		displayMode = "display_mode"
+	}
 	rows, err := src.QueryContext(ctx, `SELECT id, group_id, sort_order, kind, frame_name, audio_etag, audio_status, audio_source,
-		audio_voice, audio_text, audio_last_error, dynamic_type, dynamic_config, dynamic_data, dynamic_last_run_at, created_at, updated_at
-		FROM contents ORDER BY group_id, sort_order`)
+        audio_voice, audio_text, audio_last_error, dynamic_type, dynamic_config, dynamic_data, dynamic_last_run_at,
+        created_at, updated_at, `+displayMode+` FROM contents ORDER BY group_id, sort_order`)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -199,7 +210,7 @@ func importContents(ctx context.Context, src *sql.DB, q *db.Queries, groups map[
 	imported, skipped := 0, 0
 	for rows.Next() {
 		var (
-			id, groupID, kind, audioStatus                                        string
+			id, groupID, kind, audioStatus, legacyDisplayMode                     string
 			sort                                                                  int32
 			frameName, audioEtag, audioSource, voice, text, audioErr, dynamicType sql.NullString
 			config, data                                                          []byte
@@ -207,7 +218,7 @@ func importContents(ctx context.Context, src *sql.DB, q *db.Queries, groups map[
 			created, updated                                                      time.Time
 		)
 		if err := rows.Scan(&id, &groupID, &sort, &kind, &frameName, &audioEtag, &audioStatus, &audioSource, &voice, &text,
-			&audioErr, &dynamicType, &config, &data, &renderedAt, &created, &updated); err != nil {
+			&audioErr, &dynamicType, &config, &data, &renderedAt, &created, &updated, &legacyDisplayMode); err != nil {
 			return imported, skipped, err
 		}
 		if !groups[groupID] {
@@ -236,8 +247,28 @@ func importContents(ctx context.Context, src *sql.DB, q *db.Queries, groups map[
 		if err != nil {
 			return imported, skipped, err
 		}
+		mode := api.DisplayModeMono
+		var grayHash *string
+		if kind == "image" {
+			gray, err := os.ReadFile(filepath.Join(blobDir, groupID, id+".gray"))
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return imported, skipped, fmt.Errorf("content %s: read grayscale frame: %w", id, err)
+			}
+			if len(gray) == api.GrayFrameBytes {
+				grayHash, err = blobs.PutOptional(gray)
+				if err != nil {
+					return imported, skipped, err
+				}
+				if legacyDisplayMode == api.DisplayModeGray {
+					mode = api.DisplayModeGray
+				}
+			} else if len(gray) > 0 || legacyDisplayMode == api.DisplayModeGray {
+				slog.Warn("missing or invalid legacy grayscale frame; using mono", "contentId", id, "bytes", len(gray))
+			}
+		}
 		if err := q.ImportContent(ctx, db.ImportContentParams{ID: id, GroupID: groupID, SortOrder: sort, Kind: db.ContentKind(kind),
-			FrameName: nullable(frameName), ImageHash: hash, ColorImageHash: colorHash, CreatedAt: created, UpdatedAt: updated}); err != nil {
+			FrameName: nullable(frameName), ImageHash: hash, ColorImageHash: colorHash, GrayImageHash: grayHash, DisplayMode: mode,
+			CreatedAt: created, UpdatedAt: updated}); err != nil {
 			return imported, skipped, fmt.Errorf("content %s: %w", id, err)
 		}
 		if kind == "dynamic" && dynamicType.Valid {

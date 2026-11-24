@@ -32,7 +32,10 @@ class EpdSsd1683 {
     // 进深睡 / 关 rail / 后台刷新结束前用它确保不在刷新中途切断 EPD 电源。
     bool WaitForRefreshIdle(int timeout_ms);
     void RequestUrgentPartialRefresh();  // partial(~1s 残影)
-    void RequestUrgentFullRefresh();     // full(~5s 干净)
+    void RequestUrgentFullRefresh(bool preserve_gray = false);
+    // Note4 专用：提交 60000B gray4 全帧。驱动会把当前 LVGL 顶部状态栏合成到灰阶帧，
+    // 然后原子执行 OTP 白底全刷 + 官方五轮 16 灰波形。
+    bool RequestGray16FullRefresh(const uint8_t* data, size_t len);
 
     // 直接把当前 profile 的原始数据写入 framebuffer，绕过 LVGL 管线。
     // Note4:1bpp；Note4C:2bpp(00 黑、01 白、10 黄、11 红)。
@@ -62,6 +65,8 @@ class EpdSsd1683 {
     uint8_t*             snapshot_        = nullptr;  // refresh_task 冻结的本轮快照
     uint8_t*             prev_snapshot_   = nullptr;  // 上次已刷到 EPD 的快照
     uint8_t*             lvgl_render_buf_ = nullptr;
+    uint8_t*             gray_buffer_     = nullptr;
+    uint8_t*             gray_snapshot_   = nullptr;
     std::vector<uint8_t> epd_line_;
 
     // 200 而非 128：LVGL anti-alias 字体边缘的灰度像素被划入「黑」，
@@ -81,6 +86,8 @@ class EpdSsd1683 {
     bool                 refresh_task_stop_        = false;
     bool                 prev_snapshot_synced_     = false;
     bool                 refresh_in_progress_      = false;
+    bool                 gray_refresh_pending_     = false;
+    bool                 gray_selected_            = false;
     TickType_t           last_sample_tick_         = 0;
     TickType_t           last_flush_tick_          = 0;  // LVGL 最后一次 flush_cb 的时刻,用于等待静默
     int                  sample_interval_ms_       = display_profile::kMinRefreshIntervalMs;
@@ -92,21 +99,30 @@ class EpdSsd1683 {
     void        RefreshTaskLoop();
     bool        RefreshTaskShouldStop();
     void        DebounceRefreshNotify();
-    bool        TakeRefreshRequest(bool& urgent, bool& force_full);
+    bool        TakeRefreshRequest(bool& urgent, bool& force_full, bool& gray_refresh);
     bool        ThrottleRefreshSampling(bool urgent, bool force_full);
     bool        CaptureRefreshSnapshot(bool force_full, epd::DiffResult& diff, bool& prev_synced);
     bool        ShouldUseFullRefresh(const epd::DiffResult& diff, bool force_full, bool prev_synced) const;
     void        RunRefresh(bool full_refresh);
+    void        RunGray16Refresh();
     void        FinishRefreshSnapshot();
     void        MarkRefreshIdle();
 
     void AssertRefreshTaskContext() const;
-    void SpiPortInit();    // 发送模式（DI 当 MOSI，40 MHz）
+    void SpiPortInit(int clock_hz = 40 * 1000 * 1000);  // 发送模式（DI 当 MOSI）
     void SpiPortRxInit();  // 接收模式（DI 反向当 MISO，8 MHz）—— 读温度寄存器
     void SpiGpioInit();
     void EpdInit();
     void EpdDisplayFull();
     void EpdDisplayPartial();
+    void EpdDisplayGray16();
+    void EpdHardwareReset();
+    void EpdSelectOtp();
+    void EpdDisplayOtpWhiteBase();
+    void EpdInitExternalWaveform(const uint8_t* waveform, size_t size);
+    void EpdLoadExternalWaveform(const uint8_t* waveform, size_t size);
+    void EpdWriteGrayPass(int pass);
+    void EpdTriggerExternalBatch(bool power_on);
     void EpdTurnOnDisplay();
     // 读屏内温度寄存器(0x40)→映射 5 档 booster 写 0xE0/0xE6,Full/Partial 共用。
     // 60 s 内重复刷新会复用上次温度避免每次 5~10 ms 切换 SPI 模式开销。
@@ -124,4 +140,5 @@ class EpdSsd1683 {
     // pin 缓存（来自 bsp/config.h）
     gpio_num_t        cs_, dc_, rst_, busy_, mosi_, sclk_;
     spi_host_device_t spi_host_;
+    int               spi_clock_hz_ = 40 * 1000 * 1000;
 };

@@ -1,3 +1,5 @@
+import { resolveImageRenderPreset, type ImageRenderPreset } from './render-preset';
+
 // dither 前的灰度预处理，顺序见 image-preview.ts：
 //   1. 浏览器解码并绘制到 canvas，取 ImageData（RGBA）
 //   2. rgbaToGray  — Rec.709 系数
@@ -101,5 +103,33 @@ export function autoContrast(gray: Uint8Array, cutoffPct: number): Uint8Array {
 function copyOf(src: Uint8Array): Uint8Array {
   const out = new Uint8Array(src.length);
   out.set(src);
+  return out;
+}
+/** 按用户可理解的图片风格完成固定预处理，避免在 UI 暴露一组技术参数。 */
+export function preprocessGrayForPreset(
+  gray: Uint8Array,
+  width: number,
+  height: number,
+  preset: ImageRenderPreset
+): { gray: Uint8Array; resolvedPreset: Exclude<ImageRenderPreset, 'auto'> } {
+  const resolvedPreset = resolveImageRenderPreset(gray, width, height, preset);
+  let next = gray;
+  if (resolvedPreset === 'graphic') {
+    next = autoInvert(next, width, height);
+    next = autoContrast(next, 1);
+  } else if (resolvedPreset === 'vivid') {
+    next = autoContrast(next, 0.5);
+    next = adjustContrast(next, 1.1);
+  } else {
+    next = autoContrast(next, 0.25);
+  }
+  return { gray: next, resolvedPreset };
+}
+
+function adjustContrast(gray: Uint8Array, factor: number): Uint8Array {
+  const out = new Uint8Array(gray.length);
+  for (let i = 0; i < gray.length; i++) {
+    out[i] = Math.max(0, Math.min(255, Math.round(128 + (gray[i]! - 128) * factor)));
+  }
   return out;
 }

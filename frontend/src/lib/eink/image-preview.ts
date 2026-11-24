@@ -1,7 +1,9 @@
-import { FrameHeight, FrameWidth } from '@/api';
+import { ColorFrameFormat, DisplayModeMono, FrameHeight, FrameWidth, GrayFrameFormat } from '@/api';
 import { ditherTo1bpp, ditherToBinary, type DitherMode } from './dither';
-import { autoContrast, autoInvert, rgbaToGray } from './preprocess';
-import { renderBwry2bpp, type BwryPreset } from './bwry';
+import { autoContrast, autoInvert, preprocessGrayForPreset, rgbaToGray } from './preprocess';
+import { renderBwry2bpp } from './bwry';
+import { quantizeGrayTo4bpp } from './gray4';
+import type { ImageRenderPreset } from './render-preset';
 import { clearCanvas, decodeBppImage } from './bpp';
 import { INK_RGB, PAPER_RGB } from './colors';
 
@@ -13,28 +15,34 @@ export interface CropOptions {
 export interface DitherSettings {
   threshold: number;
   mode: DitherMode;
-  bwryPreset: BwryPreset;
+  renderPreset: ImageRenderPreset;
 }
 
 type Source = HTMLImageElement | ImageBitmap;
+export type ImageFrameFormat =
+  typeof DisplayModeMono | typeof GrayFrameFormat | typeof ColorFrameFormat;
 
 /** Draws the crop onto the preview canvas, dithered to ink and paper when `dither` is set. */
 export function drawImagePreview(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
   img: Source,
-  { dither, color, ...options }: CropOptions & DitherSettings & { dither: boolean; color: boolean }
+  {
+    dither,
+    format,
+    ...options
+  }: CropOptions & DitherSettings & { dither: boolean; format: ImageFrameFormat }
 ) {
-  drawCrop(ctx, canvas, img, options, color);
+  drawCrop(ctx, canvas, img, options, format !== 'mono1');
   if (!dither) return;
 
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  if (color) {
-    ctx.putImageData(
-      decodeBppImage(colorFrame(imageData, options.bwryPreset), canvas.width, canvas.height),
-      0,
-      0
-    );
+  if (format !== 'mono1') {
+    const packed =
+      format === 'gray4'
+        ? grayFrame(imageData, options.renderPreset)
+        : colorFrame(imageData, options.renderPreset);
+    ctx.putImageData(decodeBppImage(packed, canvas.width, canvas.height), 0, 0);
     return;
   }
   const bin = ditherToBinary(preprocess(imageData, canvas), canvas.width, canvas.height, options);
@@ -49,7 +57,7 @@ export function drawImagePreview(
 }
 
 /**
- * Renders both packed device frames from the same 400×300 crop.
+ * Renders packed device frames from the same 400×300 crop.
  * This is what gets uploaded; the server stores it as is.
  */
 export function renderFrames(img: Source, options: CropOptions & DitherSettings) {
@@ -62,13 +70,20 @@ export function renderFrames(img: Source, options: CropOptions & DitherSettings)
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const mono = ditherTo1bpp(preprocess(imageData, canvas), canvas.width, canvas.height, options);
   drawCrop(ctx, canvas, img, options, true);
+  const source = ctx.getImageData(0, 0, canvas.width, canvas.height);
   return {
     mono,
-    color: colorFrame(ctx.getImageData(0, 0, canvas.width, canvas.height), options.bwryPreset),
+    gray: grayFrame(source, options.renderPreset),
+    color: colorFrame(source, options.renderPreset),
   };
 }
 
-function colorFrame({ data, width, height }: ImageData, preset: BwryPreset): Uint8Array {
+function grayFrame({ data, width, height }: ImageData, preset: ImageRenderPreset): Uint8Array {
+  const prepared = preprocessGrayForPreset(rgbaToGray(data, width, height), width, height, preset);
+  return quantizeGrayTo4bpp(prepared.gray, width, height, prepared.resolvedPreset);
+}
+
+function colorFrame({ data, width, height }: ImageData, preset: ImageRenderPreset): Uint8Array {
   const rgb = new Uint8Array(width * height * 3);
   for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
     rgb[j] = data[i]!;
@@ -83,9 +98,9 @@ function drawCrop(
   canvas: { width: number; height: number },
   img: Source,
   { scale, offset }: CropOptions,
-  color = false
+  whiteBackground = false
 ) {
-  if (color) {
+  if (whiteBackground) {
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   } else {

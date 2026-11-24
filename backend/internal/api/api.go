@@ -15,7 +15,11 @@ const (
 	FrameHeight      = 300
 	FrameBytes       = FrameWidth * FrameHeight / 8
 	ColorFrameBytes  = FrameWidth * FrameHeight / 4
+	GrayFrameBytes   = FrameWidth * FrameHeight / 2
 	ColorFrameFormat = "bwry2"
+	GrayFrameFormat  = "gray4"
+	DisplayModeMono  = "mono1"
+	DisplayModeGray  = "gray16"
 	// StatusBarHeight is reserved at the top of every frame for the firmware status bar.
 	StatusBarHeight = 24
 	AudioSampleRate = 16000
@@ -121,6 +125,8 @@ type Content struct {
 	FrameName      *string         `json:"frameName" tstype:"string | null,required"`
 	StatusBarText  string          `json:"statusBarText"`
 	ImageHash      string          `json:"imageHash"`
+	GrayImageHash  *string         `json:"grayImageHash,omitempty"`
+	DisplayMode    string          `json:"displayMode" tstype:"'mono1' | 'gray16'"`
 	ColorImageHash *string         `json:"colorImageHash,omitempty"`
 	Audio          *ContentAudio   `json:"audio" tstype:"ContentAudio | null,required"`
 	Dynamic        *ContentDynamic `json:"dynamic" tstype:"ContentDynamic | null,required"`
@@ -147,8 +153,8 @@ type ContentDynamic struct {
 }
 
 // CreateDynamicContentRequest creates dynamic content; image content is created with
-// multipart/form-data fields frame (packed 1bpp), optional colorFrame (packed BWRY 2bpp),
-// audio and frameName.
+// multipart/form-data fields frame (packed 1bpp), optional colorFrame (BWRY 2bpp),
+// grayFrame (4bpp), displayMode, audio and frameName.
 type CreateDynamicContentRequest struct {
 	Config      json.RawMessage `json:"config" tstype:"DynamicConfig"`
 	FrameName   *string         `json:"frameName,omitempty"`

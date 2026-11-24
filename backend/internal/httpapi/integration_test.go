@@ -260,6 +260,92 @@ func TestDeviceColorRenditions(t *testing.T) {
 	h.must(404, h.call("GET", url, dev.Secret, nil, nil), "removed color blob access")
 }
 
+func TestNote4GrayRendition(t *testing.T) {
+	h := newHarness(t)
+	token := h.user("gray")
+	gid := h.group(token, "灰阶相册")
+	uploadURL := "/api/groups/" + gid + "/contents"
+	mono := bytes.Repeat([]byte{0xa5}, api.FrameBytes)
+	gray := bytes.Repeat([]byte{0x17, 0x8f}, api.GrayFrameBytes/2)
+	color := bytes.Repeat([]byte{0x1b}, api.ColorFrameBytes)
+	multipart := func(mode string, frames map[string][]byte) multipartBody {
+		buf := &bytes.Buffer{}
+		form := multipart.NewWriter(buf)
+		for field, data := range frames {
+			file, _ := form.CreateFormFile(field, field+".bin")
+			_, _ = file.Write(data)
+		}
+		if mode != "" {
+			_ = form.WriteField("displayMode", mode)
+		}
+		_ = form.Close()
+		return multipartBody{buf, form.FormDataContentType()}
+	}
+	h.must(400, h.call("POST", uploadURL, token, multipart(api.DisplayModeGray, map[string][]byte{"frame": mono}), nil), "gray mode without a gray frame")
+	h.must(400, h.call("POST", uploadURL, token, multipart("", map[string][]byte{"frame": mono, "grayFrame": gray[:100]}), nil), "invalid gray size")
+	var legacy, image, dyn api.Content
+	h.must(201, h.call("POST", uploadURL, token, frameUpload(mono, "旧图"), &legacy), "old black and white")
+	h.must(201, h.call("POST", uploadURL, token, multipart(api.DisplayModeGray, map[string][]byte{"frame": mono, "grayFrame": gray, "colorFrame": color}), &image), "gray upload")
+	h.must(201, h.call("POST", uploadURL, token, api.CreateDynamicContentRequest{
+		Config: json.RawMessage(`{"type":"font_test","fontId":"fusion_pixel_12"}`),
+	}, &dyn), "dynamic frame")
+	grayHash := blob.Hash(gray)
+	if image.DisplayMode != api.DisplayModeGray || image.GrayImageHash == nil || *image.GrayImageHash != grayHash {
+		t.Fatalf("saved grayscale frame: %+v", image)
+	}
+	dev := h.device("AA:BB:CC:DD:EE:05")
+	h.must(200, h.call("POST", "/api/devices/claims", token, map[string]string{"pairCode": dev.PairCode}, nil), "claim")
+	var state api.DeviceState
+	req := api.DeviceSyncRequest{Protocol: api.DeviceProtocol}
+	graySync := "/api/device/sync?frameFormat=gray4"
+	h.must(200, h.call("POST", graySync, dev.Secret, req, &state), "Note4 gray sync")
+	frames := state.Manifest.Frames
+	if frames[0].Image.Size != api.FrameBytes || frames[2].Image.Size != api.FrameBytes ||
+		frames[1].Image.Size != api.GrayFrameBytes || frames[1].Image.Hash != grayHash {
+		t.Fatalf("mixed manifest frames: %+v", frames)
+	}
+	grayVersion := state.Manifest.Version
+	req.ManifestVersion = grayVersion
+	h.must(200, h.call("POST", graySync, dev.Secret, req, &state), "cached grayscale sync")
+	if state.Manifest != nil {
+		t.Fatal("manifest resent for unchanged grayscale frames")
+	}
+	var got []byte
+	h.must(200, h.call("GET", "/api/device/blobs/"+grayHash, dev.Secret, nil, &got), "get grayscale blob")
+	if !bytes.Equal(got, gray) {
+		t.Fatal("gray blob bytes differ from uploaded frame")
+	}
+	h.must(200, h.call("POST", "/api/device/group?frameFormat=gray4", dev.Secret, api.DeviceGroupRequest{
+		Protocol: api.DeviceProtocol, Action: "select", GroupID: gid,
+	}, &state), "group switch requests grayscale")
+	if state.Manifest.Frames[1].Image.Hash != grayHash {
+		t.Fatal("the group endpoint did not select the grayscale rendition")
+	}
+	h.must(200, h.call("POST", "/api/device/sync", dev.Secret, req, &state), "old Note4 sync")
+	if state.Manifest.Frames[1].Image.Size != api.FrameBytes {
+		t.Fatal("an old client received gray4")
+	}
+	req.FrameFormat = api.ColorFrameFormat
+	h.must(200, h.call("POST", "/api/device/sync", dev.Secret, req, &state), "Note4C sync")
+	if state.Manifest.Frames[1].Image.Hash != blob.Hash(color) {
+		t.Fatal("the Note4 grayscale setting overrode Note4C color")
+	}
+	path := "/api/contents/" + image.ID
+	h.must(400, h.call("PATCH", "/api/contents/"+legacy.ID, token, multipart(api.DisplayModeGray, nil), nil), "reject enabling gray on old asset")
+	h.must(200, h.call("PATCH", path, token, multipart(api.DisplayModeMono, nil), &image), "switch to mono without reupload")
+	if image.DisplayMode != api.DisplayModeMono || image.GrayImageHash == nil || *image.GrayImageHash != grayHash {
+		t.Fatal("mode change lost the grayscale asset")
+	}
+	req.FrameFormat = ""
+	h.must(200, h.call("POST", graySync, dev.Secret, req, &state), "mode change invalidates grayscale manifest")
+	if state.Manifest.Version == grayVersion || state.Manifest.Frames[1].Image.Hash != image.ImageHash {
+		t.Fatal("mode change did not select the mono frame")
+	}
+	h.must(200, h.call("PATCH", path, token, multipart(api.DisplayModeGray, nil), nil), "switch back to gray")
+	h.must(200, h.call("PATCH", path, token, frameUpload(mono, "旧客户端替换"), nil), "replace image without gray")
+	h.must(404, h.call("GET", "/api/device/blobs/"+grayHash, dev.Secret, nil, nil), "removed grayscale asset")
+}
+
 func TestCountdownColorPreviewAndRefresh(t *testing.T) {
 	h := newHarness(t)
 	token := h.user("countdown")

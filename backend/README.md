@@ -123,6 +123,8 @@
 | --- | --- |
 | `frame` | 浏览器渲染好的 400×300 packed 1bpp，15000 字节，MSB first，1 为白 |
 | `colorFrame` | 可选，400×300 packed BWRY 2bpp，30000 字节，色号 00 黑、01 白、10 黄、11 红，需同时上传 `frame` |
+| `grayFrame` | 可选，400×300 packed 4bpp，60000 字节，高半字节在左，0 为黑、15 为白，需同时上传 `frame` |
+| `displayMode` | Note4 上屏方式，`mono1`（默认）或 `gray16`。可单独修改，启用 16 灰需要已有灰阶帧 |
 | `audio` | 任意支持格式的音频，≤ 5 MB |
 | `frameName` | 状态栏标题 |
 
@@ -178,7 +180,9 @@ POST /api/contents/{id}/data
 
 **manifest** 是帧列表，每帧包含 `id`、`seq`、`statusBarText`、`image {hash, size}`、`audio`、`refreshAt`。
 
-- 省略 `frameFormat` 时下发黑白帧。Note4C 请求 `bwry2` 时优先下发四色帧，历史黑白内容沿用原始帧、大小和哈希。
+- `sync` 和 `group` 支持查询参数 `frameFormat`，也可在 JSON 中传入，JSON 字段优先。省略时使用黑白帧。
+- Note4 请求 `gray4` 时，只为启用 `gray16` 的静态图片下发 60000 字节灰阶帧。其他帧沿用原始黑白数据及其哈希。
+- Note4C 请求 `bwry2` 时优先下发四色帧，Note4 上屏设置独立生效。
 - `refreshAt` 是动态帧下次重新渲染的 Unix 秒，静态帧为 null。
 - 版本是组 ID、组名和帧列表的 sha256 前 32 位，帧的任何变化都会换版本。
 

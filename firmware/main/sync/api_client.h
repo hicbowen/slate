@@ -24,6 +24,7 @@ namespace api {
 
 inline constexpr int kProtocol = 2;
 
+// For image blobs the validated size identifies mono1, gray4 or bwry2.
 struct Blob {
     std::string hash;  // 空表示没有该资源
     int         size = 0;

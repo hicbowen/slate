@@ -1,14 +1,15 @@
 // 抖动算法选择 + 阈值滑块(仅 threshold 模式显示)+ 缩放滑块(仅选了图时显示)。
 
 import { Select, SelectItem } from '@/components/ui/Select';
-import { BWRY_PRESETS, type BwryPreset } from '@/lib/eink/bwry';
+import type { ImageFrameFormat } from '@/lib/eink/image-preview';
+import { IMAGE_RENDER_PRESET_INFO, type ImageRenderPreset } from '@/lib/eink/render-preset';
 import { DITHER_MODES, type DitherMode } from '@/lib/eink/dither';
 import { cn } from '@/lib/cn';
 
 interface DitherControlsProps {
-  color: boolean;
-  bwryPreset: BwryPreset;
-  onBwryPresetChange: (preset: BwryPreset) => void;
+  format: ImageFrameFormat;
+  renderPreset: ImageRenderPreset;
+  onImageRenderPresetChange: (preset: ImageRenderPreset) => void;
   mode: DitherMode;
   onModeChange: (m: DitherMode) => void;
   threshold: number;
@@ -22,9 +23,9 @@ interface DitherControlsProps {
 }
 
 export function DitherControls({
-  color,
-  bwryPreset,
-  onBwryPresetChange,
+  format,
+  renderPreset,
+  onImageRenderPresetChange,
   mode,
   onModeChange,
   threshold,
@@ -35,6 +36,8 @@ export function DitherControls({
   onScaleChange,
   onResetCrop,
 }: DitherControlsProps) {
+  const mono = format === 'mono1';
+  const renderLabel = format === 'gray4' ? '灰阶渲染' : '四色渲染';
   return (
     <div className="space-y-5">
       {hasImage && (
@@ -66,16 +69,16 @@ export function DitherControls({
         </div>
       )}
 
-      {color ? (
+      {!mono ? (
         <div>
-          <p className="mb-2 ml-0.5 font-sans text-[13px] text-stone">四色渲染</p>
+          <p className="mb-2 ml-0.5 font-sans text-[13px] text-stone">{renderLabel}</p>
           <Select
-            aria-label="四色渲染"
-            value={bwryPreset}
+            aria-label={renderLabel}
+            value={renderPreset}
             disabled={disabled}
-            onValueChange={(preset) => onBwryPresetChange(preset as BwryPreset)}
+            onValueChange={(preset) => onImageRenderPresetChange(preset as ImageRenderPreset)}
           >
-            {Object.entries(BWRY_PRESETS).map(([preset, label]) => (
+            {Object.entries(IMAGE_RENDER_PRESET_INFO).map(([preset, { label }]) => (
               <SelectItem key={preset} value={preset}>
                 {label}
               </SelectItem>
@@ -113,7 +116,7 @@ export function DitherControls({
         </div>
       )}
 
-      {!color && mode === 'threshold' && (
+      {mono && mode === 'threshold' && (
         <div>
           <div className="flex items-baseline justify-between mb-2 ml-0.5">
             <p className="font-sans text-[13px] text-stone">阈值</p>

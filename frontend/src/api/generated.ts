@@ -14,7 +14,11 @@ export const FrameWidth = 400;
 export const FrameHeight = 300;
 export const FrameBytes = FrameWidth * FrameHeight / 8;
 export const ColorFrameBytes = FrameWidth * FrameHeight / 4;
+export const GrayFrameBytes = FrameWidth * FrameHeight / 2;
 export const ColorFrameFormat = "bwry2";
+export const GrayFrameFormat = "gray4";
+export const DisplayModeMono = "mono1";
+export const DisplayModeGray = "gray16";
 /**
  * StatusBarHeight is reserved at the top of every frame for the firmware status bar.
  */
@@ -103,6 +107,8 @@ export interface Content {
   frameName: string | null;
   statusBarText: string;
   imageHash: string;
+  grayImageHash?: string;
+  displayMode: 'mono1' | 'gray16';
   colorImageHash?: string;
   audio: ContentAudio | null;
   dynamic: ContentDynamic | null;
@@ -127,8 +133,8 @@ export interface ContentDynamic {
 }
 /**
  * CreateDynamicContentRequest creates dynamic content; image content is created with
- * multipart/form-data fields frame (packed 1bpp), optional colorFrame (packed BWRY 2bpp),
- * audio and frameName.
+ * multipart/form-data fields frame (packed 1bpp), optional colorFrame (BWRY 2bpp),
+ * grayFrame (4bpp), displayMode, audio and frameName.
  */
 export interface CreateDynamicContentRequest {
   config: DynamicConfig;
@@ -187,6 +193,8 @@ export interface DeviceRegisterResponse {
 /**
  * DeviceSyncRequest reports telemetry. The manifest is returned only when
  * ManifestVersion differs from the selected group's current version.
+ * FrameFormat may also be supplied as a query parameter for compatibility with
+ * servers that do not accept additional JSON fields.
  */
 export interface DeviceSyncRequest {
   protocol: number /* int */;
@@ -205,6 +213,9 @@ export interface DeviceTelemetry {
   wakeReason?: string;
   currentContentId?: string;
 }
+/**
+ * DeviceGroupRequest uses the same frame format negotiation as DeviceSyncRequest.
+ */
 export interface DeviceGroupRequest {
   protocol: number /* int */;
   action: 'next' | 'prev' | 'select';

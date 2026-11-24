@@ -26,7 +26,10 @@ export function DynamicContentFormShell({
     >
       <div className="order-2 min-w-0 lg:order-1">
         {previewFormat ? (
-          <FramePreviewFormat {...previewFormat} />
+          <FramePreviewFormat
+            format={previewFormat.color ? 'bwry2' : 'mono1'}
+            onChange={(format) => previewFormat.onChange(format === 'bwry2')}
+          />
         ) : (
           <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em] ml-0.5 mb-2">
             设备预览

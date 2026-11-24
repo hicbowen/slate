@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "drivers/display/framebuffer_ops.h"
+#include "drivers/display/ssd2683_waveform.h"
 #include "utils/time_utils.h"
 
 void EpdSsd1683::EpdInit() {
@@ -21,11 +22,164 @@ void EpdSsd1683::EpdInit() {
 #if !CONFIG_SLATE_DISPLAY_NOTE4C
     EpdSendCommand(0x00);
     EpdSendData(0x2F);
-    EpdSendData(0x2E);
+    EpdSendData(0x0E);
 #endif
     EpdSendCommand(0xE9);
     EpdSendData(0x01);
     ReadBusy();
+}
+
+void EpdSsd1683::EpdHardwareReset() {
+    gpio_set_level(rst_, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(rst_, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level(rst_, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ReadBusy();
+}
+
+void EpdSsd1683::EpdSelectOtp() {
+    EpdSendCommand(0x00);
+    EpdSendData(0x2F);
+    EpdSendData(0x0E);
+    EpdSendCommand(0xE9);
+    EpdSendData(0x01);
+    ReadBusy();
+}
+
+void EpdSsd1683::EpdDisplayOtpWhiteBase() {
+    ApplyTemperatureBoost();
+    EpdSendCommand(0xA5);
+    ReadBusy();
+    vTaskDelay(pdMS_TO_TICKS(10));
+    epd_line_.assign(100, 0x55);
+    EpdSendCommand(0x10);
+    for (int y = 0; y < kHeight; ++y)
+        WriteBytes(epd_line_.data(), 100);
+    EpdSendCommand(0x04);
+    ReadBusy();
+    EpdSendCommand(0x12);
+    EpdSendData(0x00);
+    ReadBusy();
+    EpdSendCommand(0x02);
+    EpdSendData(0x00);
+    ReadBusy();
+}
+
+void EpdSsd1683::EpdInitExternalWaveform(const uint8_t* waveform, size_t size) {
+    if (!waveform || size != ssd2683_waveform::kWaveformSize)
+        return;
+    EpdHardwareReset();
+    EpdSendCommand(0x00);
+    EpdSendData(0x2F);
+    EpdSendData(0x8E);
+    EpdSendCommand(0x01);
+    const uint8_t power[] = {0x07, waveform[0], waveform[1], waveform[2], waveform[3], waveform[4]};
+    for (uint8_t value : power)
+        EpdSendData(value);
+    EpdSendCommand(0x30);
+    EpdSendData(waveform[6]);
+    EpdSendCommand(0x82);
+    EpdSendData(waveform[5]);
+    EpdSendCommand(0x06);
+    const uint8_t booster[] = {0x0F, 0x8B, 0x9C, 0xAA};
+    for (uint8_t value : booster)
+        EpdSendData(value);
+    EpdSendCommand(0xE7);
+    EpdSendData(0x98);
+    EpdSendCommand(0x50);
+    EpdSendData(0x37);
+    EpdSendCommand(0x61);
+    const uint8_t resolution[] = {0x01, 0x90, 0x01, 0x2C};
+    for (uint8_t value : resolution)
+        EpdSendData(value);
+    EpdSendCommand(0x62);
+    EpdSendData(0x64);
+    EpdSendData(0x53);
+    EpdSendCommand(0x65);
+    for (int i = 0; i < 4; ++i)
+        EpdSendData(0x00);
+    EpdSendCommand(0xE9);
+    EpdSendData(0x01);
+    ReadBusy();
+    EpdSendCommand(0x20);
+    WriteBytes(waveform, static_cast<int>(size));
+}
+
+void EpdSsd1683::EpdLoadExternalWaveform(const uint8_t* waveform, size_t size) {
+    if (!waveform || size != ssd2683_waveform::kWaveformSize)
+        return;
+    ReadBusy();
+    EpdSendCommand(0x30);
+    EpdSendData(waveform[6]);
+    EpdSendCommand(0x20);
+    WriteBytes(waveform, static_cast<int>(size));
+}
+
+void EpdSsd1683::EpdWriteGrayPass(int pass) {
+    EpdSendCommand(0x10);
+    ReadBusy();
+    epd_line_.resize(100);
+    for (int y = 0; y < kHeight; ++y) {
+        for (int byte_x = 0; byte_x < 100; ++byte_x) {
+            uint8_t packed = 0;
+            for (int index = 0; index < 4; ++index) {
+                const size_t pixel = static_cast<size_t>(y) * kWidth + byte_x * 4 + index;
+                const uint8_t pair = gray_snapshot_[pixel / 2];
+                const uint8_t level = (pixel & 1u) ? (pair & 0x0F) : (pair >> 4);
+                const uint8_t code =
+                    ssd2683_waveform::VendorGray16RenderPassOfLevel(level) == static_cast<size_t>(pass)
+                        ? ssd2683_waveform::VendorGray16RenderCodeOfLevel(level)
+                        : 0;
+                packed |= static_cast<uint8_t>(code << (6 - index * 2));
+            }
+            epd_line_[byte_x] = packed;
+        }
+        WriteBytes(epd_line_.data(), 100);
+    }
+}
+
+void EpdSsd1683::EpdTriggerExternalBatch(bool power_on) {
+    if (power_on) {
+        EpdSendCommand(0x04);
+        ReadBusy();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    EpdSendCommand(0x12);
+    EpdSendData(0x00);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ReadBusy();
+}
+
+void EpdSsd1683::EpdDisplayGray16() {
+#if !CONFIG_SLATE_DISPLAY_NOTE4C
+    // Official demo runs the external waveform path at 20 MHz.
+    SpiPortInit(20 * 1000 * 1000);
+    EpdPowerOn();
+    vTaskDelay(pdMS_TO_TICKS(10));
+    EpdHardwareReset();
+    EpdSelectOtp();
+    EpdDisplayOtpWhiteBase();
+    // 白底阶段可能读取温度并临时切 SPI RX；显式重建 external path 的 20 MHz 总线。
+    SpiPortInit(20 * 1000 * 1000);
+    for (size_t pass = 0; pass < ssd2683_waveform::kVendorGray16RenderPassCount; ++pass) {
+        const auto& waveform = ssd2683_waveform::kVendorGray16RenderWaveforms[pass];
+        if (pass == 0)
+            EpdInitExternalWaveform(waveform.data(), waveform.size());
+        else
+            EpdLoadExternalWaveform(waveform.data(), waveform.size());
+        EpdWriteGrayPass(static_cast<int>(pass));
+        EpdTriggerExternalBatch(pass == 0);
+    }
+    EpdSendCommand(0x02);
+    EpdSendData(0x00);
+    ReadBusy();
+    EpdHardwareReset();
+    EpdSelectOtp();
+    EpdPowerOff();
+    SpiPortInit();
+#endif
 }
 
 void EpdSsd1683::ApplyTemperatureBoost() {

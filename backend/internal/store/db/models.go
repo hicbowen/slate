@@ -149,6 +149,8 @@ type Content struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	ColorImageHash *string
+	GrayImageHash  *string
+	DisplayMode    string
 }
 
 type ContentAudio struct {

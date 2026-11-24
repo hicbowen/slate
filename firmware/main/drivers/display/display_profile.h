@@ -8,6 +8,7 @@
 namespace display_profile {
 
 inline constexpr int kMonoFrameBytes = 400 * 300 / 8;
+inline constexpr int kGrayFrameBytes = 400 * 300 / 2;
 
 #if CONFIG_SLATE_DISPLAY_NOTE4C
 inline constexpr bool        kFourColor            = true;
@@ -29,15 +30,21 @@ inline constexpr int         kFrameBytes           = kBytesPerRow * 300;
 inline constexpr uint8_t     kWhiteByte            = 0xFF;
 inline constexpr const char* kFrameFormat          = "mono1";
 inline constexpr int         kMinRefreshIntervalMs = 300;
-inline constexpr int         kRefreshIdleTimeoutMs = 8'000;
+inline constexpr int         kRefreshIdleTimeoutMs = 45'000;
 inline constexpr int         kBusyTimeoutMs        = 5'000;
 inline constexpr int         kDebounceQuietMs      = 50;
 inline constexpr int         kDebounceMaxMs        = 500;
 #endif
 
-// Older content may only have a mono rendition.
+inline constexpr int kMaxWireFrameBytes = kFourColor ? kFrameBytes : kGrayFrameBytes;
+
+inline constexpr bool IsGrayFrameSize(size_t bytes) {
+    return !kFourColor && bytes == kGrayFrameBytes;
+}
+
+// All panels can display a mono rendition.
 inline constexpr bool IsWireFrameSize(size_t bytes) {
-    return bytes == kFrameBytes || (kFourColor && bytes == kMonoFrameBytes);
+    return bytes == kMonoFrameBytes || bytes == kMaxWireFrameBytes;
 }
 
 }  // namespace display_profile

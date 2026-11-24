@@ -12,8 +12,8 @@ INSERT INTO devices (id, mac, secret_hash, pair_code, name, owner_id, sort_order
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15);
 
 -- name: ImportContent :exec
-INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, created_at, updated_at, gray_image_hash, display_mode)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
 
 -- name: ImportDynamic :exec
 INSERT INTO content_dynamic (content_id, type, config, data, rendered_at, next_run_at, refresh_due_at)

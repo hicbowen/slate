@@ -20,7 +20,7 @@ void EpdSsd1683::AssertRefreshTaskContext() const {
     configASSERT(refresh_task_ == nullptr || xTaskGetCurrentTaskHandle() == refresh_task_);
 }
 
-void EpdSsd1683::SpiPortInit() {
+void EpdSsd1683::SpiPortInit(int clock_hz) {
     AssertRefreshTaskContext();
     if (spi_ && spi_inited_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(spi_bus_remove_device(spi_));
@@ -42,12 +42,13 @@ void EpdSsd1683::SpiPortInit() {
     b.max_transfer_sz               = kBufferLen * 2;
     spi_device_interface_config_t d = {};
     d.spics_io_num                  = -1;
-    d.clock_speed_hz                = 40 * 1000 * 1000;
+    d.clock_speed_hz                = clock_hz;
     d.mode                          = 0;
     d.queue_size                    = 7;
     ESP_ERROR_CHECK(spi_bus_initialize(spi_host_, &b, SPI_DMA_CH_AUTO));
     ESP_ERROR_CHECK(spi_bus_add_device(spi_host_, &d, &spi_));
-    spi_inited_ = true;
+    spi_inited_     = true;
+    spi_clock_hz_   = clock_hz;
 }
 
 void EpdSsd1683::SpiPortRxInit() {
@@ -84,6 +85,7 @@ uint8_t EpdSsd1683::EpdRecvData() {
     // SPI RX/TX 模式切换会 remove/free/reinit bus。当前只允许 refresh_task
     // 在刷新序列里调用,避免其它任务同时操作同一组 EPD 引脚。
     AssertRefreshTaskContext();
+    const int tx_clock_hz = spi_clock_hz_;
     SpiPortRxInit();
     uint8_t           rx = 0;
     spi_transaction_t t  = {};
@@ -93,7 +95,7 @@ uint8_t EpdSsd1683::EpdRecvData() {
     gpio_set_level(cs_, 0);
     spi_device_polling_transmit(spi_, &t);
     gpio_set_level(cs_, 1);
-    SpiPortInit();
+    SpiPortInit(tx_clock_hz);
     return rx;
 }
 

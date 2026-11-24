@@ -355,7 +355,7 @@ void App::AttachInputs() {
         [] {
             ESP_LOGI(kTag, "button combo action=full_refresh combo=up_down");
             if (auto* epd = Board::Get().epd())
-                epd->RequestUrgentFullRefresh();
+                epd->RequestUrgentFullRefresh(/*preserve_gray=*/true);
         },
         post_button(UiEventKind::kButtonShort, ButtonId::kUp), post_button(UiEventKind::kButtonLong, ButtonId::kUp),
         post_button(UiEventKind::kButtonShort, ButtonId::kDown),

@@ -1,13 +1,6 @@
 // Note4C / SSD2683 的 2bpp 线序：00 黑、01 白、10 黄、11 红。
 
-export const BWRY_PRESETS = {
-  auto: '自动',
-  photo: '照片 · 自然',
-  vivid: '照片 · 鲜明',
-  graphic: '图文 · 清晰',
-} as const;
-
-export type BwryPreset = keyof typeof BWRY_PRESETS;
+import type { ImageRenderPreset } from './render-preset';
 
 /** 管理端已有的 Note4C 墨色近似值，用于感知量化；后续实测后只需替换这一处。 */
 export const BWRY_DEVICE_PALETTE = [
@@ -24,7 +17,7 @@ function renderBwryPixels(
   rgb: Uint8Array | Uint8ClampedArray,
   width: number,
   height: number,
-  preset: BwryPreset
+  preset: ImageRenderPreset
 ): Uint8Array {
   if (rgb.length !== width * height * 3) {
     throw new Error(`rgb buffer size mismatch: ${rgb.length} vs ${width * height * 3}`);
@@ -38,8 +31,8 @@ function resolveBwryRenderPreset(
   rgb: Uint8Array | Uint8ClampedArray,
   width: number,
   height: number,
-  preset: BwryPreset
-): Exclude<BwryPreset, 'auto'> {
+  preset: ImageRenderPreset
+): Exclude<ImageRenderPreset, 'auto'> {
   if (preset !== 'auto') return preset;
   if (rgb.length !== width * height * 3 || width <= 1 || height <= 1) return 'photo';
 
@@ -75,7 +68,7 @@ export function renderBwry2bpp(
   rgb: Uint8Array | Uint8ClampedArray,
   width: number,
   height: number,
-  preset: BwryPreset
+  preset: ImageRenderPreset
 ): Uint8Array {
   return packBwryPixels(renderBwryPixels(rgb, width, height, preset), width, height);
 }
@@ -100,7 +93,7 @@ const DEVICE_OKLAB = BWRY_DEVICE_PALETTE.map((color) =>
   linearRgbToOklab(srgbToLinear(color[0]), srgbToLinear(color[1]), srgbToLinear(color[2]))
 );
 
-type ResolvedPreset = Exclude<BwryPreset, 'auto'>;
+type ResolvedPreset = Exclude<ImageRenderPreset, 'auto'>;
 
 interface LabPlanes {
   l: Float32Array;

@@ -1,7 +1,7 @@
 // 图片内容编辑器 — 仅用于编辑已有图片内容；新建流程走 ContentCreateEditor。
 //
 // 拆分：
-//   PreviewCanvas   — 1bpp 预览 + 拖拽/缩放交互
+//   PreviewCanvas   — 帧预览 + 拖拽/缩放交互
 //   ImageDropzone   — 选图(可选)
 //   AudioDropzone   — 选音频 + 删除已有音频
 //   DitherControls  — 缩放 / 抖动算法 / 阈值
@@ -41,7 +41,7 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
 
   async function submitContent() {
     try {
-      if (form.hasFilePatch) {
+      if (form.hasUploadPatch) {
         const fd = await form.buildFormData();
         await updateImageContent.mutateAsync({ contentId: content.id, form: fd });
       } else if (form.frameNameChanged) {
@@ -91,6 +91,7 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
             isEdit
             imageHash={content.imageHash}
             colorImageHash={content.colorImageHash}
+            grayImageHash={content.grayImageHash}
             hasExistingAudio={!!content.audio?.hash}
             editingContentId={content.id}
             audioStatus={content.audio?.status ?? null}

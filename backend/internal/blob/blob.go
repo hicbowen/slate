@@ -52,14 +52,20 @@ func (s *Store) PutFrames(mono, color []byte) (monoHash string, colorHash *strin
 			return "", nil, err
 		}
 	}
-	if len(color) > 0 {
-		hash, err := s.Put(color)
-		if err != nil {
-			return "", nil, err
-		}
-		colorHash = &hash
+	colorHash, err = s.PutOptional(color)
+	return monoHash, colorHash, err
+}
+
+// PutOptional stores a rendition when supplied and represents its absence as NULL.
+func (s *Store) PutOptional(data []byte) (*string, error) {
+	if len(data) == 0 {
+		return nil, nil
 	}
-	return monoHash, colorHash, nil
+	hash, err := s.Put(data)
+	if err != nil {
+		return nil, err
+	}
+	return &hash, nil
 }
 
 // Put writes data unless a blob with the same digest already exists, in which case it

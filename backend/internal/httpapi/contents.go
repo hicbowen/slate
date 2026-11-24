@@ -26,7 +26,7 @@ const (
 
 func listRow(c db.GetContentRow) db.ListContentsRow {
 	return db.ListContentsRow{
-		ID: c.ID, GroupID: c.GroupID, SortOrder: c.SortOrder, Kind: c.Kind, FrameName: c.FrameName, ImageHash: c.ImageHash, ColorImageHash: c.ColorImageHash,
+		ID: c.ID, GroupID: c.GroupID, SortOrder: c.SortOrder, Kind: c.Kind, FrameName: c.FrameName, ImageHash: c.ImageHash, ColorImageHash: c.ColorImageHash, GrayImageHash: c.GrayImageHash, DisplayMode: c.DisplayMode,
 		DynamicType: c.DynamicType, DynamicConfig: c.DynamicConfig, DynamicData: c.DynamicData, RenderedAt: c.RenderedAt,
 		NextRunAt: c.NextRunAt, RefreshDueAt: c.RefreshDueAt, DynamicError: c.DynamicError, AudioSource: c.AudioSource,
 		AudioStatus: c.AudioStatus, AudioVoice: c.AudioVoice, AudioText: c.AudioText, AudioHash: c.AudioHash,
@@ -41,7 +41,7 @@ func statusBarText(c db.ListContentsRow) string {
 func contentView(c db.ListContentsRow) api.Content {
 	out := api.Content{
 		ID: c.ID, GroupID: c.GroupID, Seq: c.SortOrder, Kind: api.ContentKind(c.Kind), FrameName: c.FrameName,
-		StatusBarText: statusBarText(c), ImageHash: c.ImageHash, ColorImageHash: c.ColorImageHash,
+		StatusBarText: statusBarText(c), ImageHash: c.ImageHash, ColorImageHash: c.ColorImageHash, GrayImageHash: c.GrayImageHash, DisplayMode: c.DisplayMode,
 	}
 	if c.AudioSource != nil && c.AudioStatus != nil {
 		out.Audio = &api.ContentAudio{
@@ -78,8 +78,11 @@ func (a *API) manifest(ctx context.Context, g db.Group, frameFormat string) (api
 			ID: c.ID, Seq: c.SortOrder, StatusBarText: statusBarText(c),
 			Image: api.Blob{Hash: c.ImageHash, Size: api.FrameBytes},
 		}
-		if frameFormat == api.ColorFrameFormat && c.ColorImageHash != nil {
+		switch {
+		case frameFormat == api.ColorFrameFormat && c.ColorImageHash != nil:
 			f.Image = api.Blob{Hash: *c.ColorImageHash, Size: api.ColorFrameBytes}
+		case frameFormat == api.GrayFrameFormat && c.DisplayMode == api.DisplayModeGray && c.GrayImageHash != nil:
+			f.Image = api.Blob{Hash: *c.GrayImageHash, Size: api.GrayFrameBytes}
 		}
 		if c.AudioStatus != nil && *c.AudioStatus == db.AudioStatusReady && c.AudioHash != nil && c.AudioSize != nil {
 			f.Audio = &api.Blob{Hash: *c.AudioHash, Size: *c.AudioSize}
@@ -141,13 +144,13 @@ func isMultipart(r *http.Request) bool {
 }
 
 type upload struct {
-	frame, colorFrame, audio []byte
-	frameName                *string
-	hasFrameName             bool
+	frame, colorFrame, grayFrame, audio []byte
+	frameName, displayMode              *string
+	hasFrameName                        bool
 }
 
 // maxUploadBytes bounds the whole multipart body: both files plus headers and frameName.
-const maxUploadBytes = api.FrameBytes + api.ColorFrameBytes + maxAudioBytes + 64<<10
+const maxUploadBytes = api.FrameBytes + api.ColorFrameBytes + api.GrayFrameBytes + maxAudioBytes + 64<<10
 
 func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 	var u upload
@@ -160,8 +163,8 @@ func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 	for {
 		part, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {
-			if len(u.colorFrame) > 0 && len(u.frame) == 0 {
-				return u, badRequest("上传四色帧时须同时提供黑白帧")
+			if (len(u.colorFrame) > 0 || len(u.grayFrame) > 0) && len(u.frame) == 0 {
+				return u, badRequest("上传四色或灰阶帧时须同时提供黑白帧")
 			}
 			return u, nil
 		}
@@ -194,6 +197,24 @@ func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 			if len(u.colorFrame) != api.ColorFrameBytes {
 				return u, badRequest(message)
 			}
+		case "grayFrame":
+			const message = "灰阶帧须为 60000 字节的 4bpp 位图"
+			if u.grayFrame, err = readPart(part, api.GrayFrameBytes, message); err != nil {
+				return u, err
+			}
+			if len(u.grayFrame) != api.GrayFrameBytes {
+				return u, badRequest(message)
+			}
+		case "displayMode":
+			raw, err := readPart(part, 16, "displayMode 过长")
+			if err != nil {
+				return u, err
+			}
+			mode := string(raw)
+			if mode != api.DisplayModeMono && mode != api.DisplayModeGray {
+				return u, badRequest("displayMode 须为 mono1 或 gray16")
+			}
+			u.displayMode = &mode
 		case "audio":
 			// Browsers often send an empty or generic type for flac/opus/wma; ffmpeg decides.
 			if u.audio, err = readPart(part, maxAudioBytes, "音频文件不能超过 5MB"); err != nil {
@@ -237,22 +258,31 @@ func truncateRunes(s string, n int) string {
 	return s
 }
 
-// storeUpload stores the frame and transcodes the audio, returning blob hashes.
-func (a *API) storeUpload(ctx context.Context, u upload) (imageHash string, colorHash *string, audioHash string, audioSize int32, err error) {
-	if imageHash, colorHash, err = a.Blobs.PutFrames(u.frame, u.colorFrame); err != nil {
-		return "", nil, "", 0, err
+type storedUpload struct {
+	imageHash, audioHash string
+	colorHash, grayHash  *string
+	audioSize            int32
+}
+
+// storeUpload writes the supplied assets before any database changes.
+func (a *API) storeUpload(ctx context.Context, u upload) (storedUpload, error) {
+	var out storedUpload
+	var err error
+	out.imageHash, out.colorHash, err = a.Blobs.PutFrames(u.frame, u.colorFrame)
+	if err != nil {
+		return out, err
 	}
-	if len(u.audio) > 0 {
-		pcm, err := a.Media.Transcode(ctx, u.audio)
-		if err != nil {
-			return "", nil, "", 0, err
-		}
-		if audioHash, err = a.Blobs.Put(pcm); err != nil {
-			return "", nil, "", 0, err
-		}
-		audioSize = int32(len(pcm))
+	out.grayHash, err = a.Blobs.PutOptional(u.grayFrame)
+	if err != nil || len(u.audio) == 0 {
+		return out, err
 	}
-	return imageHash, colorHash, audioHash, audioSize, nil
+	pcm, err := a.Media.Transcode(ctx, u.audio)
+	if err != nil {
+		return out, err
+	}
+	out.audioHash, err = a.Blobs.Put(pcm)
+	out.audioSize = int32(len(pcm))
+	return out, err
 }
 
 func (a *API) createContent(w http.ResponseWriter, r *http.Request) error {
@@ -270,7 +300,10 @@ func (a *API) createContent(w http.ResponseWriter, r *http.Request) error {
 	if len(u.frame) == 0 {
 		return badRequest("请上传图片")
 	}
-	imageHash, colorHash, audioHash, audioSize, err := a.storeUpload(r.Context(), u)
+	if u.displayMode != nil && *u.displayMode == api.DisplayModeGray && len(u.grayFrame) == 0 {
+		return badRequest("16 灰显示需要灰阶帧")
+	}
+	assets, err := a.storeUpload(r.Context(), u)
 	if err != nil {
 		return err
 	}
@@ -280,13 +313,13 @@ func (a *API) createContent(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
-		if err := q.CreateContent(r.Context(), db.CreateContentParams{ID: id, GroupID: g.ID, SortOrder: seq, Kind: db.ContentKindImage, FrameName: u.frameName, ImageHash: imageHash, ColorImageHash: colorHash}); err != nil {
+		if err := q.CreateContent(r.Context(), db.CreateContentParams{ID: id, GroupID: g.ID, SortOrder: seq, Kind: db.ContentKindImage, FrameName: u.frameName, ImageHash: assets.imageHash, ColorImageHash: assets.colorHash, GrayImageHash: assets.grayHash, DisplayMode: u.displayMode}); err != nil {
 			return err
 		}
-		if audioHash == "" {
+		if assets.audioHash == "" {
 			return nil
 		}
-		return q.SetAudio(r.Context(), db.SetAudioParams{ContentID: id, Source: db.AudioSourceUpload, Status: db.AudioStatusReady, Hash: &audioHash, Size: &audioSize})
+		return q.SetAudio(r.Context(), db.SetAudioParams{ContentID: id, Source: db.AudioSourceUpload, Status: db.AudioStatusReady, Hash: &assets.audioHash, Size: &assets.audioSize})
 	})
 	if err != nil {
 		return err
@@ -454,10 +487,10 @@ func (a *API) patchImage(w http.ResponseWriter, r *http.Request, c db.GetContent
 	if err != nil {
 		return err
 	}
-	if len(u.frame) == 0 && len(u.audio) == 0 && !u.hasFrameName {
+	if len(u.frame) == 0 && len(u.audio) == 0 && !u.hasFrameName && u.displayMode == nil {
 		return badRequest("没有可更新的字段")
 	}
-	imageHash, colorHash, audioHash, audioSize, err := a.storeUpload(r.Context(), u)
+	assets, err := a.storeUpload(r.Context(), u)
 	if err != nil {
 		return err
 	}
@@ -467,14 +500,23 @@ func (a *API) patchImage(w http.ResponseWriter, r *http.Request, c db.GetContent
 				return err
 			}
 		}
-		if imageHash != "" {
-			if err := q.SetContentImage(r.Context(), db.SetContentImageParams{ID: c.ID, ImageHash: imageHash, ColorImageHash: colorHash}); err != nil {
+		if assets.imageHash != "" {
+			if err := q.SetContentImage(r.Context(), db.SetContentImageParams{ID: c.ID, ImageHash: assets.imageHash, ColorImageHash: assets.colorHash, GrayImageHash: assets.grayHash}); err != nil {
 				return err
 			}
 		}
+		if u.displayMode != nil {
+			n, err := q.SetImageDisplayMode(r.Context(), db.SetImageDisplayModeParams{ID: c.ID, DisplayMode: *u.displayMode})
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return badRequest("16 灰显示需要灰阶帧")
+			}
+		}
 		// A new picture keeps the existing audio; DELETE /audio is the only way to drop it.
-		if audioHash != "" {
-			return q.SetAudio(r.Context(), db.SetAudioParams{ContentID: c.ID, Source: db.AudioSourceUpload, Status: db.AudioStatusReady, Hash: &audioHash, Size: &audioSize})
+		if assets.audioHash != "" {
+			return q.SetAudio(r.Context(), db.SetAudioParams{ContentID: c.ID, Source: db.AudioSourceUpload, Status: db.AudioStatusReady, Hash: &assets.audioHash, Size: &assets.audioSize})
 		}
 		return nil
 	})
