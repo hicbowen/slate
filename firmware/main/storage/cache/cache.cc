@@ -1,8 +1,11 @@
 #include "storage/cache/cache.h"
 
+#include <cstring>
+
 #include <esp_littlefs.h>
 #include <esp_log.h>
 
+#include "drivers/display/display_profile.h"
 #include "storage/cache/cache_internal.h"
 #include "storage/cache/cache_io.h"
 #include "storage/cache/cache_paths.h"
@@ -12,7 +15,7 @@ namespace {
 
 // 缓存布局版本。帧元数据、manifest 或 state.json 的格式变化时递增：Init 发现不一致会
 // 整体格式化，固件不需要读旧格式。
-constexpr char kLayoutVersion[] = "2";
+constexpr const char* kLayoutVersion = display_profile::kFourColor ? "2-note4c" : "2";
 
 std::string LayoutPath() {
     return std::string(internal::kRoot) + "/layout";
@@ -73,7 +76,7 @@ bool FormatAll() {
     }
     internal::ResetStateCache();
     internal::DirEnsure(std::string(internal::kRoot) + "/groups");
-    return internal::WriteAll(LayoutPath(), kLayoutVersion, sizeof(kLayoutVersion) - 1);
+    return internal::WriteAll(LayoutPath(), kLayoutVersion, std::strlen(kLayoutVersion));
 }
 
 }  // namespace cache

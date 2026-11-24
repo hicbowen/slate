@@ -56,7 +56,7 @@ func NormalizeConfig(raw json.RawMessage) (api.DynamicConfig, error) {
 	}
 	out := api.DynamicConfig{Type: in.Type}
 	switch in.Type {
-	case api.DynamicTypeDailyCalendar, api.DynamicTypeMonthCalendar, api.DynamicTypeWeather, api.DynamicTypeHistoryToday:
+	case api.DynamicTypeDailyCalendar, api.DynamicTypeMonthCalendar, api.DynamicTypeCountdown, api.DynamicTypeWeather, api.DynamicTypeHistoryToday:
 		if _, err := time.LoadLocation(in.TZ); in.TZ == "" || len(in.TZ) > 48 || err != nil {
 			return out, invalid("时区无效: %s", in.TZ)
 		}
@@ -64,6 +64,16 @@ func NormalizeConfig(raw json.RawMessage) (api.DynamicConfig, error) {
 	}
 	switch in.Type {
 	case api.DynamicTypeDailyCalendar, api.DynamicTypeMonthCalendar, api.DynamicTypeEarthquakeReport:
+	case api.DynamicTypeCountdown:
+		out.Goal = strings.TrimSpace(in.Goal)
+		if out.Goal == "" || len([]rune(out.Goal)) > 32 {
+			return out, invalid("目标须为 1–32 个字符")
+		}
+		target, err := time.Parse(time.DateOnly, in.TargetDate)
+		if err != nil || target.Year() < 1 {
+			return out, invalid("请选择有效的目标日期")
+		}
+		out.TargetDate = in.TargetDate
 	case api.DynamicTypeWeather:
 		out.LocationID = strings.TrimSpace(in.LocationID)
 		out.LocationLabel = strings.TrimSpace(in.LocationLabel)
@@ -277,7 +287,7 @@ func normalizeBlock(b *api.DashboardBlock) error {
 		if rect.Align, err = oneOf("align", b.Align, "left", "left", "center", "right"); err != nil {
 			return err
 		}
-		if rect.Color, err = oneOf("color", b.Color, "black", "black", "white"); err != nil {
+		if rect.Color, err = oneOf("color", b.Color, "black", "black", "white", "red", "yellow"); err != nil {
 			return err
 		}
 		rect.MaxLines = b.MaxLines
@@ -336,7 +346,7 @@ func normalizeBlock(b *api.DashboardBlock) error {
 	case "rect":
 		stroke := b.Stroke == nil || *b.Stroke
 		rect.Stroke = &stroke
-		if rect.Fill, err = oneOf("fill", b.Fill, "none", "none", "black", "white"); err != nil {
+		if rect.Fill, err = oneOf("fill", b.Fill, "none", "none", "black", "white", "red", "yellow"); err != nil {
 			return err
 		}
 	default:
@@ -363,7 +373,7 @@ func ValidateDashboardData(raw json.RawMessage) error {
 func DefaultFrameName(cfg api.DynamicConfig) *string {
 	name := map[api.DynamicType]string{
 		api.DynamicTypeDailyCalendar: "日历", api.DynamicTypeMonthCalendar: "月历", api.DynamicTypeHistoryToday: "历史上的今天",
-		api.DynamicTypeEarthquakeReport: "地震速报",
+		api.DynamicTypeEarthquakeReport: "地震速报", api.DynamicTypeCountdown: "倒数日",
 	}[cfg.Type]
 	switch cfg.Type {
 	case api.DynamicTypeWeatherAlert, api.DynamicTypeWeather, api.DynamicTypeDashboard, api.DynamicTypeFontTest, api.DynamicTypeHotList:
@@ -425,6 +435,8 @@ func StatusBarText(frameName, dynamicType *string, config, data json.RawMessage,
 	var cfg api.DynamicConfig
 	_ = json.Unmarshal(config, &cfg)
 	switch api.DynamicType(*dynamicType) {
+	case api.DynamicTypeCountdown:
+		return "倒数日"
 	case api.DynamicTypeDailyCalendar, api.DynamicTypeMonthCalendar, api.DynamicTypeHistoryToday:
 		if renderedAt == nil {
 			return name

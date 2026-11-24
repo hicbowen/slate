@@ -42,7 +42,7 @@ WHERE g.id = o.id AND g.owner_id = @owner_id;
 SELECT id FROM groups WHERE owner_id = $1 ORDER BY sort_order, created_at;
 
 -- name: ListContents :many
-SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash,
+SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
        d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
@@ -55,7 +55,7 @@ WHERE c.group_id = $1
 ORDER BY c.sort_order;
 
 -- name: GetContent :one
-SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash,
+SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
        d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
@@ -72,11 +72,11 @@ WHERE c.id = $1;
 SELECT COALESCE(MAX(sort_order) + 1, 0)::int FROM contents WHERE group_id = $1;
 
 -- name: CreateContent :exec
-INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash)
-VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
 
 -- name: SetContentImage :exec
-UPDATE contents SET image_hash = $2, updated_at = now() WHERE id = $1;
+UPDATE contents SET image_hash = $2, color_image_hash = $3, updated_at = now() WHERE id = $1;
 
 -- name: SetContentFrameName :exec
 UPDATE contents SET frame_name = $2, updated_at = now() WHERE id = $1;
@@ -101,7 +101,7 @@ WHERE c.id = r.id AND c.sort_order <> r.pos - 1;
 SELECT EXISTS (
     SELECT 1 FROM contents c JOIN groups g ON g.id = c.group_id
     LEFT JOIN content_audio a ON a.content_id = c.id
-    WHERE g.owner_id = @user_id AND (c.image_hash = @hash OR a.hash = @hash)
+    WHERE g.owner_id = @user_id AND (c.image_hash = @hash OR c.color_image_hash = @hash OR a.hash = @hash)
 );
 
 -- name: BlobVisibleToDevice :one
@@ -109,10 +109,12 @@ SELECT EXISTS (
     SELECT 1 FROM devices dv JOIN groups g ON g.id = dv.group_id AND g.owner_id = dv.owner_id
     JOIN contents c ON c.group_id = g.id
     LEFT JOIN content_audio a ON a.content_id = c.id
-    WHERE dv.id = @device_id AND (c.image_hash = @hash OR a.hash = @hash)
+    WHERE dv.id = @device_id AND (c.image_hash = @hash OR c.color_image_hash = @hash OR a.hash = @hash)
 );
 
 -- name: ReferencedBlobHashes :many
 SELECT image_hash::text AS hash FROM contents
+UNION
+SELECT color_image_hash::text FROM contents WHERE color_image_hash IS NOT NULL
 UNION
 SELECT hash::text FROM content_audio WHERE hash IS NOT NULL;

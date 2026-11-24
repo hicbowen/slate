@@ -85,6 +85,19 @@ func TestFramesMatchGolden(t *testing.T) {
 	}
 }
 
+func TestPackedColorWireOrder(t *testing.T) {
+	c := NewCanvas(8, 1)
+	for x, color := range []uint8{Black, White, Yellow, Red, Red, Yellow, White, Black} {
+		c.Set(x, 0, color)
+	}
+	if got := c.PackedColor(); !bytes.Equal(got, []byte{0x1b, 0xe4}) {
+		t.Fatalf("BWRY wire order: %x", got)
+	}
+	if got := c.Packed(); !bytes.Equal(got, []byte{0x42}) {
+		t.Fatalf("monochrome rendition: %x", got)
+	}
+}
+
 func framePNG(frame []byte) []byte {
 	img := image.NewGray(image.Rect(0, 0, api.FrameWidth, api.FrameHeight))
 	for i := 0; i < api.FrameWidth*api.FrameHeight; i++ {

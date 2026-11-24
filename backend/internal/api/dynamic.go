@@ -7,6 +7,7 @@ type DynamicType string
 const (
 	DynamicTypeDailyCalendar    DynamicType = "daily_calendar"
 	DynamicTypeMonthCalendar    DynamicType = "month_calendar"
+	DynamicTypeCountdown        DynamicType = "countdown"
 	DynamicTypeWeather          DynamicType = "weather"
 	DynamicTypeHistoryToday     DynamicType = "history_today"
 	DynamicTypeWeatherAlert     DynamicType = "weather_alert"
@@ -17,13 +18,14 @@ const (
 )
 
 var DynamicTypes = []DynamicType{
-	DynamicTypeDailyCalendar, DynamicTypeMonthCalendar, DynamicTypeWeather, DynamicTypeHistoryToday, DynamicTypeWeatherAlert,
+	DynamicTypeDailyCalendar, DynamicTypeMonthCalendar, DynamicTypeCountdown, DynamicTypeWeather, DynamicTypeHistoryToday, DynamicTypeWeatherAlert,
 	DynamicTypeEarthquakeReport, DynamicTypeDashboard, DynamicTypeFontTest, DynamicTypeHotList,
 }
 
 // DynamicConfig is one flat shape for every dynamic type; fields that do not apply to
 // Type are dropped by normalization. Field use per type:
 //   - daily_calendar, month_calendar: tz, audio*, refreshIntervalSec
+//   - countdown: tz, goal, targetDate
 //   - weather: tz, locationId, locationLabel, audio*, refreshIntervalSec
 //   - history_today: tz, source (wikipedia | baidu_baike), audio*, refreshIntervalSec
 //   - weather_alert: province, audio*, refreshIntervalSec
@@ -34,6 +36,8 @@ var DynamicTypes = []DynamicType{
 type DynamicConfig struct {
 	Type               DynamicType           `json:"type"`
 	TZ                 string                `json:"tz,omitempty"`
+	Goal               string                `json:"goal,omitempty"`
+	TargetDate         string                `json:"targetDate,omitempty"`
 	AudioEnabled       bool                  `json:"audioEnabled,omitempty"`
 	AudioVoice         string                `json:"audioVoice,omitempty"`
 	RefreshIntervalSec int                   `json:"refreshIntervalSec,omitempty"`

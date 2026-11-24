@@ -18,9 +18,15 @@
 
 class MenuList {
    public:
+    enum class Tone {
+        kNormal,
+        kDanger,
+    };
+
     struct Item {
         std::string           title;
         std::function<void()> on_enter;  // ENTER 短按触发
+        Tone                  tone = Tone::kNormal;
     };
 
     static constexpr int kVisibleRows = 6;

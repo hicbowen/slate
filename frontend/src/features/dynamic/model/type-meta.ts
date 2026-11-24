@@ -7,6 +7,7 @@ import {
   CalendarDays,
   CloudSun,
   Flame,
+  Timer,
   Type as TypeIcon,
   type LucideIcon,
 } from 'lucide-react';
@@ -37,6 +38,14 @@ export const DYNAMIC_TYPE_META = {
     hasConfigurableParams: false,
     supportsAudio: true,
     Icon: CalendarDays,
+  },
+  countdown: {
+    label: '倒数日',
+    hint: '目标日期 · 剩余天数',
+    description: '按当地日期显示剩余天数，每天刷新。',
+    hasConfigurableParams: true,
+    supportsAudio: false,
+    Icon: Timer,
   },
   weather: {
     label: '天气',
@@ -99,6 +108,7 @@ export const DYNAMIC_TYPE_META = {
 export const DYNAMIC_TYPE_ORDER = [
   'daily_calendar',
   'month_calendar',
+  'countdown',
   'history_today',
   'weather',
   'weather_alert',

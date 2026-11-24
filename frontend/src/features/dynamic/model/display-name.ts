@@ -14,6 +14,8 @@ export function defaultDynamicFrameName(type: DynamicType, config: DynamicConfig
       return '日历';
     case 'month_calendar':
       return '月历';
+    case 'countdown':
+      return '倒数日';
     case 'weather':
       return config.locationLabel ? `${config.locationLabel}天气` : '天气';
     case 'history_today':
@@ -84,6 +86,8 @@ export function dynamicStatusTitle(config: DynamicConfig | null | undefined): st
       const date = zonedDateParts(new Date(), config.tz ?? 'Asia/Shanghai');
       return `${date.year}年${date.month}月`;
     }
+    case 'countdown':
+      return '倒数日';
     case 'weather':
       return config.locationLabel ? `${config.locationLabel}天气` : '天气';
     case 'history_today': {

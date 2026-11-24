@@ -59,10 +59,12 @@ export function usePreviewDynamicContent(contentId: string | undefined) {
     mutationFn: async ({
       config,
       data: previewData,
+      format,
       signal,
     }: {
       config: DynamicConfig;
       data?: Record<string, unknown>;
+      format?: string;
       signal?: AbortSignal;
     }) => {
       const url = contentId ? `/contents/${contentId}/preview` : '/contents/preview';
@@ -70,6 +72,7 @@ export function usePreviewDynamicContent(contentId: string | undefined) {
       const { data } = await api.post<ArrayBuffer>(url, body, {
         ...SLOW_REQUEST,
         responseType: 'arraybuffer',
+        params: { format },
         signal,
       });
       return data;

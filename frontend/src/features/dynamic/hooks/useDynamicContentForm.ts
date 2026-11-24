@@ -37,11 +37,13 @@ export function useDynamicContentForm({
   const [dashboardData, setDashboardData] = useState<Record<string, unknown> | null>(
     initialDashboardData
   );
+  const [previewColor, setPreviewColor] = useState(false);
   const { livePreviewData, previewPending, invalidatePreview } = useDynamicPreview({
     contentId,
     type,
     config,
     dashboardData,
+    color: previewColor,
   });
   const configKey = useMemo(() => (config ? dynamicConfigKey(config) : ''), [config]);
   const hasDashboardData = dashboardData !== null && Object.keys(dashboardData).length > 0;
@@ -62,6 +64,7 @@ export function useDynamicContentForm({
   const reset = useCallback(() => {
     invalidatePreview();
     setType(null);
+    setPreviewColor(false);
     setConfig(null);
     setFrameName('');
     setDashboardData(null);
@@ -105,6 +108,8 @@ export function useDynamicContentForm({
     hasDashboardData,
     canSubmit: !!(type && config && (type !== 'dashboard' || dashboardDataSatisfied)),
     previewPending,
+    previewColor,
+    setPreviewColor,
     livePreviewData,
     caption: effectiveDynamicStatusBarText(type, config, frameName),
     invalidatePreview,

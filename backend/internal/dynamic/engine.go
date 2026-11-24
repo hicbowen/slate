@@ -83,6 +83,7 @@ func (e *Engine) Mutate(ctx context.Context, contentID string, f func() error) e
 // Frame is one render plus the state to store with it.
 type Frame struct {
 	Image        []byte
+	ColorImage   []byte
 	Data         json.RawMessage
 	RenderedAt   time.Time
 	NextRunAt    *time.Time
@@ -131,11 +132,11 @@ func (e *Engine) prepare(ctx context.Context, cfg api.DynamicConfig, override, l
 			return f, &FetchError{err}
 		}
 	}
-	img, err := e.renderer.Render(render.Input{Type: cfg.Type, Config: cfg, Data: f.Data, RenderedAt: now})
+	img, color, err := e.renderer.RenderFrames(render.Input{Type: cfg.Type, Config: cfg, Data: f.Data, RenderedAt: now})
 	if err != nil {
 		return f, err
 	}
-	f.Image = img
+	f.Image, f.ColorImage = img, color
 	f.NextRunAt, f.RefreshDueAt = schedule(cfg, now)
 	return f, nil
 }
@@ -171,13 +172,13 @@ func (e *Engine) Render(ctx context.Context, contentID string, override json.Raw
 			e.markError(ctx, d, err.Error())
 			return err
 		}
-		hash, err := e.blobs.Put(f.Image)
+		hash, colorHash, err := e.blobs.PutFrames(f.Image, f.ColorImage)
 		if err != nil {
 			return err
 		}
 		err = e.store.Tx(ctx, func(q *db.Queries) error {
-			if hash != c.ImageHash {
-				if err := q.SetContentImage(ctx, db.SetContentImageParams{ID: contentID, ImageHash: hash}); err != nil {
+			if hash != c.ImageHash || c.ColorImageHash == nil || *c.ColorImageHash != *colorHash {
+				if err := q.SetContentImage(ctx, db.SetContentImageParams{ID: contentID, ImageHash: hash, ColorImageHash: colorHash}); err != nil {
 					return err
 				}
 			}

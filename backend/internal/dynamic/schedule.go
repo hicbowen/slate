@@ -18,7 +18,7 @@ const (
 )
 
 var calendarTypes = map[api.DynamicType]bool{
-	api.DynamicTypeDailyCalendar: true, api.DynamicTypeMonthCalendar: true, api.DynamicTypeHistoryToday: true,
+	api.DynamicTypeDailyCalendar: true, api.DynamicTypeMonthCalendar: true, api.DynamicTypeCountdown: true, api.DynamicTypeHistoryToday: true,
 }
 
 // schedule returns when devices should next show a new frame and when the server should
@@ -82,7 +82,7 @@ func canReuse(cfg api.DynamicConfig, data json.RawMessage, renderedAt *time.Time
 		return false
 	}
 	switch cfg.Type {
-	case api.DynamicTypeDailyCalendar, api.DynamicTypeMonthCalendar:
+	case api.DynamicTypeDailyCalendar, api.DynamicTypeMonthCalendar, api.DynamicTypeCountdown:
 		return false
 	case api.DynamicTypeDashboard, api.DynamicTypeFontTest:
 		return true

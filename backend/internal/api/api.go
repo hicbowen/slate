@@ -11,9 +11,11 @@ import (
 )
 
 const (
-	FrameWidth  = 400
-	FrameHeight = 300
-	FrameBytes  = FrameWidth * FrameHeight / 8
+	FrameWidth       = 400
+	FrameHeight      = 300
+	FrameBytes       = FrameWidth * FrameHeight / 8
+	ColorFrameBytes  = FrameWidth * FrameHeight / 4
+	ColorFrameFormat = "bwry2"
 	// StatusBarHeight is reserved at the top of every frame for the firmware status bar.
 	StatusBarHeight = 24
 	AudioSampleRate = 16000
@@ -112,15 +114,16 @@ const (
 )
 
 type Content struct {
-	ID            string          `json:"id"`
-	GroupID       string          `json:"groupId"`
-	Seq           int32           `json:"seq"`
-	Kind          ContentKind     `json:"kind"`
-	FrameName     *string         `json:"frameName" tstype:"string | null,required"`
-	StatusBarText string          `json:"statusBarText"`
-	ImageHash     string          `json:"imageHash"`
-	Audio         *ContentAudio   `json:"audio" tstype:"ContentAudio | null,required"`
-	Dynamic       *ContentDynamic `json:"dynamic" tstype:"ContentDynamic | null,required"`
+	ID             string          `json:"id"`
+	GroupID        string          `json:"groupId"`
+	Seq            int32           `json:"seq"`
+	Kind           ContentKind     `json:"kind"`
+	FrameName      *string         `json:"frameName" tstype:"string | null,required"`
+	StatusBarText  string          `json:"statusBarText"`
+	ImageHash      string          `json:"imageHash"`
+	ColorImageHash *string         `json:"colorImageHash,omitempty"`
+	Audio          *ContentAudio   `json:"audio" tstype:"ContentAudio | null,required"`
+	Dynamic        *ContentDynamic `json:"dynamic" tstype:"ContentDynamic | null,required"`
 }
 
 type ContentAudio struct {
@@ -144,7 +147,7 @@ type ContentDynamic struct {
 }
 
 // CreateDynamicContentRequest creates dynamic content; image content is created with
-// multipart/form-data fields frame (FrameBytes of packed 1bpp, rendered by the browser),
+// multipart/form-data fields frame (packed 1bpp), optional colorFrame (packed BWRY 2bpp),
 // audio and frameName.
 type CreateDynamicContentRequest struct {
 	Config      json.RawMessage `json:"config" tstype:"DynamicConfig"`

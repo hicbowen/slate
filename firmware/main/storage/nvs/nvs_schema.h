@@ -27,6 +27,8 @@ inline constexpr char kPwd[]    = "pwd";
 inline constexpr char kUrl[]    = "url";
 inline constexpr char kDevId[]  = "dev_id";
 inline constexpr char kDevSec[] = "dev_sec";
+inline constexpr char kLegacyWifiList[] = "wifi_list";
+inline constexpr char kWifiSingle[] = "wifi_single";
 }  // namespace net
 
 namespace audio {
@@ -69,6 +71,8 @@ SLATE_NVS_ASSERT_NAME(net::kPwd);
 SLATE_NVS_ASSERT_NAME(net::kUrl);
 SLATE_NVS_ASSERT_NAME(net::kDevId);
 SLATE_NVS_ASSERT_NAME(net::kDevSec);
+SLATE_NVS_ASSERT_NAME(net::kLegacyWifiList);
+SLATE_NVS_ASSERT_NAME(net::kWifiSingle);
 
 SLATE_NVS_ASSERT_NAME(audio::kVolume);
 

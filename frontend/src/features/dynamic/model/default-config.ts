@@ -8,6 +8,8 @@ export function defaultConfig(type: DynamicType): DynamicConfig {
     case 'daily_calendar':
     case 'month_calendar':
       return { type, tz: LOCAL_TIME_ZONE, ...audio };
+    case 'countdown':
+      return { type, tz: LOCAL_TIME_ZONE, goal: '', targetDate: '' };
     case 'weather':
       return {
         type,

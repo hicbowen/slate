@@ -100,6 +100,28 @@ function DynamicConfigFields({
     case 'daily_calendar':
     case 'month_calendar':
       return null;
+    case 'countdown':
+      return (
+        <div className="space-y-5">
+          <Input
+            type="text"
+            label="目标"
+            value={config.goal ?? ''}
+            maxLength={32}
+            onChange={(event) => onChange({ ...config, goal: event.target.value })}
+            placeholder="如：期末考试周"
+            required
+          />
+          <Input
+            type="date"
+            label="目标日期"
+            value={config.targetDate ?? ''}
+            onChange={(event) => onChange({ ...config, targetDate: event.target.value })}
+            hint="按当地日期计算，到期当天及之后显示 0 天。"
+            required
+          />
+        </div>
+      );
     case 'weather':
       return <WeatherConfigPanel config={config} onChange={onChange} />;
     case 'history_today':

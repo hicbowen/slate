@@ -20,6 +20,7 @@ type DeviceRegisterResponse struct {
 type DeviceSyncRequest struct {
 	Protocol        int             `json:"protocol"`
 	ManifestVersion string          `json:"manifestVersion"`
+	FrameFormat     string          `json:"frameFormat,omitempty"`
 	Telemetry       DeviceTelemetry `json:"telemetry"`
 }
 
@@ -38,6 +39,7 @@ type DeviceGroupRequest struct {
 	Action          string `json:"action" tstype:"'next' | 'prev' | 'select'"`
 	GroupID         string `json:"groupId,omitempty"`
 	ManifestVersion string `json:"manifestVersion"`
+	FrameFormat     string `json:"frameFormat,omitempty"`
 }
 
 type DeviceState struct {

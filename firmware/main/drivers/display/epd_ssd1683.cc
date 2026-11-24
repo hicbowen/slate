@@ -117,9 +117,9 @@ void EpdSsd1683::Init() {
         ESP_LOGE(kTag, "init failed reason=framebuffer_alloc action=restart");
         esp_restart();
     }
-    memset(buffer_, 0xFF, kBufferLen);
-    memset(snapshot_, 0xFF, kBufferLen);
-    memset(prev_snapshot_, 0xFF, kBufferLen);
+    memset(buffer_, display_profile::kWhiteByte, kBufferLen);
+    memset(snapshot_, display_profile::kWhiteByte, kBufferLen);
+    memset(prev_snapshot_, display_profile::kWhiteByte, kBufferLen);
     epd_line_.resize(((kWidth + 7) >> 3) * 2);
 
     dirty_mutex_ = xSemaphoreCreateMutex();
@@ -182,8 +182,12 @@ void EpdSsd1683::LvglFlushCb(lv_display_t* disp, const lv_area_t* area, uint8_t*
     for (int yy = 0; yy < h; ++yy) {
         const uint16_t* row = src + (yy + (y1 - area->y1)) * sw + (x1 - area->x1);
         for (int xx = 0; xx < w; ++xx) {
-            bool white = epd::Rgb565IsWhite(row[xx], kBwThreshold);
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+            epd::SetPx2(self->buffer_, kWidth, x1 + xx, y1 + yy, epd::Rgb565ToBwry(row[xx], kBwThreshold));
+#else
+            const bool white = epd::Rgb565IsWhite(row[xx], kBwThreshold);
             epd::SetPx1(self->buffer_, kWidth, x1 + xx, y1 + yy, white);
+#endif
         }
     }
 
@@ -266,15 +270,19 @@ void EpdSsd1683::RequestUrgentFullRefresh() {
         xTaskNotifyGive(refresh_task_);
 }
 
-void EpdSsd1683::WriteRaw1bpp(int x, int y, int w, int h, const uint8_t* data, size_t len) {
+void EpdSsd1683::WriteRawFrame(int x, int y, int w, int h, const uint8_t* data, size_t len) {
     ESP_LOGD(kTag, "write raw x=%d y=%d w=%d h=%d len=%u", x, y, w, h, static_cast<unsigned>(len));
     if (!data || w <= 0 || h <= 0)
         return;
-    const int src_bpr = (w + 7) >> 3;
+    const int src_bpr = (w * display_profile::kBitsPerPixel + 7) >> 3;
     if (len < static_cast<size_t>(src_bpr * h))
         return;
     xSemaphoreTake(dirty_mutex_, portMAX_DELAY);
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    epd::Copy2bppInto(buffer_, kWidth, kHeight, x, y, w, h, data);
+#else
     epd::Copy1bppInto(buffer_, kWidth, kHeight, x, y, w, h, data);
+#endif
     epd::Rect r = epd::Clamp(epd::AlignX8({x, y, w, h}), kWidth, kHeight);
     if (epd::Area(r) > 0) {
         epd::Rect u      = epd::Union(dirty_, r);
@@ -288,31 +296,40 @@ void EpdSsd1683::WriteRaw1bpp(int x, int y, int w, int h, const uint8_t* data, s
     xSemaphoreGive(dirty_mutex_);
 }
 
-void EpdSsd1683::SeedPreviousRaw1bpp(int x, int y, int w, int h, const uint8_t* data, size_t len) {
+void EpdSsd1683::SeedPreviousRawFrame(int x, int y, int w, int h, const uint8_t* data, size_t len) {
     if (!data || w <= 0 || h <= 0)
         return;
-    const int src_bpr = (w + 7) >> 3;
+    const int src_bpr = (w * display_profile::kBitsPerPixel + 7) >> 3;
     if (len < static_cast<size_t>(src_bpr * h))
         return;
 
     xSemaphoreTake(dirty_mutex_, portMAX_DELAY);
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    epd::Copy2bppInto(buffer_, kWidth, kHeight, x, y, w, h, data);
+    epd::Copy2bppInto(prev_snapshot_, kWidth, kHeight, x, y, w, h, data);
+#else
     epd::Copy1bppInto(buffer_, kWidth, kHeight, x, y, w, h, data);
     epd::Copy1bppInto(prev_snapshot_, kWidth, kHeight, x, y, w, h, data);
+#endif
     prev_snapshot_synced_ = true;
     xSemaphoreGive(dirty_mutex_);
 }
 
-bool EpdSsd1683::ReadPreviousRaw1bpp(int x, int y, int w, int h, uint8_t* out, size_t len) {
+bool EpdSsd1683::ReadPreviousRawFrame(int x, int y, int w, int h, uint8_t* out, size_t len) {
     if (!out || w <= 0 || h <= 0)
         return false;
-    const int dst_bpr = (w + 7) >> 3;
+    const int dst_bpr = (w * display_profile::kBitsPerPixel + 7) >> 3;
     if (len < static_cast<size_t>(dst_bpr * h))
         return false;
 
     xSemaphoreTake(dirty_mutex_, portMAX_DELAY);
     const bool synced = prev_snapshot_synced_;
     if (synced) {
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+        epd::Copy2bppFrom(prev_snapshot_, kWidth, kHeight, x, y, w, h, out);
+#else
         epd::Copy1bppFrom(prev_snapshot_, kWidth, kHeight, x, y, w, h, out);
+#endif
     }
     xSemaphoreGive(dirty_mutex_);
     return synced;
@@ -339,8 +356,8 @@ bool EpdSsd1683::RefreshTaskShouldStop() {
 }
 
 void EpdSsd1683::DebounceRefreshNotify() {
-    constexpr TickType_t kDebounceMs    = 50;   // 每来一次新 notify，续 50 ms
-    constexpr TickType_t kDebounceMaxMs = 500;  // 兜底：总等待最多 500 ms，防止 LVGL 永不静默
+    constexpr TickType_t kDebounceMs    = display_profile::kDebounceQuietMs;
+    constexpr TickType_t kDebounceMaxMs = display_profile::kDebounceMaxMs;
 
     // Sliding debounce：在 50 ms 窗口内吸收所有新 notify，每来一次重置窗口，
     // 直到 50 ms 没有新 notify 才进入真正的刷新。这一步把 LVGL 把整屏
@@ -387,8 +404,13 @@ bool EpdSsd1683::TakeRefreshRequest(bool& urgent, bool& force_full) {
 }
 
 bool EpdSsd1683::ThrottleRefreshSampling(bool urgent, bool force_full) {
+#if !CONFIG_SLATE_DISPLAY_NOTE4C
     if (urgent || force_full)
         return true;
+#else
+    (void)urgent;
+    (void)force_full;
+#endif
 
     // 周期性采样:LVGL 自驱(动画/滚动)flush 触发 notify,但没设 urgent flag。
     // sample_interval_ms_ 节流防止过频刷新损伤 EPD。
@@ -399,7 +421,12 @@ bool EpdSsd1683::ThrottleRefreshSampling(bool urgent, bool force_full) {
         ESP_LOGD(kTag, "refresh throttle urgent=%d force_full=%d wait_ticks=%lu", urgent ? 1 : 0, force_full ? 1 : 0,
                  static_cast<unsigned long>(mn - el));
         vTaskDelay(mn - el);
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+        // 四色屏每次刷新代价约十余秒；请求需要合并等待，但不能像动画采样一样丢弃。
+        return true;
+#else
         return false;
+#endif
     }
     return true;
 }
@@ -424,15 +451,22 @@ bool EpdSsd1683::CaptureRefreshSnapshot(bool force_full, epd::DiffResult& diff, 
 }
 
 bool EpdSsd1683::ShouldUseFullRefresh(const epd::DiffResult& diff, bool force_full, bool prev_synced) const {
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    (void)diff;
+    (void)force_full;
+    (void)prev_synced;
+    return true;
+#else
     // 决策 full vs partial:force_full / 累积 partial >= 阈值 / 差异 ≥ 30%(大改动
     // partial 出来会一片错乱) → 必须 full;首次未 sync 也要 full。timer wake
-    // 会先用 SeedPreviousRaw1bpp 把 prev_snapshot 跟物理屏幕对齐,不需要额外越过。
+    // 会先用 SeedPreviousRawFrame 把 prev_snapshot 跟物理屏幕对齐,不需要额外越过。
     constexpr float kForceFullDiffRatio = 0.30f;
     const bool      full                = force_full || partial_since_full_ >= kPartialBeforeFullCleanup ||
                       diff.ratio >= kForceFullDiffRatio || !prev_synced;
     ESP_LOGD(kTag, "refresh decision full=%d force=%d partial_since_full=%d diff=%d/1000 prev_synced=%d", full ? 1 : 0,
              force_full ? 1 : 0, partial_since_full_, static_cast<int>(diff.ratio * 1000.0f), prev_synced ? 1 : 0);
     return full;
+#endif
 }
 
 void EpdSsd1683::RunRefresh(bool full_refresh) {

@@ -192,9 +192,13 @@ jobs:
     needs:
       - prepare
       - quality
-    outputs:
-      full_name: ${{ steps.package.outputs.full_name }}
-      ota_name: ${{ steps.package.outputs.ota_name }}
+    strategy:
+      matrix:
+        include:
+          - panel: note4
+            defaults: sdkconfig.defaults
+          - panel: note4c
+            defaults: 'sdkconfig.defaults;sdkconfig.note4c.defaults'
     steps:
       - uses: actions/checkout@v7
 
@@ -205,39 +209,32 @@ jobs:
           target: esp32s3
           path: 'firmware'
           command: >-
-            idf.py build &&
+            idf.py -D 'SDKCONFIG_DEFAULTS=${{ matrix.defaults }}' build &&
             idf.py merge-bin -o slate-full.bin &&
             cp build/slate.bin build/slate-ota.bin
 
       - name: Prepare firmware assets
-        id: package
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          PANEL: ${{ matrix.panel }}
         run: |
           set -euo pipefail
 
-          FULL_NAME="slate-zectrix-note4-${RELEASE_TAG}-full.bin"
-          OTA_NAME="slate-zectrix-note4-${RELEASE_TAG}-ota.bin"
-
-          cp firmware/build/slate-full.bin "$RUNNER_TEMP/$FULL_NAME"
-          cp firmware/build/slate-ota.bin "$RUNNER_TEMP/$OTA_NAME"
+          PREFIX="slate-zectrix-${PANEL}-${RELEASE_TAG}"
+          cp firmware/build/slate-full.bin "$RUNNER_TEMP/$PREFIX-full.bin"
+          cp firmware/build/slate-ota.bin "$RUNNER_TEMP/$PREFIX-ota.bin"
 
           (
             cd "$RUNNER_TEMP"
-            sha256sum "$FULL_NAME" "$OTA_NAME" > "slate-zectrix-note4-${RELEASE_TAG}-sha256.txt"
+            sha256sum "$PREFIX-full.bin" "$PREFIX-ota.bin" > "$PREFIX-sha256.txt"
           )
-
-          echo "full_name=$FULL_NAME" >> "$GITHUB_OUTPUT"
-          echo "ota_name=$OTA_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: slate-release-firmware
+          name: slate-release-firmware-${{ matrix.panel }}
           path: |
-            ${{ runner.temp }}/${{ steps.package.outputs.full_name }}
-            ${{ runner.temp }}/${{ steps.package.outputs.ota_name }}
-            ${{ runner.temp }}/slate-zectrix-note4-${{ needs.prepare.outputs.tag }}-sha256.txt
+            ${{ runner.temp }}/slate-zectrix-${{ matrix.panel }}-${{ needs.prepare.outputs.tag }}-*
           if-no-files-found: error
 
   github-release:
@@ -264,7 +261,8 @@ jobs:
       - name: Download firmware artifacts
         uses: actions/download-artifact@v8
         with:
-          name: slate-release-firmware
+          pattern: slate-release-firmware-*
+          merge-multiple: true
           path: ${{ runner.temp }}/firmware
 
       - name: Publish GitHub Release
@@ -276,12 +274,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          ASSETS=(
-            "$FIRMWARE_DIR/${{ needs.firmware.outputs.full_name }}"
-            "$FIRMWARE_DIR/${{ needs.firmware.outputs.ota_name }}"
-            "$FIRMWARE_DIR/slate-zectrix-note4-${RELEASE_TAG}-sha256.txt"
-            compose.yml
-          )
+          ASSETS=(compose.yml)
+          for panel in note4 note4c; do
+            prefix="$FIRMWARE_DIR/slate-zectrix-${panel}-${RELEASE_TAG}"
+            for suffix in full.bin ota.bin sha256.txt; do
+              asset="$prefix-$suffix"
+              test -s "$asset"
+              ASSETS+=("$asset")
+            done
+          done
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" \

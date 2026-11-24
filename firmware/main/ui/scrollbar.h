@@ -16,7 +16,7 @@ struct ScrollbarTrack {
 };
 
 inline void StyleScrollbarThumb(lv_obj_t* thumb) {
-    lv_obj_set_style_bg_color(thumb, lv_color_black(), 0);
+    lv_obj_set_style_bg_color(thumb, theme::Accent(), 0);
     lv_obj_set_style_bg_opa(thumb, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(thumb, 0, 0);
     lv_obj_set_style_radius(thumb, 0, 0);

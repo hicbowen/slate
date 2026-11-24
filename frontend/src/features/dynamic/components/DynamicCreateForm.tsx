@@ -55,6 +55,7 @@ export function DynamicCreateForm({ gid, type, form, header, onDone }: DynamicCr
     <DynamicContentFormShell
       onSubmit={onSubmit}
       gridClassName="lg:grid-cols-2"
+      previewFormat={{ color: form.previewColor, onChange: form.setPreviewColor }}
       preview={
         <DynamicFramePreview
           data={form.livePreviewData}

@@ -1,6 +1,7 @@
 import type { AudioStatus } from '@/api';
-import type { ReactNode } from 'react';
-import { FrameHeight, FrameWidth } from '@/api';
+import { useState, type ReactNode } from 'react';
+import { useBlob } from '@/features/contents/query/content-image-queries';
+import { FramePreviewFormat } from '@/components/eink/FramePreviewFormat';
 import { Input } from '@/components/ui/Input';
 import { FormSection } from '@/components/ui/FormSection';
 import { cn } from '@/lib/cn';
@@ -14,8 +15,8 @@ interface ImageFormBodyProps {
   gid: string;
   form: ReturnType<typeof useImageContentForm>;
   isEdit: boolean;
-  existingImage?: ArrayBuffer;
-  existingImagePending?: boolean;
+  imageHash?: string;
+  colorImageHash?: string | null;
   hasExistingAudio?: boolean;
   editingContentId?: string | null;
   audioStatus?: AudioStatus | null;
@@ -31,8 +32,8 @@ export function ImageFormBody({
   gid,
   form,
   isEdit,
-  existingImage,
-  existingImagePending,
+  imageHash,
+  colorImageHash,
   hasExistingAudio = false,
   editingContentId = null,
   audioStatus,
@@ -43,19 +44,24 @@ export function ImageFormBody({
   beforeFields,
   actions,
 }: ImageFormBodyProps) {
+  const [color, setColor] = useState(false);
+  const available = !!(form.image.file || colorImageHash);
+  const previewColor = available && color;
+  const savedHash = previewColor ? colorImageHash : imageHash;
+  const saved = useBlob(form.image.file ? null : savedHash);
   return (
     <div
       className={cn('grid grid-cols-1 gap-6 lg:gap-8', gridClassName ?? 'lg:grid-cols-[1.3fr_1fr]')}
     >
       <div className="order-2 min-w-0 lg:order-1">
-        <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em] ml-0.5 mb-2">
-          预览 · 1bpp · {FrameWidth}×{FrameHeight}
-        </p>
+        <FramePreviewFormat color={previewColor} onChange={setColor} disabled={!available} />
         <PreviewCanvas
           canvasRef={form.image.previewRef}
           imageFile={form.image.file}
-          existingImage={existingImage}
-          existingImagePending={existingImagePending}
+          existingImage={saved.data}
+          existingImagePending={!!savedHash && !form.image.file && saved.isPending}
+          color={previewColor}
+          bwryPreset={form.dither.bwryPreset}
           threshold={form.dither.threshold}
           mode={form.dither.mode}
           scale={form.crop.scale}
@@ -83,6 +89,9 @@ export function ImageFormBody({
           <div className="space-y-4">
             <ImageDropzone isEdit={isEdit} imageFile={form.image.file} onPick={form.image.onPick} />
             <DitherControls
+              color={previewColor}
+              bwryPreset={form.dither.bwryPreset}
+              onBwryPresetChange={form.dither.setBwryPreset}
               mode={form.dither.mode}
               onModeChange={form.dither.setMode}
               threshold={form.dither.threshold}

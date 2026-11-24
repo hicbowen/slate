@@ -13,6 +13,8 @@ writes frontend/src/api/generated.ts (tygo) and frontend/src/api/catalog.json.
 export const FrameWidth = 400;
 export const FrameHeight = 300;
 export const FrameBytes = FrameWidth * FrameHeight / 8;
+export const ColorFrameBytes = FrameWidth * FrameHeight / 4;
+export const ColorFrameFormat = "bwry2";
 /**
  * StatusBarHeight is reserved at the top of every frame for the firmware status bar.
  */
@@ -101,6 +103,7 @@ export interface Content {
   frameName: string | null;
   statusBarText: string;
   imageHash: string;
+  colorImageHash?: string;
   audio: ContentAudio | null;
   dynamic: ContentDynamic | null;
 }
@@ -124,7 +127,7 @@ export interface ContentDynamic {
 }
 /**
  * CreateDynamicContentRequest creates dynamic content; image content is created with
- * multipart/form-data fields frame (FrameBytes of packed 1bpp, rendered by the browser),
+ * multipart/form-data fields frame (packed 1bpp), optional colorFrame (packed BWRY 2bpp),
  * audio and frameName.
  */
 export interface CreateDynamicContentRequest {
@@ -188,6 +191,7 @@ export interface DeviceRegisterResponse {
 export interface DeviceSyncRequest {
   protocol: number /* int */;
   manifestVersion: string;
+  frameFormat?: string;
   telemetry: DeviceTelemetry;
 }
 export interface DeviceTelemetry {
@@ -206,6 +210,7 @@ export interface DeviceGroupRequest {
   action: 'next' | 'prev' | 'select';
   groupId?: string;
   manifestVersion: string;
+  frameFormat?: string;
 }
 export interface DeviceState {
   serverTime: number /* int64 */;
@@ -255,6 +260,7 @@ export interface Blob {
 
 export const DynamicTypeDailyCalendar = "daily_calendar";
 export const DynamicTypeMonthCalendar = "month_calendar";
+export const DynamicTypeCountdown = "countdown";
 export const DynamicTypeWeather = "weather";
 export const DynamicTypeHistoryToday = "history_today";
 export const DynamicTypeWeatherAlert = "weather_alert";
@@ -262,11 +268,12 @@ export const DynamicTypeEarthquakeReport = "earthquake_report";
 export const DynamicTypeDashboard = "dashboard";
 export const DynamicTypeFontTest = "font_test";
 export const DynamicTypeHotList = "hot_list";
-export type DynamicType = typeof DynamicTypeDailyCalendar | typeof DynamicTypeMonthCalendar | typeof DynamicTypeWeather | typeof DynamicTypeHistoryToday | typeof DynamicTypeWeatherAlert | typeof DynamicTypeEarthquakeReport | typeof DynamicTypeDashboard | typeof DynamicTypeFontTest | typeof DynamicTypeHotList;
+export type DynamicType = typeof DynamicTypeDailyCalendar | typeof DynamicTypeMonthCalendar | typeof DynamicTypeCountdown | typeof DynamicTypeWeather | typeof DynamicTypeHistoryToday | typeof DynamicTypeWeatherAlert | typeof DynamicTypeEarthquakeReport | typeof DynamicTypeDashboard | typeof DynamicTypeFontTest | typeof DynamicTypeHotList;
 /**
  * DynamicConfig is one flat shape for every dynamic type; fields that do not apply to
  * Type are dropped by normalization. Field use per type:
  *   - daily_calendar, month_calendar: tz, audio*, refreshIntervalSec
+ *   - countdown: tz, goal, targetDate
  *   - weather: tz, locationId, locationLabel, audio*, refreshIntervalSec
  *   - history_today: tz, source (wikipedia | baidu_baike), audio*, refreshIntervalSec
  *   - weather_alert: province, audio*, refreshIntervalSec
@@ -278,6 +285,8 @@ export type DynamicType = typeof DynamicTypeDailyCalendar | typeof DynamicTypeMo
 export interface DynamicConfig {
   type: DynamicType;
   tz?: string;
+  goal?: string;
+  targetDate?: string;
   audioEnabled?: boolean;
   audioVoice?: string;
   refreshIntervalSec?: number /* int */;

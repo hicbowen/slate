@@ -1,4 +1,5 @@
 import { FrameHeight, FrameWidth } from '@/api';
+import { BWRY_DEVICE_PALETTE } from './bwry';
 import { INK_RGB, PAPER_HEX, PAPER_RGB } from './colors';
 
 export function clearCanvas(
@@ -18,6 +19,14 @@ export function decodeBppImage(
 ): ImageData {
   const byteView = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes;
   const data = new ImageData(width, height);
+  if (byteView.length === (width * height) / 4) {
+    const palette = BWRY_DEVICE_PALETTE.map(rgbaPixel);
+    const pixels = new Uint32Array(data.data.buffer);
+    for (let i = 0; i < pixels.length; i++) {
+      pixels[i] = palette[(byteView[i >> 2]! >> (6 - (i & 3) * 2)) & 3]!;
+    }
+    return data;
+  }
   const bpr = width >> 3;
   const pixels = new Uint32Array(data.data.buffer);
   const paperPixel = rgbaPixel(paperColor);
@@ -48,7 +57,7 @@ export function isValidBppLength(
   height: number = FrameHeight
 ): boolean {
   const byteLength = bytes instanceof ArrayBuffer ? bytes.byteLength : bytes.length;
-  return byteLength === (width * height) / 8;
+  return byteLength === (width * height) / 8 || byteLength === (width * height) / 4;
 }
 
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x0a0b0c0d]).buffer)[0] === 0x0d;

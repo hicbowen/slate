@@ -1,6 +1,6 @@
 # Slate / Firmware
 
-ESP-IDF 5.5 固件，目标芯片 ESP32-S3。目前只支持 **ZecTrix Note4 V1.0**（极趣实验室「Ai 便利贴」）：4.2 英寸黑白墨水屏、ES8311 音频、MEMS 麦克风、3 个按键、单节锂电池。
+ESP-IDF 5.5.x 固件，目标芯片 ESP32-S3，支持 **ZecTrix Note4 V1.0** 黑白屏和 **ZecTrix Note4C** 黑白红黄四色屏。构建时选择屏幕型号。
 
 本目录是独立的 ESP-IDF 工程。
 
@@ -8,13 +8,19 @@ ESP-IDF 5.5 固件，目标芯片 ESP32-S3。目前只支持 **ZecTrix Note4 V1.
 
 ```bash
 source $IDF_PATH/export.sh
-idf.py -C firmware build
-idf.py -C firmware -p <serial> flash monitor
+cd firmware
+
+# Note4 黑白屏
+idf.py -B build-note4 -D SDKCONFIG=build-note4/sdkconfig build
+
+# Note4C 四色屏
+idf.py -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
+  -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults' build
 ```
 
-- target、Flash、PSRAM、分区表都写在 `sdkconfig.defaults` 里，不需要 `set-target`。
-- CI 使用 v5.5.6，产物为 `slate-full.bin`（合并后的完整镜像）和 `slate-ota.bin`（只含应用）。
-- 只更新应用、保留配网和绑定信息时用 `idf.py app-flash`，它不写 NVS。
+- 使用对应型号的同一组构建参数，将 `build` 换成 `-p <serial> flash monitor` 即可烧录。两种屏幕固件需按型号选择。
+- CI 使用 v5.5.6 分别构建 Note4 和 Note4C，完整烧录包以 `-full.bin` 结尾，应用包以 `-ota.bin` 结尾。
+- 分区表和设备密钥键沿用 v0.2.0。只更新应用可使用 `app-flash` 保留 NVS；旧 fork 的多 Wi-Fi 列表会优先读取上次连通的配置，重新配网后使用新保存的单条配置。首次升级到新缓存版本时，Note4C 会重建 LittleFS 帧缓存并重新下载；服务端需使用本分支的 v2 实现。
 
 ## 代码结构
 
@@ -42,7 +48,7 @@ idf.py -C firmware -p <serial> flash monitor
 | 项 | 规格 |
 | --- | --- |
 | MCU | ESP32-S3-WROOM-1 N16R8V：16 MB QIO Flash + 8 MB Octal PSRAM |
-| 显示 | 4.2" 黑白 EPD，400×300，SSD2683（命令兼容 SSD1683） |
+| 显示 | 4.2" EPD，400×300，Note4 黑白 / Note4C 黑白红黄 |
 | 音频 | ES8311 codec、单声道扬声器、MEMS 麦克风、差分 D 类功放 |
 | 其他 | PCF8563 RTC、GT23SC6699 NFC、USB-C（CDC/JTAG） |
 | 按键 | 确认 / BOOT、上、下 / 开机，另有 EN 硬复位 |
@@ -155,6 +161,7 @@ Flash 为 QIO、PSRAM 为 Octal，所以 `CONFIG_ESPTOOLPY_OCT_FLASH=n` 配合 `
 
 - 每次 `sync` / `group` 请求都带上本地缓存的 `manifestVersion`。版本一致时服务端不返回 manifest，设备不下载任何内容。
 - 版本变化时响应里直接带新 manifest。设备按 sha256 只下载缺失或变化的图片和音频（`GET /api/device/blobs/{hash}`），并校验大小和哈希。
+- Note4C 在同步与切组时请求 `frameFormat: "bwry2"`。收到 30000 字节四色帧时直接显示，收到 15000 字节旧黑白帧时在上屏前展开为黑白像素。LittleFS 保留原始下载字节及其哈希。
 - 服务端返回 426 表示固件协议版本过旧，需要升级固件。
 
 ### 定时刷新

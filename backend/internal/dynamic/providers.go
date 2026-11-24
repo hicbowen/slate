@@ -27,6 +27,15 @@ func (e *Engine) fetchData(ctx context.Context, cfg api.DynamicConfig, lastData 
 		return dailyCalendar(local), nil
 	case api.DynamicTypeMonthCalendar:
 		return monthCalendar(local), nil
+	case api.DynamicTypeCountdown:
+		target, err := time.Parse(time.DateOnly, cfg.TargetDate)
+		if err != nil {
+			return nil, err
+		}
+		today := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
+		// Compute calendar days in UTC to avoid daylight-saving transitions and Duration overflow.
+		days := max(0, (target.Unix()-today.Unix())/86400)
+		return render.CountdownData{RemainingDays: days}, nil
 	case api.DynamicTypeFontTest:
 		return nil, nil
 	case api.DynamicTypeDashboard:

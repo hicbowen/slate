@@ -54,6 +54,11 @@ SplashScene::State MapBootStage(BootStage s) {
     return SplashScene::State::kInitializing;
 }
 
+bool IsDangerState(SplashScene::State state) {
+    return state == SplashScene::State::kWifiFailed || state == SplashScene::State::kServerUnreachable ||
+           state == SplashScene::State::kNetError;
+}
+
 }  // namespace
 
 void SplashScene::OnEnter(SceneContext& ctx) {
@@ -79,6 +84,8 @@ void SplashScene::OnEnter(SceneContext& ctx) {
 void SplashScene::OnExit(SceneContext& ctx) {
     ESP_LOGD(kTag, "exit root=%p", root_);
     DestroyRoot(ctx, root_, [this]() {
+        accent_bar_ = nullptr;
+        code_panel_ = nullptr;
         text_label_ = nullptr;
         code_label_ = nullptr;
         hint_label_ = nullptr;
@@ -88,10 +95,34 @@ void SplashScene::OnExit(SceneContext& ctx) {
 void SplashScene::CreateLayout() {
     root_ = CreateFullscreenRoot();
 
+#if CONFIG_SLATE_DISPLAY_NOTE4C
+    accent_bar_ = lv_obj_create(root_);
+    lv_obj_set_size(accent_bar_, 6, LV_VER_RES);
+    lv_obj_set_pos(accent_bar_, 0, 0);
+    lv_obj_set_style_bg_color(accent_bar_, theme::Accent(), 0);
+    lv_obj_set_style_bg_opa(accent_bar_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(accent_bar_, 0, 0);
+    lv_obj_set_style_radius(accent_bar_, 0, 0);
+    lv_obj_set_style_pad_all(accent_bar_, 0, 0);
+    lv_obj_clear_flag(accent_bar_, LV_OBJ_FLAG_SCROLLABLE);
+
+    code_panel_ = lv_obj_create(root_);
+    lv_obj_set_size(code_panel_, 290, 70);
+    lv_obj_align(code_panel_, LV_ALIGN_CENTER, 0, 24);
+    lv_obj_set_style_bg_color(code_panel_, theme::Accent(), 0);
+    lv_obj_set_style_bg_opa(code_panel_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(code_panel_, theme::Ink(), 0);
+    lv_obj_set_style_border_width(code_panel_, 1, 0);
+    lv_obj_set_style_radius(code_panel_, 0, 0);
+    lv_obj_set_style_pad_all(code_panel_, 0, 0);
+    lv_obj_clear_flag(code_panel_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(code_panel_, LV_OBJ_FLAG_HIDDEN);
+#endif
+
     // 主文案(中文 + 阿拉伯数字),Awaiting pair 状态下放在码上方做提示。
     text_label_ = lv_label_create(root_);
     lv_obj_set_style_text_font(text_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(text_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(text_label_, theme::Ink(), 0);
     lv_obj_set_style_text_align(text_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_line_space(text_label_, 8, 0);
     lv_label_set_long_mode(text_label_, LV_LABEL_LONG_WRAP);
@@ -100,7 +131,7 @@ void SplashScene::CreateLayout() {
     // 配对码大字(仅 ASCII A-Z 0-9,montserrat_48 即可)。默认隐藏,kAwaitingPair 时显示。
     code_label_ = lv_label_create(root_);
     lv_obj_set_style_text_font(code_label_, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_text_color(code_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(code_label_, theme::Ink(), 0);
     lv_obj_set_style_text_align(code_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_letter_space(code_label_, 4, 0);
     lv_obj_add_flag(code_label_, LV_OBJ_FLAG_HIDDEN);
@@ -108,7 +139,7 @@ void SplashScene::CreateLayout() {
     // 应急逃生 hint:始终在底部,长按 ENTER 进设置(配网恢复 / 看设备信息 / 工厂重置)。
     hint_label_ = lv_label_create(root_);
     lv_obj_set_style_text_font(hint_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(hint_label_, lv_color_black(), 0);
+    lv_obj_set_style_text_color(hint_label_, theme::Ink(), 0);
     lv_obj_set_style_text_align(hint_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(hint_label_, "长按确认 进入设置");
     lv_obj_align(hint_label_, LV_ALIGN_BOTTOM_MID, 0, -16);
@@ -223,6 +254,9 @@ void SplashScene::RenderContent() {
     char buf[192];
     bool show_code = false;
 
+    if (accent_bar_)
+        lv_obj_set_style_bg_color(accent_bar_, IsDangerState(state_) ? theme::Danger() : theme::Accent(), 0);
+
     switch (state_) {
         case State::kInitializing:
             std::snprintf(buf, sizeof(buf), "正在启动…");
@@ -279,10 +313,14 @@ void SplashScene::RenderContent() {
         // 配对码居中显示,提示文案放在码上方约 60px。
         lv_label_set_text(code_label_, pair_code_);
         lv_obj_clear_flag(code_label_, LV_OBJ_FLAG_HIDDEN);
+        if (code_panel_)
+            lv_obj_clear_flag(code_panel_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_align(text_label_, LV_ALIGN_CENTER, 0, -52);
         lv_obj_align(code_label_, LV_ALIGN_CENTER, 0, 24);
     } else {
         lv_obj_add_flag(code_label_, LV_OBJ_FLAG_HIDDEN);
+        if (code_panel_)
+            lv_obj_add_flag(code_panel_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_align(text_label_, LV_ALIGN_CENTER, 0, 0);
     }
 }

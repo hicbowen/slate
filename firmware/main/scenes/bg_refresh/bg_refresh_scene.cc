@@ -23,12 +23,12 @@
 
 namespace {
 constexpr char kTag[] = "bg_refresh";
-constexpr int  kBpr   = FrameView::kWidth / 8;
+constexpr int  kBpr   = display_profile::kBytesPerRow;
 
 // 后台刷新整体硬截止：从进场到完成的总时长上限。WiFi 连接 + poll + 拉帧 + EPD 刷新
 // 都算在内。超时直接投 kBgRefreshDone 回睡，不再依赖 10min idle Tick 兜底，封住
 // 「sync 卡住 → 持续亮屏连网耗电」的窗口。
-constexpr int kBgRefreshDeadlineMs = 40000;
+constexpr int kBgRefreshDeadlineMs = display_profile::kFourColor ? 150'000 : 40'000;
 
 void PostBgRefreshDone() {
     evt::PostSimple(UiEventKind::kBgRefreshDone);
@@ -48,7 +48,7 @@ struct WatcherContext {
 void WatcherEntry(void* arg) {
     std::unique_ptr<WatcherContext> ctx(static_cast<WatcherContext*>(arg));
     auto*                           epd        = ctx ? ctx->epd : nullptr;
-    constexpr int                   kTimeoutMs = 8000;
+    constexpr int                   kTimeoutMs = display_profile::kRefreshIdleTimeoutMs;
     // 只有确认刷新完成才清待重绘标记;超时则保留,下次唤醒继续全刷补画。
     if (epd && epd->WaitForRefreshIdle(kTimeoutMs))
         power_state::SetScreenRedrawPending(false);
@@ -175,9 +175,9 @@ bool BgRefreshScene::SeedPreviousFrame(SceneContext& ctx) {
 
     const int y = theme::kStatusBarHeight;
     const int h = FrameView::kHeight - y;
-    ctx.epd->SeedPreviousRaw1bpp(0, 0, epd::kStatusBarSnapshotWidth, epd::kStatusBarSnapshotHeight, status_bar.data(),
+    ctx.epd->SeedPreviousRawFrame(0, 0, epd::kStatusBarSnapshotWidth, epd::kStatusBarSnapshotHeight, status_bar.data(),
                                  status_bar.size());
-    ctx.epd->SeedPreviousRaw1bpp(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
+    ctx.epd->SeedPreviousRawFrame(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
     return true;
 }
 
@@ -236,12 +236,12 @@ bool BgRefreshScene::RenderChangedFrame(SceneContext& ctx) {
     lv_refr_now(NULL);
 
     // Background refresh uses LVGL only for the status bar. The frame body is
-    // written as raw 1bpp data so it exactly matches the cached screen format.
+    // written in the panel frame format so it exactly matches the cached screen format.
     const int y = theme::kStatusBarHeight;
     const int h = FrameView::kHeight - y;
-    ctx.epd->WriteRaw1bpp(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
+    ctx.epd->WriteRawFrame(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
     // 旧画面未知(待重绘或快照缺失)时局刷的差异不可信,零差异还会被直接跳过,只能全刷。
-    if (previous_screen_seeded_) {
+    if (previous_screen_seeded_ && !display_profile::kFourColor) {
         ctx.epd->RequestUrgentPartialRefresh();
     } else {
         ESP_LOGI(kTag, "render full refresh redraw_pending=%d", redraw_pending_ ? 1 : 0);

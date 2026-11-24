@@ -28,7 +28,11 @@ func (d drawer) hotList(data HotListData) {
 		rank = min(99, max(1, rank))
 		color := Black
 		if i < 3 {
-			d.c.FillRect(contentLeft, rankY, rankW, rankH, Black)
+			accent := Yellow
+			if i == 0 {
+				accent = Red
+			}
+			d.c.FillRect(contentLeft, rankY, rankW, rankH, accent)
 			color = White
 		} else {
 			d.c.StrokeRect(contentLeft, rankY, rankW, rankH, Black)
@@ -59,7 +63,7 @@ func (d drawer) earthquake(data EarthquakeData, now time.Time) {
 	heroY := statusBarH + 10
 	const heroH, magW = 106, 120
 	fields := quakeFields(latest)
-	d.c.FillRect(contentLeft, heroY, magW, heroH, Black)
+	d.c.FillRect(contentLeft, heroY, magW, heroH, Red)
 	d.text(f.Sans12, "震级", contentLeft+8, heroY+8, textOpts{maxWidth: magW - 16, ellipsis: true, color: White})
 	d.magnitude(or(latest.Magnitude, "--"), contentLeft+4, heroY+22, magW-8, 58)
 	footer := "最新速报"
@@ -85,7 +89,7 @@ func (d drawer) earthquake(data EarthquakeData, now time.Time) {
 	for i, item := range rest {
 		y := startY + i*rowH
 		fields := quakeFields(item)
-		d.badge("M"+or(item.Magnitude, "--"), contentLeft, y+11, 52, 24, i == 0)
+		d.badge("M"+or(item.Magnitude, "--"), contentLeft, y+11, 52, 24, i == 0, Red)
 		d.text(f.Sans16, or(item.Location, fallbackText), contentLeft+66, y+5, textOpts{maxWidth: contentRight - contentLeft - 66, ellipsis: true})
 		if fields.time != "" {
 			d.text(f.Metric12, fields.time, contentLeft+66, y+26, textOpts{maxWidth: 62, ellipsis: true})

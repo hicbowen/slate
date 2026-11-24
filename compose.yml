@@ -17,7 +17,7 @@
 
 services:
   slate:
-    image: ghcr.io/qiujun8023/slate:latest
+    image: ${SLATE_IMAGE:-ghcr.io/qiujun8023/slate:latest}
     restart: unless-stopped
     depends_on:
       postgres:

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DynamicConfig, DynamicType } from '@/api';
+import { ColorFrameFormat, type DynamicConfig, type DynamicType } from '@/api';
 import { usePreviewDynamicContent } from '@/features/dynamic/query/dynamic-content-queries';
 
 type PreviewContentType = DynamicType | 'image';
@@ -9,12 +9,14 @@ export function useDynamicPreview({
   type,
   config,
   dashboardData,
+  color,
   debounceMs = 800,
 }: {
   contentId?: string;
   type: PreviewContentType | null;
   config: DynamicConfig | null;
   dashboardData?: Record<string, unknown> | null;
+  color: boolean;
   debounceMs?: number;
 }) {
   const preview = usePreviewDynamicContent(contentId);
@@ -40,6 +42,7 @@ export function useDynamicPreview({
         {
           config,
           data: config.type === 'dashboard' ? (dashboardData ?? undefined) : undefined,
+          format: color ? ColorFrameFormat : undefined,
           signal: controller.signal,
         },
         {
@@ -56,7 +59,7 @@ export function useDynamicPreview({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [config, dashboardData, debounceMs, invalidatePreview, previewMutate, type]);
+  }, [color, config, dashboardData, debounceMs, invalidatePreview, previewMutate, type]);
 
   return { livePreviewData, previewPending: preview.isPending, invalidatePreview };
 }

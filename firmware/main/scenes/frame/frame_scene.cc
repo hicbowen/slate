@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "drivers/audio/audio_player.h"
+#include "drivers/display/display_profile.h"
 #include "drivers/display/epd_ssd1683.h"
 #include "events/event_bus.h"
 #include "events/ui_event_log.h"
@@ -223,13 +224,15 @@ void FrameScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
                     idx_ = 0;
             }
             if (content_count_ > 0) {
-                SyncRender(ctx, [this]() { ApplyEmptyState(); }, /*force_full*/ false);
+                SyncRender(
+                    ctx, [this]() { ApplyEmptyState(); }, /*force_full*/ false);
                 LoadFrame(ctx, idx_, /*force_full*/ true,
                           same_group ? AudioBehavior::StopIfUnavailable : AudioBehavior::RestartIfAvailable);
             } else {
                 if (ctx.audio)
                     ctx.audio->Stop();
-                SyncRender(ctx, [this]() { ApplyEmptyState(); }, /*force_full*/ true);
+                SyncRender(
+                    ctx, [this]() { ApplyEmptyState(); }, /*force_full*/ true);
             }
             break;
         }
@@ -270,14 +273,18 @@ void FrameScene::PrevFrame(SceneContext& ctx) {
 
 void FrameScene::CycleGroup(SceneContext& ctx, bool next) {
     ESP_LOGI(kTag, "cycle group direction=%s gid=%s idx=%d", next ? "next" : "prev", gid_.c_str(), idx_);
-    SyncRenderIfChanged(
-        ctx, [this]() { return status_bar_ && status_bar_->SetCaption("切换内容组…"); },
-        /*force_full*/ false);
+    if (!display_profile::kFourColor) {
+        SyncRenderIfChanged(
+            ctx, [this]() { return status_bar_ && status_bar_->SetCaption("切换内容组…"); },
+            /*force_full*/ false);
+    }
     if (ctx.cycle_group)
         ctx.cycle_group(next);
 }
 
 void FrameScene::HandleGroupSyncStatus(SceneContext& ctx, const UiEvent& e) {
+    if (display_profile::kFourColor)
+        return;
     ESP_LOGD(kTag, "group sync status mode=%s gid=%s name=%s current=%u total=%u",
              evt::log::GroupSyncStatusModeName(e.u.group_sync.mode), e.u.group_sync.gid, e.u.group_sync.name,
              static_cast<unsigned>(e.u.group_sync.current), static_cast<unsigned>(e.u.group_sync.total));
@@ -290,6 +297,8 @@ void FrameScene::HandleGroupSyncStatus(SceneContext& ctx, const UiEvent& e) {
 }
 
 void FrameScene::RefreshStatusBarForCharge(SceneContext& ctx, const UiEvent& e) {
+    if (display_profile::kFourColor)
+        return;
     const auto& c   = e.u.charge;
     int         pct = -1;
     if (!c.no_battery && ctx.read_battery) {
@@ -302,6 +311,8 @@ void FrameScene::RefreshStatusBarForCharge(SceneContext& ctx, const UiEvent& e) 
 }
 
 void FrameScene::RefreshStatusBarForBattery(SceneContext& ctx, const UiEvent& e) {
+    if (display_profile::kFourColor)
+        return;
     bool charging = false;
     bool full     = false;
     if (ctx.read_charge) {
@@ -318,12 +329,16 @@ void FrameScene::RefreshStatusBarForBattery(SceneContext& ctx, const UiEvent& e)
 }
 
 void FrameScene::RefreshStatusBarForWifi(SceneContext& ctx, const UiEvent& e) {
+    if (display_profile::kFourColor)
+        return;
     SyncRenderIfChanged(
         ctx, [this, &e]() { return status_bar_ && status_bar_->SetWifi(e.u.wifi.connected, e.u.wifi.rssi); },
         /*force_full*/ false);
 }
 
 void FrameScene::RestoreStatusBarCaption(SceneContext& ctx) {
+    if (display_profile::kFourColor)
+        return;
     if (cached_status_bar_text_.empty())
         return;
     SyncRenderIfChanged(

@@ -1,4 +1,4 @@
-// Package render draws dynamic frames with bitmap fonts directly into 1bpp canvases.
+// Package render draws dynamic frames with bitmap fonts.
 package render
 
 import (
@@ -8,8 +8,10 @@ import (
 )
 
 const (
-	Black uint8 = 0
-	White uint8 = 1
+	Black  uint8 = 0
+	White  uint8 = 1
+	Yellow uint8 = 2
+	Red    uint8 = 3
 )
 
 type Canvas struct {
@@ -134,9 +136,18 @@ func (c *Canvas) Mask(m *Mask, x, y int, color uint8) {
 func (c *Canvas) Packed() []byte {
 	out := make([]byte, (c.W*c.H+7)/8)
 	for i, v := range c.px {
-		if v != 0 {
+		if v == White {
 			out[i>>3] |= 0x80 >> (i & 7)
 		}
+	}
+	return out
+}
+
+// PackedColor uses the SSD2683 wire order: black, white, yellow, red.
+func (c *Canvas) PackedColor() []byte {
+	out := make([]byte, (len(c.px)+3)/4)
+	for i, v := range c.px {
+		out[i>>2] |= v << (6 - (i&3)*2)
 	}
 	return out
 }

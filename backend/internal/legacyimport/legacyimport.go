@@ -224,12 +224,20 @@ func importContents(ctx context.Context, src *sql.DB, q *db.Queries, groups map[
 			// The scheduler re-renders dynamic content right after import.
 			image = blankFrame()
 		}
-		hash, err := blobs.Put(image)
+		color, err := os.ReadFile(filepath.Join(blobDir, groupID, id+".bwry"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return imported, skipped, fmt.Errorf("content %s: read color frame: %w", id, err)
+		}
+		if err == nil && len(color) != api.ColorFrameBytes {
+			slog.Warn("invalid legacy color frame; using mono", "contentId", id, "bytes", len(color))
+			color = nil
+		}
+		hash, colorHash, err := blobs.PutFrames(image, color)
 		if err != nil {
 			return imported, skipped, err
 		}
 		if err := q.ImportContent(ctx, db.ImportContentParams{ID: id, GroupID: groupID, SortOrder: sort, Kind: db.ContentKind(kind),
-			FrameName: nullable(frameName), ImageHash: hash, CreatedAt: created, UpdatedAt: updated}); err != nil {
+			FrameName: nullable(frameName), ImageHash: hash, ColorImageHash: colorHash, CreatedAt: created, UpdatedAt: updated}); err != nil {
 			return imported, skipped, fmt.Errorf("content %s: %w", id, err)
 		}
 		if kind == "dynamic" && dynamicType.Valid {

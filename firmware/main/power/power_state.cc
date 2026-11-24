@@ -39,7 +39,7 @@ constexpr uint64_t kMaxBackoffWakeSec = 3600;
 // 标记保留,下次按键或动态帧定时唤醒时照常全刷补画。
 constexpr uint32_t kMaxRedrawRetries = 3;
 
-constexpr uint32_t     kStatusBarSnapshotMagic                             = 0x53544231u;  // "STB1"
+constexpr uint32_t kStatusBarSnapshotMagic = display_profile::kFourColor ? 0x53544232u : 0x53544231u;
 RTC_DATA_ATTR uint32_t s_status_bar_magic                                  = 0;
 RTC_DATA_ATTR uint32_t s_status_bar_hash                                   = 0;
 RTC_DATA_ATTR uint8_t  s_status_bar_snapshot[epd::kStatusBarSnapshotBytes] = {};

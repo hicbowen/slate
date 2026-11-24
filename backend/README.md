@@ -26,7 +26,7 @@
 | `internal/httpapi/` | 路由、鉴权、限流、handler |
 | `internal/store/` | sqlc 查询（`sql/`）与生成代码（`db/`） |
 | `internal/dynamic/` | 动态内容：配置校验、数据源、调度、TTS 队列、blob GC |
-| `internal/render/` | 1bpp 帧绘制：点阵字体、布局、各类型模板 |
+| `internal/render/` | 黑白和 BWRY 四色帧绘制：点阵字体、布局、各类型模板 |
 | `internal/hotlist/` | 热榜抓取，`sources.json` 是榜单源清单 |
 | `internal/blob/` | sha256 内容寻址文件存储 |
 | `internal/media/` | ffmpeg 音频转码 |
@@ -117,19 +117,20 @@
 | `GET /api/blobs/{hash}` | 帧或音频原始字节 |
 | `GET /api/weather/cities?q=` | 城市搜索 |
 
-**图片内容**用 `multipart/form-data` 创建和修改，只接受三个字段：
+**图片内容**用 `multipart/form-data` 创建和修改，接受以下字段：
 
 | 字段 | 内容 |
 | --- | --- |
 | `frame` | 浏览器渲染好的 400×300 packed 1bpp，15000 字节，MSB first，1 为白 |
+| `colorFrame` | 可选，400×300 packed BWRY 2bpp，30000 字节，色号 00 黑、01 白、10 黄、11 红，需同时上传 `frame` |
 | `audio` | 任意支持格式的音频，≤ 5 MB |
 | `frameName` | 状态栏标题 |
 
-- 其他字段或重复字段直接报错，请求体总大小不超过两个文件上限之和加 64 KB。
+- 其他字段或重复字段直接报错，请求体总大小不超过各文件上限之和加 64 KB。
 - 服务端不处理图片像素，只校验长度。
 - 换图片会保留已有音频，删除音频走 `DELETE /audio`。
 
-**动态内容**用 JSON（`CreateDynamicContentRequest` / `PatchContentRequest`）。修改配置时先按新配置取数并渲染，成功后才落库。
+**动态内容**用 JSON（`CreateDynamicContentRequest` / `PatchContentRequest`）。修改配置时先按新配置取数并渲染，成功后才落库。倒数日接受 `goal`、`targetDate` 和 `tz`，按当地午夜刷新。动态预览默认返回黑白帧，加 `?format=bwry2` 返回四色帧。
 
 ### Dashboard 数据推送
 
@@ -161,8 +162,8 @@ POST /api/contents/{id}/data
 | 接口 | 请求体 |
 | --- | --- |
 | `POST /api/device/register` | `{ protocol, mac }`，无需鉴权 |
-| `POST /api/device/sync` | `{ protocol, manifestVersion, telemetry }` |
-| `POST /api/device/group` | `{ protocol, action, groupId?, manifestVersion }` |
+| `POST /api/device/sync` | `{ protocol, manifestVersion, telemetry, frameFormat? }` |
+| `POST /api/device/group` | `{ protocol, action, groupId?, manifestVersion, frameFormat? }` |
 | `GET /api/device/blobs/{hash}` | — |
 
 **注册**返回 `deviceId`、`secret`（64 位 hex）、`pairCode` 和 `serverTime`（Unix 毫秒）。之后的请求都带 `Authorization: Bearer <secret>`。
@@ -177,6 +178,7 @@ POST /api/contents/{id}/data
 
 **manifest** 是帧列表，每帧包含 `id`、`seq`、`statusBarText`、`image {hash, size}`、`audio`、`refreshAt`。
 
+- 省略 `frameFormat` 时下发黑白帧。Note4C 请求 `bwry2` 时优先下发四色帧，历史黑白内容沿用原始帧、大小和哈希。
 - `refreshAt` 是动态帧下次重新渲染的 Unix 秒，静态帧为 null。
 - 版本是组 ID、组名和帧列表的 sha256 前 32 位，帧的任何变化都会换版本。
 
@@ -221,7 +223,7 @@ POST /api/contents/{id}/data
 
 两个源的结果都按「数据源 + 日期 + AI 模型」缓存 24 小时。
 
-**渲染**：`internal/render` 直接画 1bpp，不经过浏览器或 SVG。改布局后运行 `go test ./internal/render -update` 重写 golden PNG，并检查图片差异。
+**渲染**：`internal/render` 在同一布局上直接绘制并打包黑白和四色帧。改布局后运行 `go test ./internal/render -update` 重写 golden PNG，并检查图片差异。
 
 **调度**：`BACKGROUND_WORKERS=true` 时运行。
 

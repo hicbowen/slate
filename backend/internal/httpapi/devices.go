@@ -352,7 +352,7 @@ func (a *API) syncDevice(w http.ResponseWriter, r *http.Request) error {
 	if t.WakeReason == "timer" && t.CurrentContentID != "" {
 		a.refreshCurrentFrame(r.Context(), id, t.CurrentContentID)
 	}
-	state, err := a.deviceState(r.Context(), id, req.ManifestVersion)
+	state, err := a.deviceState(r.Context(), id, req.ManifestVersion, req.FrameFormat)
 	if err != nil {
 		return err
 	}
@@ -448,14 +448,14 @@ func (a *API) changeDeviceGroup(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	state, err := a.deviceState(r.Context(), id, req.ManifestVersion)
+	state, err := a.deviceState(r.Context(), id, req.ManifestVersion, req.FrameFormat)
 	if err != nil {
 		return err
 	}
 	return ok(w, state)
 }
 
-func (a *API) deviceState(ctx context.Context, id, knownVersion string) (api.DeviceState, error) {
+func (a *API) deviceState(ctx context.Context, id, knownVersion, frameFormat string) (api.DeviceState, error) {
 	d, err := a.Store.Q.GetDevice(ctx, id)
 	if err != nil {
 		return api.DeviceState{}, err
@@ -488,7 +488,7 @@ func (a *API) deviceState(ctx context.Context, id, knownVersion string) (api.Dev
 			pos.Current = i + 1
 		}
 	}
-	m, err := a.manifest(ctx, g)
+	m, err := a.manifest(ctx, g, frameFormat)
 	if err != nil {
 		return state, err
 	}

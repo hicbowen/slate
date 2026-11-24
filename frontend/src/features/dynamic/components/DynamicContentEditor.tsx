@@ -72,8 +72,8 @@ export function DynamicContentEditor({
     ]
   );
 
-  const savedPreviewEnabled = !!content.imageHash;
-  const savedPreview = useBlob(content.imageHash);
+  const savedPreviewHash = form.previewColor ? content.colorImageHash : content.imageHash;
+  const savedPreview = useBlob(savedPreviewHash);
   const dynamicMeta = form.type ? DYNAMIC_TYPE_META[form.type] : null;
   const showParams = Boolean(dynamicMeta?.hasConfigurableParams);
   const showAudio = Boolean(
@@ -119,17 +119,18 @@ export function DynamicContentEditor({
         onBack={onDone}
         icon={<Sparkles size={24} />}
         title="编辑动态内容"
-        subtitle="动态内容由服务端生成 400×300 1bpp 帧，设备端直接显示并叠加状态栏。"
+        subtitle="服务端为 Note4 和 Note4C 生成对应的 400×300 帧。"
       />
 
       <div className="mt-6 fade-up fade-up-1">
         <DynamicContentFormShell
           onSubmit={handleSubmit}
           gridClassName="lg:grid-cols-[1.3fr_1fr]"
+          previewFormat={{ color: form.previewColor, onChange: form.setPreviewColor }}
           preview={
             <SavedOrLiveDynamicFramePreview
               savedData={savedPreview.data}
-              savedPending={savedPreviewEnabled && savedPreview.isPending}
+              savedPending={!!savedPreviewHash && savedPreview.isPending}
               liveData={form.livePreviewData}
               livePending={form.previewPending}
               hasConfig={!!form.config}

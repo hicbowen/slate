@@ -12,6 +12,7 @@
 #include "bsp/board.h"
 #include "bsp/charge_status.h"
 #include "bsp/config.h"
+#include "drivers/display/display_profile.h"
 #include "drivers/display/epd_ssd1683.h"
 #include "drivers/display/framebuffer_ops.h"
 #include "events/event_bus.h"
@@ -25,7 +26,7 @@ constexpr char kTag[] = "sleep";
 
 // 进 deep sleep 前等 EPD 刷新结束的最大时长。低温或 full cleanup 可接近 5s；
 // 超时过短会在白相阶段切 EPD 电源，留下整屏白。
-constexpr int kEpdFlushTimeoutMs = 8000;
+constexpr int kEpdFlushTimeoutMs = display_profile::kRefreshIdleTimeoutMs;
 
 constexpr int kMaxBatteryPct = 100;
 constexpr int kMinBatteryPct = 0;
@@ -67,8 +68,8 @@ void SaveStatusBarSnapshot(EpdSsd1683* epd) {
     if (!epd)
         return;
     std::array<uint8_t, epd::kStatusBarSnapshotBytes> snapshot{};
-    if (!epd->ReadPreviousRaw1bpp(0, 0, epd::kStatusBarSnapshotWidth, epd::kStatusBarSnapshotHeight, snapshot.data(),
-                                  snapshot.size())) {
+    if (!epd->ReadPreviousRawFrame(0, 0, epd::kStatusBarSnapshotWidth, epd::kStatusBarSnapshotHeight, snapshot.data(),
+                                   snapshot.size())) {
         ESP_LOGW(kTag, "status snapshot skipped reason=previous_buffer_not_synced");
         power_state::ClearStatusBarSnapshot();
         return;

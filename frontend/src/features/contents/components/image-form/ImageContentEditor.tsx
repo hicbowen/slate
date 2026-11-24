@@ -10,7 +10,6 @@ import type { FormEvent } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
 import type { Content } from '@/api';
 import { useGenerateContentTts } from '@/features/contents/query/content-audio-queries';
-import { useBlob } from '@/features/contents/query/content-image-queries';
 import {
   usePatchContentFrameName,
   useUpdateImageContent,
@@ -38,7 +37,6 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
   const toast = useToast();
   const form = useImageContentForm(content);
 
-  const existingImg = useBlob(!form.image.file ? content.imageHash : null);
   const canSubmit = form.canEdit;
 
   async function submitContent() {
@@ -91,8 +89,8 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
             gid={gid}
             form={form}
             isEdit
-            existingImage={existingImg.data}
-            existingImagePending={existingImg.isPending && !form.image.file}
+            imageHash={content.imageHash}
+            colorImageHash={content.colorImageHash}
             hasExistingAudio={!!content.audio?.hash}
             editingContentId={content.id}
             audioStatus={content.audio?.status ?? null}

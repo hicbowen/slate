@@ -52,14 +52,14 @@ Slate 的 Web 管理端：账号、设备绑定、内容组、图片与动态内
 
 **图片**
 
-- 浏览器完成裁剪、缩放、灰度、自动反色、自动对比度和抖动，`renderFrame` 生成 400×300 packed 1bpp（15000 字节）直接上传，服务端原样保存。
+- 浏览器从同一裁剪区域生成 400×300 黑白帧和黑白红黄四色帧。预览可切换 Note4 和 Note4C，保存时上传两种帧。
 - 预览和上传走同一套函数，看到的就是设备上的样子。
 - 抖动模式列表在 `lib/eink/dither.ts`。`lib/eink/testdata/dither.json` 固定了各模式的输出，改算法时要有意更新它。
 
 **动态内容**
 
 - 配置表单覆盖所有类型，选项（字体、模板、榜单源、音色）来自 `catalog.json`。
-- 预览调用 `POST /api/contents/preview`，返回的 1bpp 画到 canvas 上。
+- 预览调用 `POST /api/contents/preview`，按选中的型号请求黑白或四色数据，再绘制到 canvas。
 - Dashboard 编辑页展示推送 URL（`POST /api/contents/{id}/data`），这个 URL 本身就是凭证。
 
 **缓存与刷新**

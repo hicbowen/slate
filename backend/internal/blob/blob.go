@@ -44,6 +44,24 @@ func (s *Store) path(hash string) string {
 	return filepath.Join(s.root, hash[:2], hash)
 }
 
+// PutFrames writes the supplied renditions before the caller publishes their hashes.
+func (s *Store) PutFrames(mono, color []byte) (monoHash string, colorHash *string, err error) {
+	if len(mono) > 0 {
+		monoHash, err = s.Put(mono)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	if len(color) > 0 {
+		hash, err := s.Put(color)
+		if err != nil {
+			return "", nil, err
+		}
+		colorHash = &hash
+	}
+	return monoHash, colorHash, nil
+}
+
 // Put writes data unless a blob with the same digest already exists, in which case it
 // refreshes the file's mtime so GC treats it as new until the caller commits its reference.
 func (s *Store) Put(data []byte) (string, error) {

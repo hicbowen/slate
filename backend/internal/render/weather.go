@@ -32,7 +32,7 @@ func (d drawer) weather(data WeatherData) {
 
 	d.icon(WeatherIcon(data.Code, 70), iconCx, heroCenterY)
 	tempX := round(float64(tempCenterX) - float64(f.DisplayLarge.Width(temp))/2)
-	d.text(f.DisplayLarge, temp, tempX, tempY, textOpts{maxWidth: 92, ellipsis: true})
+	d.text(f.DisplayLarge, temp, tempX, tempY, textOpts{maxWidth: 92, ellipsis: true, color: Yellow})
 	visible := ellipsize(f.DisplayLarge, tempFB, temp, 92)
 	d.text(f.Sans16, "°", tempX+widthFallback(f.DisplayLarge, tempFB, visible)+4, tempY+18, textOpts{maxWidth: 20})
 
@@ -121,7 +121,7 @@ func (d drawer) weatherAlert(data WeatherAlertData, now time.Time) {
 		if label == "" {
 			label = s.LevelShort
 		}
-		d.badge(label, contentLeft, round(float64(centerY)-badgeH/2.0), badgeW, badgeH, s.Filled)
+		d.badge(label, contentLeft, round(float64(centerY)-badgeH/2.0), badgeW, badgeH, s.Filled, Red)
 		d.textCenteredY(f.Sans16, s.Line(), titleX, float64(centerY), textOpts{maxWidth: titleW, ellipsis: true})
 		if item.IssuedAt != nil {
 			d.textCenteredY(f.Metric12, item.IssuedAt.In(now.Location()).Format("15:04"), contentRight, float64(centerY), textOpts{align: alignRight, maxWidth: timeW, ellipsis: true})

@@ -122,10 +122,8 @@ void EpdSsd1683::SpiGpioInit() {
 }
 
 void EpdSsd1683::ReadBusy() {
-    // 5s 超时兜底:屏挂死/带线松了不会让 refresh task 永久阻塞。
-    // 正常 full 刷 ~3s,partial ~1s,5s 留足余量。超时直接 panic 重启,
-    // 比挂死 + WDT 复位更可控,日志也更明确。
-    constexpr int64_t kBusyTimeoutMs = 5000;
+    // Note4C 的四色全刷显著慢于黑白屏，超时由编译期 profile 单独设置。
+    constexpr int64_t kBusyTimeoutMs = display_profile::kBusyTimeoutMs;
     const int64_t     start_ms       = time_utils::NowMs();
     while (gpio_get_level(busy_) == 0) {
         vTaskDelay(pdMS_TO_TICKS(5));

@@ -30,6 +30,23 @@ func New() (*Renderer, error) {
 // Render returns a packed 400×300 frame. The status bar strip stays white for the
 // firmware to draw over.
 func (r *Renderer) Render(in Input) ([]byte, error) {
+	c, err := r.draw(in)
+	if err != nil {
+		return nil, err
+	}
+	return c.Packed(), nil
+}
+
+// RenderFrames renders both renditions from the same snapshot and layout.
+func (r *Renderer) RenderFrames(in Input) (mono, color []byte, err error) {
+	c, err := r.draw(in)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c.Packed(), c.PackedColor(), nil
+}
+
+func (r *Renderer) draw(in Input) (*Canvas, error) {
 	c := NewCanvas(frameW, frameH)
 	d := drawer{c, r.fonts}
 	loc := Location(in.Config.TZ)
@@ -44,6 +61,11 @@ func (r *Renderer) Render(in Input) ([]byte, error) {
 		var data MonthCalendarData
 		if err = decode(in.Data, &data); err == nil {
 			d.monthCalendar(data, in.RenderedAt.In(loc))
+		}
+	case api.DynamicTypeCountdown:
+		var data CountdownData
+		if err = decode(in.Data, &data); err == nil {
+			d.countdown(in.Config, data)
 		}
 	case api.DynamicTypeHistoryToday:
 		var data HistoryTodayData
@@ -87,7 +109,7 @@ func (r *Renderer) Render(in Input) ([]byte, error) {
 		return nil, fmt.Errorf("动态数据格式错误: %w", err)
 	}
 	c.FillRect(0, 0, frameW, statusBarH, White)
-	return c.Packed(), nil
+	return c, nil
 }
 
 func decode(raw json.RawMessage, v any) error {

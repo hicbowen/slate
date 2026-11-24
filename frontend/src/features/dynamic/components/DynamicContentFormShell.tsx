@@ -1,9 +1,11 @@
 import type { FormEvent, ReactNode } from 'react';
+import { FramePreviewFormat } from '@/components/eink/FramePreviewFormat';
 import { cn } from '@/lib/cn';
 
 export function DynamicContentFormShell({
   onSubmit,
   preview,
+  previewFormat,
   header,
   fields,
   actions,
@@ -11,6 +13,7 @@ export function DynamicContentFormShell({
 }: {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   preview: ReactNode;
+  previewFormat?: { color: boolean; onChange: (color: boolean) => void };
   header: ReactNode;
   fields?: ReactNode;
   actions?: ReactNode;
@@ -22,9 +25,13 @@ export function DynamicContentFormShell({
       className={cn('grid grid-cols-1 gap-6 lg:gap-8', gridClassName ?? 'lg:grid-cols-[1.3fr_1fr]')}
     >
       <div className="order-2 min-w-0 lg:order-1">
-        <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em] ml-0.5 mb-2">
-          设备预览
-        </p>
+        {previewFormat ? (
+          <FramePreviewFormat {...previewFormat} />
+        ) : (
+          <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em] ml-0.5 mb-2">
+            设备预览
+          </p>
+        )}
         {preview}
       </div>
 

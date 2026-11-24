@@ -25,6 +25,13 @@ jobs:
   firmware:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - panel: note4
+            defaults: sdkconfig.defaults
+          - panel: note4c
+            defaults: 'sdkconfig.defaults;sdkconfig.note4c.defaults'
     steps:
       - uses: actions/checkout@v7
 
@@ -35,14 +42,14 @@ jobs:
           target: esp32s3
           path: 'firmware'
           command: >-
-            idf.py build &&
+            idf.py -D 'SDKCONFIG_DEFAULTS=${{ matrix.defaults }}' build &&
             idf.py merge-bin -o slate-full.bin &&
             cp build/slate.bin build/slate-ota.bin
 
       - name: Upload firmware
         uses: actions/upload-artifact@v7
         with:
-          name: firmware
+          name: firmware-${{ matrix.panel }}
           path: |
             firmware/build/slate-full.bin
             firmware/build/slate-ota.bin

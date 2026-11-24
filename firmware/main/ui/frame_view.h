@@ -4,13 +4,15 @@
 
 #include <vector>
 
+#include "drivers/display/display_profile.h"
+
 class EpdSsd1683;
 
 class FrameView {
    public:
     static constexpr int kWidth    = 400;
     static constexpr int kHeight   = 300;
-    static constexpr int kRawBytes = kWidth * kHeight / 8;
+    static constexpr int kRawBytes = display_profile::kFrameBytes;
 
     explicit FrameView(lv_obj_t* parent);
 

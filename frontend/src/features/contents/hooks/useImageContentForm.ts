@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import type { Content } from '@/api';
+import type { BwryPreset } from '@/lib/eink/bwry';
 import { DEFAULT_DITHER_MODE, type DitherMode } from '@/lib/eink/dither';
 import { useAudioFormState } from './useAudioFormState';
 import { useCropState } from './useCropState';
@@ -14,6 +15,7 @@ export function useImageContentForm(content?: Content) {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const audio = useAudioFormState(content);
   const [threshold, setThreshold] = useState(BW_THRESHOLD_DEFAULT);
+  const [bwryPreset, setBwryPreset] = useState<BwryPreset>('auto');
   const [mode, setMode] = useState<DitherMode>(DEFAULT_DITHER_MODE);
   const [frameName, setFrameName] = useState(content?.frameName ?? '');
   const { scale, setScale, offset, setOffset, resetCrop } = useCropState();
@@ -47,6 +49,7 @@ export function useImageContentForm(content?: Content) {
     audio.resetAudio();
     setThreshold(BW_THRESHOLD_DEFAULT);
     setMode(DEFAULT_DITHER_MODE);
+    setBwryPreset('auto');
     setFrameName('');
     resetCrop();
   }, [audio, resetCrop]);
@@ -56,6 +59,7 @@ export function useImageContentForm(content?: Content) {
     audioFile: audio.audioFile,
     frameName,
     threshold,
+    bwryPreset,
     mode,
     scale,
     offset,
@@ -85,6 +89,8 @@ export function useImageContentForm(content?: Content) {
       setThreshold,
       mode,
       setMode,
+      bwryPreset,
+      setBwryPreset,
     },
     crop: {
       scale,

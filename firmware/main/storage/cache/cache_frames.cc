@@ -9,6 +9,7 @@
 #include <cstring>
 #include <utility>
 
+#include "drivers/display/display_profile.h"
 #include "storage/cache/cache_io.h"
 #include "storage/cache/cache_paths.h"
 #include "storage/cache/cache_staging.h"
@@ -82,7 +83,7 @@ bool FrameImageExists(const std::string& gid, int idx, const std::string& expect
     struct stat st;
     if (stat(internal::ImagePath(gid, idx).c_str(), &st) != 0)
         return false;
-    if (st.st_size != internal::kFrameImageBytes)
+    if (!display_profile::IsWireFrameSize(st.st_size))
         return false;
     FrameMeta meta;
     return ReadFrameMeta(gid, idx, meta) && meta.image_hash == expected_hash;
@@ -90,7 +91,7 @@ bool FrameImageExists(const std::string& gid, int idx, const std::string& expect
 
 bool WriteFrameImage(const std::string& gid, int idx, const std::vector<uint8_t>& bytes, const std::string& hash) {
     (void)hash;
-    if (bytes.size() != internal::kFrameImageBytes) {
+    if (!display_profile::IsWireFrameSize(bytes.size())) {
         ESP_LOGW(internal::kTag, "frame image refused idx=%d bytes=%u expected=%u", idx,
                  static_cast<unsigned>(bytes.size()), static_cast<unsigned>(internal::kFrameImageBytes));
         return false;
@@ -101,7 +102,23 @@ bool WriteFrameImage(const std::string& gid, int idx, const std::vector<uint8_t>
 }
 
 bool ReadFrameImage(const std::string& gid, int idx, std::vector<uint8_t>& out) {
-    return internal::ReadAll(internal::ImagePath(gid, idx), out, internal::kFrameImageBytes);
+    if (!internal::ReadAll(internal::ImagePath(gid, idx), out, internal::kFrameImageBytes) ||
+        !display_profile::IsWireFrameSize(out.size()))
+        return false;
+    if (display_profile::kFourColor && out.size() == display_profile::kMonoFrameBytes) {
+        // Keep the verified wire bytes and hash in LittleFS. Expand only for display.
+        out.resize(display_profile::kFrameBytes);
+        for (int i = display_profile::kMonoFrameBytes - 1; i >= 0; --i) {
+            const uint8_t mono = out[i];
+            for (int half = 0; half < 2; ++half) {
+                uint8_t bwry = 0;
+                for (int x = 0; x < 4; ++x)
+                    bwry |= ((mono >> (7 - half * 4 - x)) & 1) << (6 - x * 2);
+                out[i * 2 + half] = bwry;
+            }
+        }
+    }
+    return true;
 }
 
 bool FrameAudioExists(const std::string& gid, int idx, const std::string& expected_hash) {
@@ -165,7 +182,7 @@ bool StagedFrameImageExists(const std::string& gid, int idx, const std::string& 
     if (expected_hash.empty())
         return false;
     struct stat st;
-    if (stat(internal::StageImagePath(gid, idx).c_str(), &st) == 0 && st.st_size == internal::kFrameImageBytes) {
+    if (stat(internal::StageImagePath(gid, idx).c_str(), &st) == 0 && display_profile::IsWireFrameSize(st.st_size)) {
         FrameMeta meta;
         if (ReadFrameMetaFile(internal::StageMetaPath(gid, idx), meta) && meta.image_hash == expected_hash)
             return true;
@@ -175,7 +192,7 @@ bool StagedFrameImageExists(const std::string& gid, int idx, const std::string& 
 
 bool WriteStagedFrameImage(const std::string& gid, int idx, const std::vector<uint8_t>& bytes,
                            const std::string& hash) {
-    if (bytes.size() != internal::kFrameImageBytes) {
+    if (!display_profile::IsWireFrameSize(bytes.size())) {
         ESP_LOGW(internal::kTag, "staged frame image refused idx=%d bytes=%u expected=%u", idx,
                  static_cast<unsigned>(bytes.size()), static_cast<unsigned>(internal::kFrameImageBytes));
         return false;

@@ -26,12 +26,9 @@ func (d drawer) dashboard(cfg api.DynamicConfig, data map[string]any) {
 			if !ok {
 				continue
 			}
-			font, color := f.Sans16, Black
+			font := f.Sans16
 			if b.FontSize == 12 {
 				font = f.Sans12
-			}
-			if b.Color == "white" {
-				color = White
 			}
 			a, anchor := alignLeft, x
 			switch b.Align {
@@ -40,7 +37,7 @@ func (d drawer) dashboard(cfg api.DynamicConfig, data map[string]any) {
 			case "right":
 				a, anchor = alignRight, x+w
 			}
-			d.text(font, ResolveTemplate(b.Value, data), anchor, y, textOpts{align: a, maxWidth: w, maxLines: min(4, max(1, b.MaxLines)), ellipsis: true, color: color})
+			d.text(font, ResolveTemplate(b.Value, data), anchor, y, textOpts{align: a, maxWidth: w, maxLines: min(4, max(1, b.MaxLines)), ellipsis: true, color: dashboardInk(b.Color)})
 		case "metric":
 			x, y, w, h, ok := blockRect(b)
 			if !ok {
@@ -79,16 +76,26 @@ func (d drawer) dashboard(cfg api.DynamicConfig, data map[string]any) {
 			if !ok {
 				continue
 			}
-			switch b.Fill {
-			case "black":
-				d.c.FillRect(x, y, w, h, Black)
-			case "white":
-				d.c.FillRect(x, y, w, h, White)
+			if b.Fill != "" && b.Fill != "none" {
+				d.c.FillRect(x, y, w, h, dashboardInk(b.Fill))
 			}
 			if b.Stroke == nil || *b.Stroke {
 				d.c.StrokeRect(x, y, w, h, Black)
 			}
 		}
+	}
+}
+
+func dashboardInk(color string) uint8 {
+	switch color {
+	case "white":
+		return White
+	case "red":
+		return Red
+	case "yellow":
+		return Yellow
+	default:
+		return Black
 	}
 }
 

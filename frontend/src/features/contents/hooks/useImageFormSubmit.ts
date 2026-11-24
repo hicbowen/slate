@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
+import type { BwryPreset } from '@/lib/eink/bwry';
 import type { DitherMode } from '@/lib/eink/dither';
-import { renderFrame, type CropOptions } from '@/lib/eink/image-preview';
+import { renderFrames, type CropOptions } from '@/lib/eink/image-preview';
 
 export function useImageFormSubmit({
   imageFile,
@@ -8,6 +9,7 @@ export function useImageFormSubmit({
   frameName,
   threshold,
   mode,
+  bwryPreset,
   scale,
   offset,
 }: {
@@ -16,6 +18,7 @@ export function useImageFormSubmit({
   frameName: string;
   threshold: number;
   mode: DitherMode;
+  bwryPreset: BwryPreset;
 } & CropOptions) {
   return useCallback(async (): Promise<FormData> => {
     const fd = new FormData();
@@ -24,11 +27,22 @@ export function useImageFormSubmit({
         throw new Error('图片无法解码，请换一张图片。');
       });
       try {
-        const frame = renderFrame(bitmap, { scale, offset, threshold, mode });
+        const { mono, color } = renderFrames(bitmap, {
+          scale,
+          offset,
+          threshold,
+          mode,
+          bwryPreset,
+        });
         fd.append(
           'frame',
-          new Blob([frame.slice()], { type: 'application/octet-stream' }),
+          new Blob([mono.slice()], { type: 'application/octet-stream' }),
           'frame.bin'
+        );
+        fd.append(
+          'colorFrame',
+          new Blob([color.slice()], { type: 'application/octet-stream' }),
+          'frame-bwry.bin'
         );
       } finally {
         bitmap.close();
@@ -37,5 +51,5 @@ export function useImageFormSubmit({
     if (audioFile) fd.append('audio', audioFile);
     fd.append('frameName', frameName.trim());
     return fd;
-  }, [audioFile, frameName, imageFile, mode, offset, scale, threshold]);
+  }, [audioFile, bwryPreset, frameName, imageFile, mode, offset, scale, threshold]);
 }

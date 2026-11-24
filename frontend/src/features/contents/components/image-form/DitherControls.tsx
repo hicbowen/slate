@@ -1,9 +1,14 @@
 // 抖动算法选择 + 阈值滑块(仅 threshold 模式显示)+ 缩放滑块(仅选了图时显示)。
 
+import { Select, SelectItem } from '@/components/ui/Select';
+import { BWRY_PRESETS, type BwryPreset } from '@/lib/eink/bwry';
 import { DITHER_MODES, type DitherMode } from '@/lib/eink/dither';
 import { cn } from '@/lib/cn';
 
 interface DitherControlsProps {
+  color: boolean;
+  bwryPreset: BwryPreset;
+  onBwryPresetChange: (preset: BwryPreset) => void;
   mode: DitherMode;
   onModeChange: (m: DitherMode) => void;
   threshold: number;
@@ -17,6 +22,9 @@ interface DitherControlsProps {
 }
 
 export function DitherControls({
+  color,
+  bwryPreset,
+  onBwryPresetChange,
   mode,
   onModeChange,
   threshold,
@@ -58,36 +66,54 @@ export function DitherControls({
         </div>
       )}
 
-      <div>
-        <div className="flex items-baseline justify-between mb-2 ml-0.5">
-          <p className="font-sans text-[13px] text-stone">抖动算法</p>
-          <p className="font-mono text-[11px] text-stone-light">{ditherInfo(mode)?.hint}</p>
+      {color ? (
+        <div>
+          <p className="mb-2 ml-0.5 font-sans text-[13px] text-stone">四色渲染</p>
+          <Select
+            aria-label="四色渲染"
+            value={bwryPreset}
+            disabled={disabled}
+            onValueChange={(preset) => onBwryPresetChange(preset as BwryPreset)}
+          >
+            {Object.entries(BWRY_PRESETS).map(([preset, label]) => (
+              <SelectItem key={preset} value={preset}>
+                {label}
+              </SelectItem>
+            ))}
+          </Select>
         </div>
-        <div className="grid grid-cols-2">
-          {DITHER_MODES.map(({ id: m }) => (
-            <button
-              key={m}
-              type="button"
-              aria-pressed={mode === m}
-              disabled={disabled}
-              onClick={() => onModeChange(m)}
-              className={cn(
-                'flex items-center justify-between px-3 py-2.5 font-serif text-[13px] border border-ink -ml-px -mt-px transition-colors',
-                mode === m ? 'bg-cream-deep text-ink' : 'text-stone hover:bg-cream',
-                disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent'
-              )}
-            >
-              <span>{ditherInfo(m)?.label}</span>
-              {mode === m && <span className="font-mono text-[10px]">●</span>}
-            </button>
-          ))}
+      ) : (
+        <div>
+          <div className="flex items-baseline justify-between mb-2 ml-0.5">
+            <p className="font-sans text-[13px] text-stone">黑白抖动</p>
+            <p className="font-mono text-[11px] text-stone-light">{ditherInfo(mode)?.hint}</p>
+          </div>
+          <div className="grid grid-cols-2">
+            {DITHER_MODES.map(({ id: m }) => (
+              <button
+                key={m}
+                type="button"
+                aria-pressed={mode === m}
+                disabled={disabled}
+                onClick={() => onModeChange(m)}
+                className={cn(
+                  'flex items-center justify-between px-3 py-2.5 font-serif text-[13px] border border-ink -ml-px -mt-px transition-colors',
+                  mode === m ? 'bg-cream-deep text-ink' : 'text-stone hover:bg-cream',
+                  disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent'
+                )}
+              >
+                <span>{ditherInfo(m)?.label}</span>
+                {mode === m && <span className="font-mono text-[10px]">●</span>}
+              </button>
+            ))}
+          </div>
+          <p className="font-serif text-[11px] text-stone-light mt-1.5">
+            线稿用「线稿 · 纯黑白」;照片用「照片 · 推荐」。
+          </p>
         </div>
-        <p className="font-serif text-[11px] text-stone-light mt-1.5">
-          线稿用「线稿 · 纯黑白」;照片用「照片 · 推荐」。
-        </p>
-      </div>
+      )}
 
-      {mode === 'threshold' && (
+      {!color && mode === 'threshold' && (
         <div>
           <div className="flex items-baseline justify-between mb-2 ml-0.5">
             <p className="font-sans text-[13px] text-stone">阈值</p>

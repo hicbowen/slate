@@ -1,7 +1,8 @@
 import { FrameHeight, FrameWidth } from '@/api';
 import { ditherTo1bpp, ditherToBinary, type DitherMode } from './dither';
 import { autoContrast, autoInvert, rgbaToGray } from './preprocess';
-import { clearCanvas } from './bpp';
+import { renderBwry2bpp, type BwryPreset } from './bwry';
+import { clearCanvas, decodeBppImage } from './bpp';
 import { INK_RGB, PAPER_RGB } from './colors';
 
 export interface CropOptions {
@@ -12,6 +13,7 @@ export interface CropOptions {
 export interface DitherSettings {
   threshold: number;
   mode: DitherMode;
+  bwryPreset: BwryPreset;
 }
 
 type Source = HTMLImageElement | ImageBitmap;
@@ -21,12 +23,20 @@ export function drawImagePreview(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
   img: Source,
-  { dither, ...options }: CropOptions & DitherSettings & { dither: boolean }
+  { dither, color, ...options }: CropOptions & DitherSettings & { dither: boolean; color: boolean }
 ) {
-  drawCrop(ctx, canvas, img, options);
+  drawCrop(ctx, canvas, img, options, color);
   if (!dither) return;
 
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  if (color) {
+    ctx.putImageData(
+      decodeBppImage(colorFrame(imageData, options.bwryPreset), canvas.width, canvas.height),
+      0,
+      0
+    );
+    return;
+  }
   const bin = ditherToBinary(preprocess(imageData, canvas), canvas.width, canvas.height, options);
   for (let i = 0, j = 0; i < imageData.data.length; i += 4, j++) {
     const color = bin[j] === 255 ? PAPER_RGB : INK_RGB;
@@ -39,10 +49,10 @@ export function drawImagePreview(
 }
 
 /**
- * Renders the device frame the preview shows: 400×300 packed 1bpp, MSB first, bit 1 = white.
+ * Renders both packed device frames from the same 400×300 crop.
  * This is what gets uploaded; the server stores it as is.
  */
-export function renderFrame(img: Source, options: CropOptions & DitherSettings): Uint8Array {
+export function renderFrames(img: Source, options: CropOptions & DitherSettings) {
   const canvas = document.createElement('canvas');
   canvas.width = FrameWidth;
   canvas.height = FrameHeight;
@@ -50,16 +60,37 @@ export function renderFrame(img: Source, options: CropOptions & DitherSettings):
   if (!ctx) throw new Error('canvas 2d context unavailable');
   drawCrop(ctx, canvas, img, options);
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  return ditherTo1bpp(preprocess(imageData, canvas), canvas.width, canvas.height, options);
+  const mono = ditherTo1bpp(preprocess(imageData, canvas), canvas.width, canvas.height, options);
+  drawCrop(ctx, canvas, img, options, true);
+  return {
+    mono,
+    color: colorFrame(ctx.getImageData(0, 0, canvas.width, canvas.height), options.bwryPreset),
+  };
+}
+
+function colorFrame({ data, width, height }: ImageData, preset: BwryPreset): Uint8Array {
+  const rgb = new Uint8Array(width * height * 3);
+  for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
+    rgb[j] = data[i]!;
+    rgb[j + 1] = data[i + 1]!;
+    rgb[j + 2] = data[i + 2]!;
+  }
+  return renderBwry2bpp(rgb, width, height, preset);
 }
 
 function drawCrop(
   ctx: CanvasRenderingContext2D,
   canvas: { width: number; height: number },
   img: Source,
-  { scale, offset }: CropOptions
+  { scale, offset }: CropOptions,
+  color = false
 ) {
-  clearCanvas(ctx, canvas);
+  if (color) {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  } else {
+    clearCanvas(ctx, canvas);
+  }
   const sourceWidth = img instanceof HTMLImageElement ? img.naturalWidth || img.width : img.width;
   const sourceHeight =
     img instanceof HTMLImageElement ? img.naturalHeight || img.height : img.height;

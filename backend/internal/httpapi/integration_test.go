@@ -196,6 +196,92 @@ func TestDeviceProtocol(t *testing.T) {
 	h.must(401, h.call("POST", "/api/device/sync", randomHex(32), api.DeviceSyncRequest{Protocol: api.DeviceProtocol}, nil), "unknown secret")
 }
 
+func TestDeviceColorRenditions(t *testing.T) {
+	h := newHarness(t)
+	token := h.user("color")
+	gid := h.group(token, "双色组")
+	uploadURL := "/api/groups/" + gid + "/contents"
+	mono := bytes.Repeat([]byte{0xa5}, api.FrameBytes)
+	color := bytes.Repeat([]byte{0x1b}, api.ColorFrameBytes)
+
+	var legacy, both api.Content
+	h.must(201, h.call("POST", uploadURL, token, frameUpload(mono, "旧图"), &legacy), "legacy upload")
+	buf := &bytes.Buffer{}
+	form := multipart.NewWriter(buf)
+	for field, data := range map[string][]byte{"frame": mono, "colorFrame": color} {
+		file, _ := form.CreateFormFile(field, field+".bin")
+		_, _ = file.Write(data)
+	}
+	_ = form.Close()
+	h.must(201, h.call("POST", uploadURL, token, multipartBody{buf, form.FormDataContentType()}, &both), "dual upload")
+	colorHash := blob.Hash(color)
+	if both.ColorImageHash == nil || *both.ColorImageHash != colorHash {
+		t.Fatalf("saved color rendition: %+v", both.ColorImageHash)
+	}
+
+	dev := h.device("AA:BB:CC:DD:EE:04")
+	url := "/api/device/blobs/" + colorHash
+	h.must(404, h.call("GET", url, dev.Secret, nil, nil), "unbound blob access")
+	h.must(200, h.call("POST", "/api/devices/claims", token, map[string]string{"pairCode": dev.PairCode}, nil), "claim")
+
+	var note4, note4c api.DeviceState
+	h.must(200, h.call("POST", "/api/device/sync", dev.Secret, api.DeviceSyncRequest{Protocol: api.DeviceProtocol}, &note4), "mono sync")
+	h.must(200, h.call("POST", "/api/device/group", dev.Secret, api.DeviceGroupRequest{
+		Protocol: api.DeviceProtocol, Action: "select", GroupID: gid, FrameFormat: api.ColorFrameFormat,
+		ManifestVersion: note4.Group.ManifestVersion,
+	}, &note4c), "color select")
+	if note4.Manifest.Frames[1].Image.Hash != both.ImageHash || note4c.Manifest.Version == note4.Manifest.Version {
+		t.Fatalf("manifest selection: mono %+v, color %+v", note4.Manifest, note4c.Manifest)
+	}
+	if f := note4c.Manifest.Frames[0]; f.ID != legacy.ID || f.Image.Size != api.FrameBytes || f.Image.Hash != legacy.ImageHash {
+		t.Fatalf("legacy fallback: %+v", f)
+	}
+	if f := note4c.Manifest.Frames[1]; f.Image.Size != api.ColorFrameBytes || f.Image.Hash != colorHash {
+		t.Fatalf("color selection: %+v", f)
+	}
+	var got []byte
+	h.must(200, h.call("GET", url, dev.Secret, nil, &got), "device color download")
+	if !bytes.Equal(got, color) {
+		t.Fatal("downloaded color frame differs from upload")
+	}
+	h.must(200, h.call("GET", "/api/blobs/"+colorHash, token, nil, &got), "Web color preview blob")
+	req := api.DeviceSyncRequest{Protocol: api.DeviceProtocol, FrameFormat: api.ColorFrameFormat, ManifestVersion: note4c.Manifest.Version}
+	h.must(200, h.call("POST", "/api/device/sync", dev.Secret, req, &note4c), "cached color sync")
+	if note4c.Manifest != nil {
+		t.Fatal("manifest resent for unchanged color frames")
+	}
+
+	path := "/api/contents/" + both.ID
+	both = api.Content{}
+	h.must(200, h.call("PATCH", path, token, frameUpload(mono, "黑白更新"), &both), "replace with mono-only upload")
+	if both.ColorImageHash != nil {
+		t.Fatal("old color frame survived an image replacement")
+	}
+	h.must(404, h.call("GET", url, dev.Secret, nil, nil), "removed color blob access")
+}
+
+func TestCountdownColorPreviewAndRefresh(t *testing.T) {
+	h := newHarness(t)
+	token := h.user("countdown")
+	gid := h.group(token, "倒数日")
+	cfg := json.RawMessage(`{"type":"countdown","tz":"Asia/Shanghai","goal":"开学","targetDate":"2000-09-01"}`)
+	var preview []byte
+	h.must(200, h.call("POST", "/api/contents/preview?format=bwry2", token, api.PreviewDynamicRequest{Config: cfg}, &preview), "color preview")
+	if len(preview) != api.ColorFrameBytes {
+		t.Fatalf("preview size: %d", len(preview))
+	}
+
+	var content api.Content
+	h.must(201, h.call("POST", "/api/groups/"+gid+"/contents", token, api.CreateDynamicContentRequest{Config: cfg}, &content), "create countdown")
+	if content.ColorImageHash == nil || *content.ColorImageHash != blob.Hash(preview) || content.Dynamic.NextRunAt == nil {
+		t.Fatalf("saved countdown: %+v", content)
+	}
+	h.must(200, h.call("POST", "/api/contents/"+content.ID+"/refresh", token, nil, &content), "refresh countdown")
+	if content.ColorImageHash == nil || *content.ColorImageHash != blob.Hash(preview) {
+		t.Fatal("refresh lost the color rendition")
+	}
+}
+
 // Concurrent group switches must each step from the previous result, not from a stale read.
 func TestConcurrentGroupSwitchesAllCount(t *testing.T) {
 	h := newHarness(t)

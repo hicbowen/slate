@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "bsp/config.h"
+#include "drivers/display/display_profile.h"
 #include "utils/json_utils.h"
 #include "utils/time_utils.h"
 
@@ -45,6 +46,7 @@ inline constexpr char kId[]               = "id";
 inline constexpr char kImage[]            = "image";
 inline constexpr char kMac[]              = "mac";
 inline constexpr char kManifest[]         = "manifest";
+inline constexpr char kFrameFormat[]      = "frameFormat";
 inline constexpr char kManifestVersion[]  = "manifestVersion";
 inline constexpr char kMessage[]          = "message";
 inline constexpr char kName[]             = "name";
@@ -175,6 +177,10 @@ bool ParseManifest(cJSON* obj, Manifest& out) {
         f.refresh_at      = JsonInt64(item, proto::kRefreshAt);
         if (f.id.empty() || !ParseBlob(cJSON_GetObjectItemCaseSensitive(item, proto::kImage), f.image)) {
             ESP_LOGW(kTag, "manifest invalid reason=frame_image index=%u", (unsigned)out.frames.size());
+            return false;
+        }
+        if (!display_profile::IsWireFrameSize(f.image.size)) {
+            ESP_LOGW(kTag, "manifest invalid reason=image_size size=%d", f.image.size);
             return false;
         }
         cJSON* audio = cJSON_GetObjectItemCaseSensitive(item, proto::kAudio);
@@ -494,6 +500,8 @@ bool ApiClient::Sync(const std::string& manifest_version, const Telemetry& tel, 
     cJSON* root = NewProtocolBody();
     if (root) {
         cJSON_AddStringToObject(root, proto::kManifestVersion, manifest_version.c_str());
+        if (display_profile::kFourColor)
+            cJSON_AddStringToObject(root, proto::kFrameFormat, display_profile::kFrameFormat);
         cJSON* t = cJSON_AddObjectToObject(root, proto::kTelemetry);
         if (!t) {
             cJSON_Delete(root);
@@ -526,6 +534,8 @@ bool ApiClient::ChangeGroup(GroupAction action, const std::string& group_id, con
         if (action == GroupAction::kSelect)
             cJSON_AddStringToObject(root, proto::kGroupId, group_id.c_str());
         cJSON_AddStringToObject(root, proto::kManifestVersion, manifest_version.c_str());
+        if (display_profile::kFourColor)
+            cJSON_AddStringToObject(root, proto::kFrameFormat, display_profile::kFrameFormat);
     }
     return PostJson("/api/device/group", PrintBody(root), /*need_auth=*/true,
                     [&](cJSON* data) { return ParseDeviceState(data, out); });

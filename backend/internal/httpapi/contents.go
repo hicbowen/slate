@@ -26,7 +26,7 @@ const (
 
 func listRow(c db.GetContentRow) db.ListContentsRow {
 	return db.ListContentsRow{
-		ID: c.ID, GroupID: c.GroupID, SortOrder: c.SortOrder, Kind: c.Kind, FrameName: c.FrameName, ImageHash: c.ImageHash,
+		ID: c.ID, GroupID: c.GroupID, SortOrder: c.SortOrder, Kind: c.Kind, FrameName: c.FrameName, ImageHash: c.ImageHash, ColorImageHash: c.ColorImageHash,
 		DynamicType: c.DynamicType, DynamicConfig: c.DynamicConfig, DynamicData: c.DynamicData, RenderedAt: c.RenderedAt,
 		NextRunAt: c.NextRunAt, RefreshDueAt: c.RefreshDueAt, DynamicError: c.DynamicError, AudioSource: c.AudioSource,
 		AudioStatus: c.AudioStatus, AudioVoice: c.AudioVoice, AudioText: c.AudioText, AudioHash: c.AudioHash,
@@ -41,7 +41,7 @@ func statusBarText(c db.ListContentsRow) string {
 func contentView(c db.ListContentsRow) api.Content {
 	out := api.Content{
 		ID: c.ID, GroupID: c.GroupID, Seq: c.SortOrder, Kind: api.ContentKind(c.Kind), FrameName: c.FrameName,
-		StatusBarText: statusBarText(c), ImageHash: c.ImageHash,
+		StatusBarText: statusBarText(c), ImageHash: c.ImageHash, ColorImageHash: c.ColorImageHash,
 	}
 	if c.AudioSource != nil && c.AudioStatus != nil {
 		out.Audio = &api.ContentAudio{
@@ -67,7 +67,7 @@ func contentView(c db.ListContentsRow) api.Content {
 
 // manifest lists the frames a device should hold; its version changes whenever any
 // field a device shows or downloads changes.
-func (a *API) manifest(ctx context.Context, g db.Group) (api.Manifest, error) {
+func (a *API) manifest(ctx context.Context, g db.Group, frameFormat string) (api.Manifest, error) {
 	rows, err := a.Store.Q.ListContents(ctx, g.ID)
 	if err != nil {
 		return api.Manifest{}, err
@@ -77,6 +77,9 @@ func (a *API) manifest(ctx context.Context, g db.Group) (api.Manifest, error) {
 		f := api.ManifestFrame{
 			ID: c.ID, Seq: c.SortOrder, StatusBarText: statusBarText(c),
 			Image: api.Blob{Hash: c.ImageHash, Size: api.FrameBytes},
+		}
+		if frameFormat == api.ColorFrameFormat && c.ColorImageHash != nil {
+			f.Image = api.Blob{Hash: *c.ColorImageHash, Size: api.ColorFrameBytes}
 		}
 		if c.AudioStatus != nil && *c.AudioStatus == db.AudioStatusReady && c.AudioHash != nil && c.AudioSize != nil {
 			f.Audio = &api.Blob{Hash: *c.AudioHash, Size: *c.AudioSize}
@@ -138,13 +141,13 @@ func isMultipart(r *http.Request) bool {
 }
 
 type upload struct {
-	frame, audio []byte
-	frameName    *string
-	hasFrameName bool
+	frame, colorFrame, audio []byte
+	frameName                *string
+	hasFrameName             bool
 }
 
 // maxUploadBytes bounds the whole multipart body: both files plus headers and frameName.
-const maxUploadBytes = api.FrameBytes + maxAudioBytes + 64<<10
+const maxUploadBytes = api.FrameBytes + api.ColorFrameBytes + maxAudioBytes + 64<<10
 
 func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 	var u upload
@@ -157,6 +160,9 @@ func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 	for {
 		part, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {
+			if len(u.colorFrame) > 0 && len(u.frame) == 0 {
+				return u, badRequest("上传四色帧时须同时提供黑白帧")
+			}
 			return u, nil
 		}
 		var tooLarge *http.MaxBytesError
@@ -179,6 +185,14 @@ func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 			}
 			if len(u.frame) != api.FrameBytes {
 				return u, badRequest("帧数据须为 15000 字节的 1bpp 位图")
+			}
+		case "colorFrame":
+			const message = "四色帧须为 30000 字节的 BWRY 2bpp 位图"
+			if u.colorFrame, err = readPart(part, api.ColorFrameBytes, message); err != nil {
+				return u, err
+			}
+			if len(u.colorFrame) != api.ColorFrameBytes {
+				return u, badRequest(message)
 			}
 		case "audio":
 			// Browsers often send an empty or generic type for flac/opus/wma; ffmpeg decides.
@@ -224,23 +238,21 @@ func truncateRunes(s string, n int) string {
 }
 
 // storeUpload stores the frame and transcodes the audio, returning blob hashes.
-func (a *API) storeUpload(ctx context.Context, u upload) (imageHash string, audioHash string, audioSize int32, err error) {
-	if len(u.frame) > 0 {
-		if imageHash, err = a.Blobs.Put(u.frame); err != nil {
-			return "", "", 0, err
-		}
+func (a *API) storeUpload(ctx context.Context, u upload) (imageHash string, colorHash *string, audioHash string, audioSize int32, err error) {
+	if imageHash, colorHash, err = a.Blobs.PutFrames(u.frame, u.colorFrame); err != nil {
+		return "", nil, "", 0, err
 	}
 	if len(u.audio) > 0 {
 		pcm, err := a.Media.Transcode(ctx, u.audio)
 		if err != nil {
-			return "", "", 0, err
+			return "", nil, "", 0, err
 		}
 		if audioHash, err = a.Blobs.Put(pcm); err != nil {
-			return "", "", 0, err
+			return "", nil, "", 0, err
 		}
 		audioSize = int32(len(pcm))
 	}
-	return imageHash, audioHash, audioSize, nil
+	return imageHash, colorHash, audioHash, audioSize, nil
 }
 
 func (a *API) createContent(w http.ResponseWriter, r *http.Request) error {
@@ -258,7 +270,7 @@ func (a *API) createContent(w http.ResponseWriter, r *http.Request) error {
 	if len(u.frame) == 0 {
 		return badRequest("请上传图片")
 	}
-	imageHash, audioHash, audioSize, err := a.storeUpload(r.Context(), u)
+	imageHash, colorHash, audioHash, audioSize, err := a.storeUpload(r.Context(), u)
 	if err != nil {
 		return err
 	}
@@ -268,7 +280,7 @@ func (a *API) createContent(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
-		if err := q.CreateContent(r.Context(), db.CreateContentParams{ID: id, GroupID: g.ID, SortOrder: seq, Kind: db.ContentKindImage, FrameName: u.frameName, ImageHash: imageHash}); err != nil {
+		if err := q.CreateContent(r.Context(), db.CreateContentParams{ID: id, GroupID: g.ID, SortOrder: seq, Kind: db.ContentKindImage, FrameName: u.frameName, ImageHash: imageHash, ColorImageHash: colorHash}); err != nil {
 			return err
 		}
 		if audioHash == "" {
@@ -313,7 +325,7 @@ func (a *API) createDynamic(w http.ResponseWriter, r *http.Request, g db.Group) 
 	if err != nil {
 		return err
 	}
-	imageHash, err := a.Blobs.Put(frame.Image)
+	imageHash, colorHash, err := a.Blobs.PutFrames(frame.Image, frame.ColorImage)
 	if err != nil {
 		return err
 	}
@@ -324,7 +336,7 @@ func (a *API) createDynamic(w http.ResponseWriter, r *http.Request, g db.Group) 
 		if err != nil {
 			return err
 		}
-		if err := q.CreateContent(r.Context(), db.CreateContentParams{ID: id, GroupID: g.ID, SortOrder: seq, Kind: db.ContentKindDynamic, FrameName: frameName, ImageHash: imageHash}); err != nil {
+		if err := q.CreateContent(r.Context(), db.CreateContentParams{ID: id, GroupID: g.ID, SortOrder: seq, Kind: db.ContentKindDynamic, FrameName: frameName, ImageHash: imageHash, ColorImageHash: colorHash}); err != nil {
 			return err
 		}
 		if err := q.CreateDynamic(r.Context(), db.CreateDynamicParams{ContentID: id, Type: string(cfg.Type), Config: cfgJSON, Data: frame.Data}); err != nil {
@@ -404,7 +416,7 @@ func (a *API) patchContent(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
-		imageHash, err := a.Blobs.Put(frame.Image)
+		imageHash, colorHash, err := a.Blobs.PutFrames(frame.Image, frame.ColorImage)
 		if err != nil {
 			return err
 		}
@@ -416,8 +428,8 @@ func (a *API) patchContent(w http.ResponseWriter, r *http.Request) error {
 			if err := q.SetContentFrameName(r.Context(), db.SetContentFrameNameParams{ID: c.ID, FrameName: frameName}); err != nil {
 				return err
 			}
-			if imageHash != c.ImageHash {
-				if err := q.SetContentImage(r.Context(), db.SetContentImageParams{ID: c.ID, ImageHash: imageHash}); err != nil {
+			if imageHash != c.ImageHash || c.ColorImageHash == nil || *c.ColorImageHash != *colorHash {
+				if err := q.SetContentImage(r.Context(), db.SetContentImageParams{ID: c.ID, ImageHash: imageHash, ColorImageHash: colorHash}); err != nil {
 					return err
 				}
 			}
@@ -445,7 +457,7 @@ func (a *API) patchImage(w http.ResponseWriter, r *http.Request, c db.GetContent
 	if len(u.frame) == 0 && len(u.audio) == 0 && !u.hasFrameName {
 		return badRequest("没有可更新的字段")
 	}
-	imageHash, audioHash, audioSize, err := a.storeUpload(r.Context(), u)
+	imageHash, colorHash, audioHash, audioSize, err := a.storeUpload(r.Context(), u)
 	if err != nil {
 		return err
 	}
@@ -456,7 +468,7 @@ func (a *API) patchImage(w http.ResponseWriter, r *http.Request, c db.GetContent
 			}
 		}
 		if imageHash != "" {
-			if err := q.SetContentImage(r.Context(), db.SetContentImageParams{ID: c.ID, ImageHash: imageHash}); err != nil {
+			if err := q.SetContentImage(r.Context(), db.SetContentImageParams{ID: c.ID, ImageHash: imageHash, ColorImageHash: colorHash}); err != nil {
 				return err
 			}
 		}
@@ -593,6 +605,9 @@ func (a *API) previewDynamic(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if r.URL.Query().Get("format") == api.ColorFrameFormat {
+		return writeBinary(w, frame.ColorImage, "no-store")
+	}
 	return writeBinary(w, frame.Image, "no-store")
 }
 
@@ -630,6 +645,9 @@ func (a *API) previewDynamicContent(w http.ResponseWriter, r *http.Request) erro
 	frame, err := a.Dynamic.Prepare(r.Context(), cfg, req.Data, lastData, time.Now())
 	if err != nil {
 		return err
+	}
+	if r.URL.Query().Get("format") == api.ColorFrameFormat {
+		return writeBinary(w, frame.ColorImage, "no-store")
 	}
 	return writeBinary(w, frame.Image, "no-store")
 }

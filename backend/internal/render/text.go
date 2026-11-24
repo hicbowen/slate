@@ -334,13 +334,13 @@ func (d drawer) sparkline(x, y, w, h int, values []float64) {
 	}
 }
 
-func (d drawer) badge(label string, x, y, w, h int, filled bool) {
-	color := Black
+func (d drawer) badge(label string, x, y, w, h int, filled bool, ink uint8) {
+	color := ink
 	if filled {
-		d.c.FillRect(x, y, w, h, Black)
+		d.c.FillRect(x, y, w, h, ink)
 		color = White
 	} else {
-		d.c.StrokeRect(x, y, w, h, Black)
+		d.c.StrokeRect(x, y, w, h, ink)
 	}
 	f := d.fonts.Metric12
 	switch {

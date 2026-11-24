@@ -54,7 +54,7 @@ func (d drawer) dailyCalendar(data DailyCalendarData) {
 	dateY := upperTop + round(float64(upperBottom-upperTop-f.DisplayLarge.LineHeight)/2)
 	rightY := upperTop + round(float64(upperBottom-upperTop-(f.Sans16.LineHeight*3+14*2))/2)
 	rightX := 202
-	d.text(f.DisplayLarge, monthDay, 18, dateY, textOpts{maxWidth: 176, ellipsis: true})
+	d.text(f.DisplayLarge, monthDay, 18, dateY, textOpts{maxWidth: 176, ellipsis: true, color: Yellow})
 	d.text(f.Sans16, or(data.WeekdayCN, "今日"), rightX, rightY, textOpts{maxWidth: contentRight - rightX, ellipsis: true})
 	if lunar := or(data.LunarDate, data.Lunar); lunar != "" {
 		d.text(f.Sans16, lunar, rightX, rightY+30, textOpts{maxWidth: contentRight - rightX, ellipsis: true})
@@ -125,7 +125,14 @@ func (d drawer) monthCalendar(data MonthCalendarData, now time.Time) {
 		rowH = (frameH - (y0 + headerH) - 38) / (weekRows - 1)
 	}
 	for i, label := range weekdayShort {
-		d.text(f.Sans16, label, x0+i*colW+colW/2, y0, textOpts{align: alignCenter, maxWidth: colW})
+		color := Black
+		switch i {
+		case 0:
+			color = Red
+		case 6:
+			color = Yellow
+		}
+		d.text(f.Sans16, label, x0+i*colW+colW/2, y0, textOpts{align: alignCenter, maxWidth: colW, color: color})
 	}
 	for day := 1; day <= total; day++ {
 		pos := first + day - 1
@@ -133,7 +140,7 @@ func (d drawer) monthCalendar(data MonthCalendarData, now time.Time) {
 		y := y0 + headerH + pos/7*rowH
 		color := Black
 		if day == today {
-			d.c.FillRect(x+colW/2-11, y+1, 22, 18, Black)
+			d.c.FillRect(x+colW/2-11, y+1, 22, 18, Red)
 			color = White
 		}
 		d.text(f.Sans16, strconv.Itoa(day), x+colW/2, y+2, textOpts{align: alignCenter, maxWidth: colW - 4, color: color})
@@ -202,7 +209,7 @@ func (d drawer) historyToday(data HistoryTodayData) {
 	dotRadius := dotSize / 2
 	top := firstCenterY - 18
 	bottom := firstCenterY + rowStep*(len(items)-1) + 18
-	d.c.VLine(timelineX, top, bottom-top+1, Black)
+	d.c.VLine(timelineX, top, bottom-top+1, Yellow)
 	for i, item := range items {
 		centerY := firstCenterY + i*rowStep
 		textY := centerY - round(float64(f.LineHeight*2+2)/2)
