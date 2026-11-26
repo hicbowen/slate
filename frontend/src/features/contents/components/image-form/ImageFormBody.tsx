@@ -51,8 +51,9 @@ export function ImageFormBody({
   const [format, setFormat] = useState<ImageFrameFormat>(
     form.displayMode === DisplayModeGray ? 'gray4' : 'mono1'
   );
-  const grayAvailable = !!(form.image.file || grayImageHash);
-  const colorAvailable = !!(form.image.file || colorImageHash);
+  const canRender = !!(form.image.file || form.image.sourceFile);
+  const grayAvailable = canRender || !!grayImageHash;
+  const colorAvailable = canRender || !!colorImageHash;
   const previewFormat =
     (format === 'gray4' && !grayAvailable) || (format === 'bwry2' && !colorAvailable)
       ? 'mono1'
@@ -60,7 +61,7 @@ export function ImageFormBody({
   const savedHash = { mono1: imageHash, gray4: grayImageHash, bwry2: colorImageHash }[
     previewFormat
   ];
-  const saved = useBlob(form.image.file ? null : savedHash);
+  const saved = useBlob(form.image.renderFile ? null : savedHash);
   return (
     <div
       className={cn('grid grid-cols-1 gap-6 lg:gap-8', gridClassName ?? 'lg:grid-cols-[1.3fr_1fr]')}
@@ -75,9 +76,10 @@ export function ImageFormBody({
         />
         <PreviewCanvas
           canvasRef={form.image.previewRef}
-          imageFile={form.image.file}
+          imageFile={form.image.file ?? form.image.sourceFile}
+          preferExistingImage={!!savedHash && !!form.image.sourceFile && !form.image.renderFile}
           existingImage={saved.data}
-          existingImagePending={!!savedHash && !form.image.file && saved.isPending}
+          existingImagePending={!!savedHash && !form.image.renderFile && saved.isPending}
           format={previewFormat}
           renderPreset={form.dither.renderPreset}
           threshold={form.dither.threshold}
@@ -134,7 +136,16 @@ export function ImageFormBody({
           </div>
         </FormSection>
 
-        <FormSection label="类型参数" hint={isEdit ? '不传图片则保留原图。' : undefined}>
+        <FormSection
+          label="类型参数"
+          hint={
+            form.image.sourceError
+              ? '可编辑源图加载失败，仍可更换图片。'
+              : form.image.sourceFile
+                ? '可用已保存的源图重新调整渲染。'
+                : undefined
+          }
+        >
           <div className="space-y-4">
             <ImageDropzone isEdit={isEdit} imageFile={form.image.file} onPick={form.image.onPick} />
             <DitherControls
@@ -145,8 +156,8 @@ export function ImageFormBody({
               onModeChange={form.dither.setMode}
               threshold={form.dither.threshold}
               onThresholdChange={form.dither.setThreshold}
-              disabled={isEdit && !form.image.file}
-              hasImage={!!form.image.file}
+              disabled={isEdit && !canRender}
+              hasImage={canRender}
               scale={form.crop.scale}
               onScaleChange={form.crop.setScale}
               onResetCrop={form.crop.reset}

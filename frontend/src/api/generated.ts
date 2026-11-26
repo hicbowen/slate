@@ -110,6 +110,8 @@ export interface Content {
   grayImageHash?: string;
   displayMode: 'mono1' | 'gray16';
   colorImageHash?: string;
+  imageSourceHash?: string;
+  imageRenderPreset?: 'auto' | 'photo' | 'vivid' | 'graphic';
   audio: ContentAudio | null;
   dynamic: ContentDynamic | null;
 }
@@ -351,6 +353,7 @@ export interface DashboardBlock {
   criticalAt?: number /* float64 */;
   style?: string;
   stroke?: boolean;
+  strokeColor?: string;
   fill?: string;
 }
 /**

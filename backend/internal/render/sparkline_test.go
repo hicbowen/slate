@@ -14,7 +14,7 @@ func TestSparklineExtremeValuesStayInBox(t *testing.T) {
 	}
 	for _, values := range cases {
 		c := NewCanvas(frameW, frameH)
-		drawer{c: c}.sparkline(10, 40, 100, 50, values)
+		drawer{c: c}.sparkline(10, 40, 100, 50, values, Black)
 		for y := range frameH {
 			for x := range frameW {
 				if c.px[y*c.W+x] == Black && (x < 10 || x > 110 || y < 40 || y > 90) {

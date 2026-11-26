@@ -74,6 +74,34 @@ func TestProgressColorThresholds(t *testing.T) {
 	}
 }
 
+func TestCustomDashboardBlockColors(t *testing.T) {
+	for _, block := range []api.DashboardBlock{
+		{Type: "metric", X: 20, Y: 30, W: 90, H: 42, Label: "服务", Value: "Slate", Color: "red"},
+		{Type: "progress", X: 20, Y: 30, W: 300, H: 30, Label: "状态", Color: "yellow"},
+		{Type: "sparkline", X: 20, Y: 30, W: 80, H: 42, Values: json.RawMessage(`[1,2]`), Color: "red"},
+		{Type: "line", X1: 20, Y1: 30, X2: 80, Y2: 30, Color: "yellow"},
+		{Type: "rect", X: 20, Y: 30, W: 90, H: 42, Fill: "yellow", StrokeColor: "red"},
+	} {
+		t.Run(block.Type, func(t *testing.T) {
+			got := block
+			if err := normalizeBlock(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Color != block.Color || got.StrokeColor != block.StrokeColor || got.Fill != block.Fill {
+				t.Fatalf("colors lost: %+v", got)
+			}
+			if block.Type == "rect" {
+				block.StrokeColor = "blue"
+			} else {
+				block.Color = "blue"
+			}
+			if err := normalizeBlock(&block); err == nil {
+				t.Fatal("invalid color accepted")
+			}
+		})
+	}
+}
+
 func TestScheduleCalendarWakesAfterLocalMidnight(t *testing.T) {
 	now := time.Date(2026, 10, 26, 15, 0, 0, 0, time.UTC) // 23:00 in Shanghai
 	next, due := schedule(api.DynamicConfig{Type: api.DynamicTypeDailyCalendar, TZ: "Asia/Shanghai"}, now)

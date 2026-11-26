@@ -33,7 +33,8 @@
       "h": 52,
       "type": "metric",
       "label": "状态",
-      "value": "{status_label}"
+      "value": "{status_label}",
+      "color": "yellow"
      },
      {
       "x": 20,
@@ -71,7 +72,8 @@
       "y1": 210,
       "x2": 380,
       "y2": 210,
-      "style": "dashed"
+      "style": "dashed",
+      "color": "yellow"
      },
      {
       "x": 20,
@@ -102,6 +104,253 @@
      }
     ]
    }
+  },
+  {
+   "id": "ai_usage_stats",
+   "label": "AI 使用统计",
+   "description": "展示今日和累计消费、请求、Token、缓存率、均价、响应时间及平台拆分。",
+   "template": {
+    "version": 1,
+    "name": "AI 使用统计",
+    "blocks": [
+     {
+      "type": "metric",
+      "x": 20,
+      "y": 34,
+      "w": 84,
+      "h": 48,
+      "label": "今日消费",
+      "value": "{today_cost_usd|usd2}",
+      "color": "yellow"
+     },
+     {
+      "type": "metric",
+      "x": 112,
+      "y": 34,
+      "w": 84,
+      "h": 48,
+      "label": "今日请求",
+      "value": "{today_request_count|int}"
+     },
+     {
+      "type": "metric",
+      "x": 204,
+      "y": 34,
+      "w": 84,
+      "h": 48,
+      "label": "今日Token",
+      "value": "{today_token_count|tokens}"
+     },
+     {
+      "type": "metric",
+      "x": 296,
+      "y": 34,
+      "w": 84,
+      "h": 48,
+      "label": "今日缓存率",
+      "value": "{today_cache_hit_rate_percent|percent}"
+     },
+     {
+      "type": "metric",
+      "x": 20,
+      "y": 92,
+      "w": 84,
+      "h": 48,
+      "label": "累计消费",
+      "value": "{total_cost_usd|usd2}"
+     },
+     {
+      "type": "metric",
+      "x": 112,
+      "y": 92,
+      "w": 84,
+      "h": 48,
+      "label": "累计请求",
+      "value": "{total_request_count|int}"
+     },
+     {
+      "type": "metric",
+      "x": 204,
+      "y": 92,
+      "w": 84,
+      "h": 48,
+      "label": "累计Token",
+      "value": "{total_token_count|tokens}"
+     },
+     {
+      "type": "metric",
+      "x": 296,
+      "y": 92,
+      "w": 84,
+      "h": 48,
+      "label": "总缓存率",
+      "value": "{total_cache_hit_rate_percent|percent}"
+     },
+     {
+      "type": "metric",
+      "x": 20,
+      "y": 150,
+      "w": 84,
+      "h": 48,
+      "label": "平均响应",
+      "value": "{average_latency_ms|duration}"
+     },
+     {
+      "type": "metric",
+      "x": 112,
+      "y": 150,
+      "w": 84,
+      "h": 48,
+      "label": "今日均价",
+      "value": "{today_cost_per_million_tokens_usd|usd_per_million}"
+     },
+     {
+      "type": "metric",
+      "x": 204,
+      "y": 150,
+      "w": 84,
+      "h": 48,
+      "label": "累计均价",
+      "value": "{total_cost_per_million_tokens_usd|usd_per_million}"
+     },
+     {
+      "type": "metric",
+      "x": 296,
+      "y": 150,
+      "w": 84,
+      "h": 48,
+      "label": "更新时间",
+      "value": "{last_updated_time_label}"
+     },
+     {
+      "type": "line",
+      "x1": 20,
+      "y1": 218,
+      "x2": 380,
+      "y2": 218,
+      "style": "dashed",
+      "color": "yellow"
+     },
+     {
+      "type": "text",
+      "x": 20,
+      "y": 237,
+      "w": 120,
+      "h": 12,
+      "value": "按平台拆分",
+      "fontSize": 12,
+      "color": "yellow"
+     },
+     {
+      "type": "text",
+      "x": 170,
+      "y": 237,
+      "w": 58,
+      "h": 12,
+      "value": "今日",
+      "fontSize": 12,
+      "align": "right"
+     },
+     {
+      "type": "text",
+      "x": 240,
+      "y": 237,
+      "w": 58,
+      "h": 12,
+      "value": "请求",
+      "fontSize": 12,
+      "align": "right"
+     },
+     {
+      "type": "text",
+      "x": 310,
+      "y": 237,
+      "w": 70,
+      "h": 12,
+      "value": "Token",
+      "fontSize": 12,
+      "align": "right"
+     },
+     {
+      "type": "text",
+      "x": 20,
+      "y": 255,
+      "w": 130,
+      "h": 12,
+      "value": "{platform_breakdown.0.platform_name}",
+      "fontSize": 12
+     },
+     {
+      "type": "text",
+      "x": 170,
+      "y": 255,
+      "w": 58,
+      "h": 12,
+      "value": "{platform_breakdown.0.today_cost_usd|usd2}",
+      "fontSize": 12,
+      "align": "right"
+     },
+     {
+      "type": "text",
+      "x": 240,
+      "y": 255,
+      "w": 58,
+      "h": 12,
+      "value": "{platform_breakdown.0.today_request_count|int}",
+      "fontSize": 12,
+      "align": "right"
+     },
+     {
+      "type": "text",
+      "x": 310,
+      "y": 255,
+      "w": 70,
+      "h": 12,
+      "value": "{platform_breakdown.0.today_token_count|tokens}",
+      "fontSize": 12,
+      "align": "right"
+     },
+     {
+      "type": "text",
+      "x": 20,
+      "y": 275,
+      "w": 130,
+      "h": 12,
+      "value": "{platform_breakdown.1.platform_name}",
+      "fontSize": 12
+     },
+     {
+      "type": "text",
+      "x": 170,
+      "y": 275,
+      "w": 58,
+      "h": 12,
+      "value": "{platform_breakdown.1.today_cost_usd|usd2}",
+      "fontSize": 12,
+      "align": "right"
+     },
+     {
+      "type": "text",
+      "x": 240,
+      "y": 275,
+      "w": 58,
+      "h": 12,
+      "value": "{platform_breakdown.1.today_request_count|int}",
+      "fontSize": 12,
+      "align": "right"
+     },
+     {
+      "type": "text",
+      "x": 310,
+      "y": 275,
+      "w": 70,
+      "h": 12,
+      "value": "{platform_breakdown.1.today_token_count|tokens}",
+      "fontSize": 12,
+      "align": "right"
+     }
+    ]
+   }
   }
  ],
  "starter": {
@@ -116,7 +365,8 @@
     "type": "metric",
     "label": "{primary_label}",
     "value": "{primary_value}",
-    "sparkline": "{primary_trend}"
+    "sparkline": "{primary_trend}",
+    "color": "yellow"
    },
    {
     "x": 210,
@@ -164,7 +414,8 @@
     "percentage": "{primary_progress_percent}",
     "labelFontSize": 12,
     "valueFontSize": 12,
-    "barHeight": 9
+    "barHeight": 9,
+    "color": "yellow"
    },
    {
     "x": 20,

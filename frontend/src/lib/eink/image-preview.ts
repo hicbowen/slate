@@ -4,7 +4,7 @@ import { autoContrast, autoInvert, preprocessGrayForPreset, rgbaToGray } from '.
 import { renderBwry2bpp } from './bwry';
 import { quantizeGrayTo4bpp } from './gray4';
 import type { ImageRenderPreset } from './render-preset';
-import { clearCanvas, decodeBppImage } from './bpp';
+import { decodeBppImage } from './bpp';
 import { INK_RGB, PAPER_RGB } from './colors';
 
 export interface CropOptions {
@@ -14,9 +14,11 @@ export interface CropOptions {
 
 export interface DitherSettings {
   threshold: number;
-  mode: DitherMode;
+  mode: MonochromeMode;
   renderPreset: ImageRenderPreset;
 }
+
+export type MonochromeMode = 'preset' | DitherMode;
 
 type Source = HTMLImageElement | ImageBitmap;
 export type ImageFrameFormat =
@@ -33,7 +35,7 @@ export function drawImagePreview(
     ...options
   }: CropOptions & DitherSettings & { dither: boolean; format: ImageFrameFormat }
 ) {
-  drawCrop(ctx, canvas, img, options, format !== 'mono1');
+  drawCrop(ctx, canvas, img, options);
   if (!dither) return;
 
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -45,7 +47,8 @@ export function drawImagePreview(
     ctx.putImageData(decodeBppImage(packed, canvas.width, canvas.height), 0, 0);
     return;
   }
-  const bin = ditherToBinary(preprocess(imageData, canvas), canvas.width, canvas.height, options);
+  const mono = prepareMonochrome(imageData, options);
+  const bin = ditherToBinary(mono.gray, canvas.width, canvas.height, mono);
   for (let i = 0, j = 0; i < imageData.data.length; i += 4, j++) {
     const color = bin[j] === 255 ? PAPER_RGB : INK_RGB;
     imageData.data[i] = color[0];
@@ -60,21 +63,26 @@ export function drawImagePreview(
  * Renders packed device frames from the same 400×300 crop.
  * This is what gets uploaded; the server stores it as is.
  */
-export function renderFrames(img: Source, options: CropOptions & DitherSettings) {
+export async function renderFrames(img: Source, options: CropOptions & DitherSettings) {
   const canvas = document.createElement('canvas');
   canvas.width = FrameWidth;
   canvas.height = FrameHeight;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('canvas 2d context unavailable');
   drawCrop(ctx, canvas, img, options);
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const mono = ditherTo1bpp(preprocess(imageData, canvas), canvas.width, canvas.height, options);
-  drawCrop(ctx, canvas, img, options, true);
   const source = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const mono = prepareMonochrome(source, options);
+  const imageSource = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('无法保存可编辑源图。'));
+    }, 'image/png');
+  });
   return {
-    mono,
+    mono: ditherTo1bpp(mono.gray, canvas.width, canvas.height, mono),
     gray: grayFrame(source, options.renderPreset),
     color: colorFrame(source, options.renderPreset),
+    imageSource,
   };
 }
 
@@ -97,15 +105,10 @@ function drawCrop(
   ctx: CanvasRenderingContext2D,
   canvas: { width: number; height: number },
   img: Source,
-  { scale, offset }: CropOptions,
-  whiteBackground = false
+  { scale, offset }: CropOptions
 ) {
-  if (whiteBackground) {
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  } else {
-    clearCanvas(ctx, canvas);
-  }
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
   const sourceWidth = img instanceof HTMLImageElement ? img.naturalWidth || img.width : img.width;
   const sourceHeight =
     img instanceof HTMLImageElement ? img.naturalHeight || img.height : img.height;
@@ -117,11 +120,15 @@ function drawCrop(
   ctx.drawImage(img, drawX, drawY, drawW, drawH);
 }
 
-function preprocess(imageData: ImageData, canvas: { width: number; height: number }): Uint8Array {
-  const gray = autoInvert(
-    rgbaToGray(imageData.data, canvas.width, canvas.height, 4),
-    canvas.width,
-    canvas.height
-  );
-  return autoContrast(gray, 1);
+function prepareMonochrome(
+  { data, width, height }: ImageData,
+  { mode, threshold, renderPreset }: DitherSettings
+): { gray: Uint8Array; mode: DitherMode; threshold: number } {
+  const gray = rgbaToGray(data, width, height);
+  if (mode !== 'preset') {
+    return { gray: autoContrast(autoInvert(gray, width, height), 1), mode, threshold };
+  }
+  const prepared = preprocessGrayForPreset(gray, width, height, renderPreset);
+  const modes = { graphic: 'threshold', vivid: 'atkinson', photo: 'floyd' } as const;
+  return { gray: prepared.gray, mode: modes[prepared.resolvedPreset], threshold: 128 };
 }

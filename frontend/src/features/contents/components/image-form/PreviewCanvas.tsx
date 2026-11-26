@@ -1,7 +1,6 @@
-import type { ImageFrameFormat } from '@/lib/eink/image-preview';
+import type { ImageFrameFormat, MonochromeMode } from '@/lib/eink/image-preview';
 import { FrameWidth, FrameHeight } from '@/api';
 import type { ImageRenderPreset } from '@/lib/eink/render-preset';
-import type { DitherMode } from '@/lib/eink/dither';
 import type { RefObject } from 'react';
 import { cn } from '@/lib/cn';
 import { StatusBarOverlay } from '@/components/eink/StatusBarOverlay';
@@ -10,11 +9,12 @@ import { usePreviewCanvasRenderer } from './usePreviewCanvasRenderer';
 interface PreviewCanvasProps {
   imageFile: File | null;
   existingImage: ArrayBuffer | undefined;
+  preferExistingImage?: boolean;
   format: ImageFrameFormat;
   renderPreset: ImageRenderPreset;
   existingImagePending?: boolean;
   threshold: number;
-  mode: DitherMode;
+  mode: MonochromeMode;
   scale: number;
   offset: { x: number; y: number };
   onOffsetChange: (o: { x: number; y: number }) => void;
@@ -26,6 +26,7 @@ interface PreviewCanvasProps {
 export function PreviewCanvas({
   imageFile,
   existingImage,
+  preferExistingImage,
   format,
   renderPreset,
   existingImagePending,
@@ -41,6 +42,7 @@ export function PreviewCanvas({
   const pan = usePreviewCanvasRenderer({
     imageFile,
     existingImage,
+    preferExistingImage,
     format,
     renderPreset,
     threshold,

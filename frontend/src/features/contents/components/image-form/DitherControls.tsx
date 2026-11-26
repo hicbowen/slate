@@ -1,17 +1,17 @@
 // 抖动算法选择 + 阈值滑块(仅 threshold 模式显示)+ 缩放滑块(仅选了图时显示)。
 
 import { Select, SelectItem } from '@/components/ui/Select';
-import type { ImageFrameFormat } from '@/lib/eink/image-preview';
+import type { ImageFrameFormat, MonochromeMode } from '@/lib/eink/image-preview';
 import { IMAGE_RENDER_PRESET_INFO, type ImageRenderPreset } from '@/lib/eink/render-preset';
-import { DITHER_MODES, type DitherMode } from '@/lib/eink/dither';
+import { DITHER_MODES } from '@/lib/eink/dither';
 import { cn } from '@/lib/cn';
 
 interface DitherControlsProps {
   format: ImageFrameFormat;
   renderPreset: ImageRenderPreset;
   onImageRenderPresetChange: (preset: ImageRenderPreset) => void;
-  mode: DitherMode;
-  onModeChange: (m: DitherMode) => void;
+  mode: MonochromeMode;
+  onModeChange: (m: MonochromeMode) => void;
   threshold: number;
   onThresholdChange: (n: number) => void;
   disabled?: boolean;
@@ -37,7 +37,11 @@ export function DitherControls({
   onResetCrop,
 }: DitherControlsProps) {
   const mono = format === 'mono1';
-  const renderLabel = format === 'gray4' ? '灰阶渲染' : '四色渲染';
+  const renderLabel = '图片优化风格';
+  const modes = [
+    { id: 'preset', label: '跟随优化风格', hint: '自动选择抖动' } as const,
+    ...DITHER_MODES,
+  ];
   return (
     <div className="space-y-5">
       {hasImage && (
@@ -69,7 +73,7 @@ export function DitherControls({
         </div>
       )}
 
-      {!mono ? (
+      {(!mono || mode === 'preset') && (
         <div>
           <p className="mb-2 ml-0.5 font-sans text-[13px] text-stone">{renderLabel}</p>
           <Select
@@ -85,14 +89,18 @@ export function DitherControls({
             ))}
           </Select>
         </div>
-      ) : (
+      )}
+
+      {mono && (
         <div>
           <div className="flex items-baseline justify-between mb-2 ml-0.5">
             <p className="font-sans text-[13px] text-stone">黑白抖动</p>
-            <p className="font-mono text-[11px] text-stone-light">{ditherInfo(mode)?.hint}</p>
+            <p className="font-mono text-[11px] text-stone-light">
+              {modes.find((info) => info.id === mode)?.hint}
+            </p>
           </div>
           <div className="grid grid-cols-2">
-            {DITHER_MODES.map(({ id: m }) => (
+            {modes.map(({ id: m, label }) => (
               <button
                 key={m}
                 type="button"
@@ -105,7 +113,7 @@ export function DitherControls({
                   disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent'
                 )}
               >
-                <span>{ditherInfo(m)?.label}</span>
+                <span>{label}</span>
                 {mode === m && <span className="font-mono text-[10px]">●</span>}
               </button>
             ))}
@@ -140,8 +148,4 @@ export function DitherControls({
       )}
     </div>
   );
-}
-
-function ditherInfo(mode: DitherMode) {
-  return DITHER_MODES.find((info) => info.id === mode);
 }

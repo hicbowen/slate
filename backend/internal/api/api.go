@@ -118,18 +118,29 @@ const (
 )
 
 type Content struct {
-	ID             string          `json:"id"`
-	GroupID        string          `json:"groupId"`
-	Seq            int32           `json:"seq"`
-	Kind           ContentKind     `json:"kind"`
-	FrameName      *string         `json:"frameName" tstype:"string | null,required"`
-	StatusBarText  string          `json:"statusBarText"`
-	ImageHash      string          `json:"imageHash"`
-	GrayImageHash  *string         `json:"grayImageHash,omitempty"`
-	DisplayMode    string          `json:"displayMode" tstype:"'mono1' | 'gray16'"`
-	ColorImageHash *string         `json:"colorImageHash,omitempty"`
-	Audio          *ContentAudio   `json:"audio" tstype:"ContentAudio | null,required"`
-	Dynamic        *ContentDynamic `json:"dynamic" tstype:"ContentDynamic | null,required"`
+	ID                string          `json:"id"`
+	GroupID           string          `json:"groupId"`
+	Seq               int32           `json:"seq"`
+	Kind              ContentKind     `json:"kind"`
+	FrameName         *string         `json:"frameName" tstype:"string | null,required"`
+	StatusBarText     string          `json:"statusBarText"`
+	ImageHash         string          `json:"imageHash"`
+	GrayImageHash     *string         `json:"grayImageHash,omitempty"`
+	DisplayMode       string          `json:"displayMode" tstype:"'mono1' | 'gray16'"`
+	ColorImageHash    *string         `json:"colorImageHash,omitempty"`
+	ImageSourceHash   *string         `json:"imageSourceHash,omitempty"`
+	ImageRenderPreset string          `json:"imageRenderPreset,omitempty" tstype:"'auto' | 'photo' | 'vivid' | 'graphic'"`
+	Audio             *ContentAudio   `json:"audio" tstype:"ContentAudio | null,required"`
+	Dynamic           *ContentDynamic `json:"dynamic" tstype:"ContentDynamic | null,required"`
+}
+
+func ValidImageRenderPreset(preset string) bool {
+	switch preset {
+	case "auto", "photo", "vivid", "graphic":
+		return true
+	default:
+		return false
+	}
 }
 
 type ContentAudio struct {

@@ -12,22 +12,24 @@ import (
 )
 
 const importContent = `-- name: ImportContent :exec
-INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, created_at, updated_at, gray_image_hash, display_mode)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, created_at, updated_at, gray_image_hash, display_mode, image_source_hash, image_render_preset)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 `
 
 type ImportContentParams struct {
-	ID             string
-	GroupID        string
-	SortOrder      int32
-	Kind           ContentKind
-	FrameName      *string
-	ImageHash      string
-	ColorImageHash *string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	GrayImageHash  *string
-	DisplayMode    string
+	ID                string
+	GroupID           string
+	SortOrder         int32
+	Kind              ContentKind
+	FrameName         *string
+	ImageHash         string
+	ColorImageHash    *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	GrayImageHash     *string
+	DisplayMode       string
+	ImageSourceHash   *string
+	ImageRenderPreset string
 }
 
 func (q *Queries) ImportContent(ctx context.Context, arg ImportContentParams) error {
@@ -43,6 +45,8 @@ func (q *Queries) ImportContent(ctx context.Context, arg ImportContentParams) er
 		arg.UpdatedAt,
 		arg.GrayImageHash,
 		arg.DisplayMode,
+		arg.ImageSourceHash,
+		arg.ImageRenderPreset,
 	)
 	return err
 }

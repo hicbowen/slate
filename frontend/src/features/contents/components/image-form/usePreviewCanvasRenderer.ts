@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import type { ImageRenderPreset } from '@/lib/eink/render-preset';
-import type { DitherMode } from '@/lib/eink/dither';
 import { clearCanvas, decodeBppImage, isValidBppLength } from '@/lib/eink/bpp';
-import { drawImagePreview, type ImageFrameFormat } from '@/lib/eink/image-preview';
+import {
+  drawImagePreview,
+  type ImageFrameFormat,
+  type MonochromeMode,
+} from '@/lib/eink/image-preview';
 import { useCanvasPan } from './useCanvasPan';
 import { useLoadedImage } from './useLoadedImage';
 
@@ -14,6 +17,7 @@ interface CanvasOffset {
 export function usePreviewCanvasRenderer({
   imageFile,
   existingImage,
+  preferExistingImage,
   format,
   renderPreset,
   threshold,
@@ -25,10 +29,11 @@ export function usePreviewCanvasRenderer({
 }: {
   imageFile: File | null;
   existingImage: ArrayBuffer | undefined;
+  preferExistingImage?: boolean;
   format: ImageFrameFormat;
   renderPreset: ImageRenderPreset;
   threshold: number;
-  mode: DitherMode;
+  mode: MonochromeMode;
   scale: number;
   offset: CanvasOffset;
   onOffsetChange: (offset: CanvasOffset) => void;
@@ -94,7 +99,7 @@ export function usePreviewCanvasRenderer({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    if (imageFile) {
+    if (imageFile && !preferExistingImage) {
       if (loadedImage?.file !== imageFile) {
         cancelScheduledDraw();
         clearCanvas(ctx, canvas);
@@ -128,6 +133,7 @@ export function usePreviewCanvasRenderer({
     isDraggingRef,
     loadedImage,
     offset,
+    preferExistingImage,
     scheduleImageDraw,
   ]);
 

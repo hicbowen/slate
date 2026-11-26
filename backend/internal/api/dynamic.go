@@ -93,6 +93,7 @@ type DashboardBlock struct {
 	CriticalAt    *float64        `json:"criticalAt,omitempty"`
 	Style         string          `json:"style,omitempty"`
 	Stroke        *bool           `json:"stroke,omitempty"`
+	StrokeColor   string          `json:"strokeColor,omitempty"`
 	Fill          string          `json:"fill,omitempty"`
 }
 

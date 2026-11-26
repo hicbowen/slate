@@ -28,6 +28,9 @@ func (d drawer) hotList(data HotListData) {
 		rank = min(99, max(1, rank))
 		color := Black
 		if d.color && i == 0 {
+			d.c.FillRect(contentLeft, rankY, rankW, rankH, Red)
+			color = White
+		} else if d.color && i < 3 {
 			d.c.FillRect(contentLeft, rankY, rankW, rankH, Yellow)
 		} else if !d.color && i < 3 {
 			d.c.FillRect(contentLeft, rankY, rankW, rankH, Black)

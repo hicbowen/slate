@@ -45,9 +45,10 @@ func (d drawer) dashboard(cfg api.DynamicConfig, data map[string]any) {
 			}
 			d.c.StrokeRect(x, y, w, h, Black)
 			d.text(f.Sans12, ResolveTemplate(b.Label, data), x+7, y+4, textOpts{maxWidth: w - 14, ellipsis: true})
-			d.text(f.Sans16, ResolveTemplate(b.Value, data), x+7, y+27, textOpts{maxWidth: w - 14, ellipsis: true})
+			ink := dashboardInk(b.Color)
+			d.text(f.Sans16, ResolveTemplate(b.Value, data), x+7, y+27, textOpts{maxWidth: w - 14, ellipsis: true, color: ink})
 			if series := resolveSeries(b.Sparkline, data); len(series) >= 2 && h >= 54 {
-				d.sparkline(x+7, y+h-18, w-14, 10, series)
+				d.sparkline(x+7, y+h-18, w-14, 10, series, ink)
 			}
 		case "progress":
 			x, y, w, h, ok := blockRect(b)
@@ -61,15 +62,16 @@ func (d drawer) dashboard(cfg api.DynamicConfig, data map[string]any) {
 				continue
 			}
 			if series := resolveSeries(b.Values, data); len(series) >= 2 {
-				d.sparkline(x, y, w, h, series)
+				d.sparkline(x, y, w, h, series, dashboardInk(b.Color))
 			}
 		case "line":
 			x1, x2 := min(frameW-1, max(0, b.X1)), min(frameW-1, max(0, b.X2))
 			y1, y2 := min(frameH-1, max(statusBarH, b.Y1)), min(frameH-1, max(statusBarH, b.Y2))
+			ink := dashboardInk(b.Color)
 			if b.Style == "dashed" && y1 == y2 {
-				d.rule(min(x1, x2), y1, abs(x2-x1), true, Black)
+				d.rule(min(x1, x2), y1, abs(x2-x1), true, ink)
 			} else {
-				d.c.Line(x1, y1, x2, y2, Black)
+				d.c.Line(x1, y1, x2, y2, ink)
 			}
 		case "rect":
 			x, y, w, h, ok := blockRect(b)
@@ -80,7 +82,7 @@ func (d drawer) dashboard(cfg api.DynamicConfig, data map[string]any) {
 				d.c.FillRect(x, y, w, h, dashboardInk(b.Fill))
 			}
 			if b.Stroke == nil || *b.Stroke {
-				d.c.StrokeRect(x, y, w, h, Black)
+				d.c.StrokeRect(x, y, w, h, dashboardInk(b.StrokeColor))
 			}
 		}
 	}
@@ -128,7 +130,7 @@ func (d drawer) progress(b api.DashboardBlock, data map[string]any, x, y, w, h i
 	d.textCenteredY(labelFont, label, x, float64(centerY), textOpts{maxWidth: labelW - 6, ellipsis: true})
 	d.c.StrokeRect(barX, barY, barW, barH, Black)
 	if fillW := max(0, min(barW-2, round(float64(barW-2)*pct/100))); fillW > 0 {
-		ink := Black
+		ink := dashboardInk(b.Color)
 		if d.color {
 			switch {
 			case b.CriticalAt != nil && pct >= *b.CriticalAt:

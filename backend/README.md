@@ -124,12 +124,14 @@
 | `frame` | 浏览器渲染好的 400×300 packed 1bpp，15000 字节，MSB first，1 为白 |
 | `colorFrame` | 可选，400×300 packed BWRY 2bpp，30000 字节，色号 00 黑、01 白、10 黄、11 红，需同时上传 `frame` |
 | `grayFrame` | 可选，400×300 packed 4bpp，60000 字节，高半字节在左，0 为黑、15 为白，需同时上传 `frame` |
+| `imageSource` | 可选，400×300 PNG 裁剪源图，最大 1 MB，需同时上传 `frame` |
+| `imageRenderPreset` | 可选，图片优化风格 `auto` / `photo` / `vivid` / `graphic`，需同时上传 `frame` |
 | `displayMode` | Note4 上屏方式，`mono1`（默认）或 `gray16`。可单独修改，启用 16 灰需要已有灰阶帧 |
 | `audio` | 任意支持格式的音频，≤ 5 MB |
 | `frameName` | 状态栏标题 |
 
 - 其他字段或重复字段直接报错，请求体总大小不超过各文件上限之和加 64 KB。
-- 服务端不处理图片像素，只校验长度。
+- 设备帧由客户端生成，服务端保存原始帧字节。可编辑源图通过 `imageSourceHash` 和有归属校验的 Web Blob 接口读取，仅用于网页重新渲染。
 - 换图片会保留已有音频，删除音频走 `DELETE /audio`。
 
 **动态内容**用 JSON（`CreateDynamicContentRequest` / `PatchContentRequest`）。修改配置时先按新配置取数并渲染，成功后才落库。倒数日接受 `goal`、`targetDate` 和 `tz`，按当地午夜刷新。动态预览默认返回黑白帧，加 `?format=bwry2` 返回四色帧。

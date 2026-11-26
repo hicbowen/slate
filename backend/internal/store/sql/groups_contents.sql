@@ -43,6 +43,7 @@ SELECT id FROM groups WHERE owner_id = $1 ORDER BY sort_order, created_at;
 
 -- name: ListContents :many
 SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash, c.gray_image_hash, c.display_mode,
+       c.image_source_hash, c.image_render_preset,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
        d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
@@ -56,6 +57,7 @@ ORDER BY c.sort_order;
 
 -- name: GetContent :one
 SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash, c.gray_image_hash, c.display_mode,
+       c.image_source_hash, c.image_render_preset,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
        d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
@@ -72,13 +74,17 @@ WHERE c.id = $1;
 SELECT COALESCE(MAX(sort_order) + 1, 0)::int FROM contents WHERE group_id = $1;
 
 -- name: CreateContent :exec
-INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, gray_image_hash, display_mode)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE(sqlc.narg(display_mode)::text, 'mono1'));
+INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, gray_image_hash, display_mode, image_source_hash, image_render_preset)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE(sqlc.narg(display_mode)::text, 'mono1'), sqlc.narg(image_source_hash), COALESCE(sqlc.narg(image_render_preset)::text, 'auto'));
 
 -- name: SetContentImage :exec
 UPDATE contents SET image_hash = $2, color_image_hash = $3, gray_image_hash = $4,
     display_mode = CASE WHEN $4::char(64) IS NULL THEN 'mono1' ELSE display_mode END,
     updated_at = now() WHERE id = $1;
+
+-- name: SetContentImageSource :exec
+UPDATE contents SET image_source_hash = $2, image_render_preset = $3, updated_at = now()
+WHERE id = $1 AND kind = 'image';
 
 -- name: SetImageDisplayMode :execrows
 UPDATE contents SET display_mode = @display_mode, updated_at = now()
@@ -108,7 +114,7 @@ WHERE c.id = r.id AND c.sort_order <> r.pos - 1;
 SELECT EXISTS (
     SELECT 1 FROM contents c JOIN groups g ON g.id = c.group_id
     LEFT JOIN content_audio a ON a.content_id = c.id
-    WHERE g.owner_id = @user_id AND (c.image_hash = @hash OR c.color_image_hash = @hash OR c.gray_image_hash = @hash OR a.hash = @hash)
+    WHERE g.owner_id = @user_id AND (c.image_hash = @hash OR c.color_image_hash = @hash OR c.gray_image_hash = @hash OR c.image_source_hash = @hash OR a.hash = @hash)
 );
 
 -- name: BlobVisibleToDevice :one
@@ -125,5 +131,7 @@ UNION
 SELECT color_image_hash::text FROM contents WHERE color_image_hash IS NOT NULL
 UNION
 SELECT gray_image_hash::text FROM contents WHERE gray_image_hash IS NOT NULL
+UNION
+SELECT image_source_hash::text FROM contents WHERE image_source_hash IS NOT NULL
 UNION
 SELECT hash::text FROM content_audio WHERE hash IS NOT NULL;

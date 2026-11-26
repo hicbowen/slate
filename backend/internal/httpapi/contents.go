@@ -27,6 +27,7 @@ const (
 func listRow(c db.GetContentRow) db.ListContentsRow {
 	return db.ListContentsRow{
 		ID: c.ID, GroupID: c.GroupID, SortOrder: c.SortOrder, Kind: c.Kind, FrameName: c.FrameName, ImageHash: c.ImageHash, ColorImageHash: c.ColorImageHash, GrayImageHash: c.GrayImageHash, DisplayMode: c.DisplayMode,
+		ImageSourceHash: c.ImageSourceHash, ImageRenderPreset: c.ImageRenderPreset,
 		DynamicType: c.DynamicType, DynamicConfig: c.DynamicConfig, DynamicData: c.DynamicData, RenderedAt: c.RenderedAt,
 		NextRunAt: c.NextRunAt, RefreshDueAt: c.RefreshDueAt, DynamicError: c.DynamicError, AudioSource: c.AudioSource,
 		AudioStatus: c.AudioStatus, AudioVoice: c.AudioVoice, AudioText: c.AudioText, AudioHash: c.AudioHash,
@@ -42,6 +43,9 @@ func contentView(c db.ListContentsRow) api.Content {
 	out := api.Content{
 		ID: c.ID, GroupID: c.GroupID, Seq: c.SortOrder, Kind: api.ContentKind(c.Kind), FrameName: c.FrameName,
 		StatusBarText: statusBarText(c), ImageHash: c.ImageHash, ColorImageHash: c.ColorImageHash, GrayImageHash: c.GrayImageHash, DisplayMode: c.DisplayMode,
+	}
+	if c.Kind == db.ContentKindImage {
+		out.ImageSourceHash, out.ImageRenderPreset = c.ImageSourceHash, c.ImageRenderPreset
 	}
 	if c.AudioSource != nil && c.AudioStatus != nil {
 		out.Audio = &api.ContentAudio{
@@ -144,13 +148,13 @@ func isMultipart(r *http.Request) bool {
 }
 
 type upload struct {
-	frame, colorFrame, grayFrame, audio []byte
-	frameName, displayMode              *string
-	hasFrameName                        bool
+	frame, colorFrame, grayFrame, imageSource, audio []byte
+	frameName, displayMode, imageRenderPreset        *string
+	hasFrameName                                     bool
 }
 
-// maxUploadBytes bounds the whole multipart body: both files plus headers and frameName.
-const maxUploadBytes = api.FrameBytes + api.ColorFrameBytes + api.GrayFrameBytes + maxAudioBytes + 64<<10
+// maxUploadBytes bounds all uploaded renditions, source, audio, and multipart metadata.
+const maxUploadBytes = api.FrameBytes + api.ColorFrameBytes + api.GrayFrameBytes + blob.MaxImageSourceBytes + maxAudioBytes + 64<<10
 
 func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 	var u upload
@@ -165,6 +169,9 @@ func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 		if errors.Is(err, io.EOF) {
 			if (len(u.colorFrame) > 0 || len(u.grayFrame) > 0) && len(u.frame) == 0 {
 				return u, badRequest("上传四色或灰阶帧时须同时提供黑白帧")
+			}
+			if (len(u.imageSource) > 0 || u.imageRenderPreset != nil) && len(u.frame) == 0 {
+				return u, badRequest("更新源图或图片风格时须同时提供黑白帧")
 			}
 			return u, nil
 		}
@@ -215,6 +222,23 @@ func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 				return u, badRequest("displayMode 须为 mono1 或 gray16")
 			}
 			u.displayMode = &mode
+		case "imageSource":
+			if u.imageSource, err = readPart(part, blob.MaxImageSourceBytes, "可编辑源图不能超过 1 MB"); err != nil {
+				return u, err
+			}
+			if !blob.ValidImageSource(u.imageSource) {
+				return u, badRequest("可编辑源图须为 400×300 的 PNG")
+			}
+		case "imageRenderPreset":
+			raw, err := readPart(part, 16, "图片风格无效")
+			if err != nil {
+				return u, err
+			}
+			preset := string(raw)
+			if !api.ValidImageRenderPreset(preset) {
+				return u, badRequest("图片风格无效")
+			}
+			u.imageRenderPreset = &preset
 		case "audio":
 			// Browsers often send an empty or generic type for flac/opus/wma; ffmpeg decides.
 			if u.audio, err = readPart(part, maxAudioBytes, "音频文件不能超过 5MB"); err != nil {
@@ -259,9 +283,9 @@ func truncateRunes(s string, n int) string {
 }
 
 type storedUpload struct {
-	imageHash, audioHash string
-	colorHash, grayHash  *string
-	audioSize            int32
+	imageHash, audioHash            string
+	colorHash, grayHash, sourceHash *string
+	audioSize                       int32
 }
 
 // storeUpload writes the supplied assets before any database changes.
@@ -273,6 +297,10 @@ func (a *API) storeUpload(ctx context.Context, u upload) (storedUpload, error) {
 		return out, err
 	}
 	out.grayHash, err = a.Blobs.PutOptional(u.grayFrame)
+	if err != nil {
+		return out, err
+	}
+	out.sourceHash, err = a.Blobs.PutOptional(u.imageSource)
 	if err != nil || len(u.audio) == 0 {
 		return out, err
 	}
@@ -313,7 +341,11 @@ func (a *API) createContent(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
-		if err := q.CreateContent(r.Context(), db.CreateContentParams{ID: id, GroupID: g.ID, SortOrder: seq, Kind: db.ContentKindImage, FrameName: u.frameName, ImageHash: assets.imageHash, ColorImageHash: assets.colorHash, GrayImageHash: assets.grayHash, DisplayMode: u.displayMode}); err != nil {
+		if err := q.CreateContent(r.Context(), db.CreateContentParams{
+			ID: id, GroupID: g.ID, SortOrder: seq, Kind: db.ContentKindImage, FrameName: u.frameName,
+			ImageHash: assets.imageHash, ColorImageHash: assets.colorHash, GrayImageHash: assets.grayHash, DisplayMode: u.displayMode,
+			ImageSourceHash: assets.sourceHash, ImageRenderPreset: u.imageRenderPreset,
+		}); err != nil {
 			return err
 		}
 		if assets.audioHash == "" {
@@ -502,6 +534,15 @@ func (a *API) patchImage(w http.ResponseWriter, r *http.Request, c db.GetContent
 		}
 		if assets.imageHash != "" {
 			if err := q.SetContentImage(r.Context(), db.SetContentImageParams{ID: c.ID, ImageHash: assets.imageHash, ColorImageHash: assets.colorHash, GrayImageHash: assets.grayHash}); err != nil {
+				return err
+			}
+			preset := "auto"
+			if u.imageRenderPreset != nil {
+				preset = *u.imageRenderPreset
+			}
+			if err := q.SetContentImageSource(r.Context(), db.SetContentImageSourceParams{
+				ID: c.ID, ImageSourceHash: assets.sourceHash, ImageRenderPreset: preset,
+			}); err != nil {
 				return err
 			}
 		}

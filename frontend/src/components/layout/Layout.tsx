@@ -81,7 +81,7 @@ export function Layout() {
       <footer className="border-t border-line">
         <div className="max-w-6xl mx-auto px-5 sm:px-8 py-3.5 text-center">
           <p className="font-mono text-[11px] text-stone tracking-[0.06em]">
-            Slate · 1bpp · 400×300 · v0.1
+            Slate · Note4 黑白 / 16 灰 · Note4C 四色 · 400×300
           </p>
         </div>
       </footer>

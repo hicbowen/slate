@@ -6,12 +6,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"image"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -258,6 +261,72 @@ func TestDeviceColorRenditions(t *testing.T) {
 		t.Fatal("old color frame survived an image replacement")
 	}
 	h.must(404, h.call("GET", url, dev.Secret, nil, nil), "removed color blob access")
+}
+
+func TestEditableImageSource(t *testing.T) {
+	h := newHarness(t)
+	owner := h.user("sourceowner")
+	gid := h.group(owner, "原图测试")
+	uploadURL := "/api/groups/" + gid + "/contents"
+	frame := bytes.Repeat([]byte{0xff}, api.FrameBytes)
+	var source bytes.Buffer
+	if err := png.Encode(&source, image.NewGray(image.Rect(0, 0, api.FrameWidth, api.FrameHeight))); err != nil {
+		t.Fatal(err)
+	}
+	upload := func(image []byte, preset string) multipartBody {
+		t.Helper()
+		buf := &bytes.Buffer{}
+		writer := multipart.NewWriter(buf)
+		for field, data := range map[string][]byte{"frame": frame, "imageSource": image} {
+			part, err := writer.CreateFormFile(field, field)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := part.Write(data); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writer.WriteField("imageRenderPreset", preset); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return multipartBody{buf, writer.FormDataContentType()}
+	}
+	h.must(400, h.call("POST", uploadURL, owner, upload([]byte("not a PNG"), "photo"), nil), "invalid source")
+	h.must(400, h.call("POST", uploadURL, owner, upload(source.Bytes(), "unknown"), nil), "invalid preset")
+	var saved api.Content
+	h.must(201, h.call("POST", uploadURL, owner, upload(source.Bytes(), "photo"), &saved), "save source")
+	hash := blob.Hash(source.Bytes())
+	if saved.ImageSourceHash == nil || *saved.ImageSourceHash != hash || saved.ImageRenderPreset != "photo" {
+		t.Fatalf("source metadata: %+v", saved)
+	}
+	path := "/api/contents/" + saved.ID
+	var downloaded []byte
+	h.must(200, h.call("GET", "/api/blobs/"+hash, owner, nil, &downloaded), "owner source download")
+	if !bytes.Equal(downloaded, source.Bytes()) {
+		t.Fatal("downloaded source differs from uploaded PNG")
+	}
+	h.must(404, h.call("GET", "/api/blobs/"+hash, h.user("sourceguest"), nil, nil), "deny other user source download")
+	device := h.device("AA:BB:CC:DD:EE:08")
+	h.must(200, h.call("POST", "/api/devices/claims", owner, map[string]string{"pairCode": device.PairCode}, nil), "claim")
+	h.must(404, h.call("GET", "/api/device/blobs/"+hash, device.Secret, nil, nil), "deny device source download")
+	hashes, err := h.st.Q.ReferencedBlobHashes(t.Context())
+	if err != nil || !slices.Contains(hashes, hash) {
+		t.Fatalf("GC source reference: %v, %v", hashes, err)
+	}
+	var updated api.Content
+	h.must(200, h.call("PATCH", path, owner, upload(source.Bytes(), "graphic"), &updated), "rerender saved source")
+	if updated.ImageSourceHash == nil || *updated.ImageSourceHash != hash || updated.ImageRenderPreset != "graphic" {
+		t.Fatalf("updated source metadata: %+v", updated)
+	}
+	updated = api.Content{}
+	h.must(200, h.call("PATCH", path, owner, frameUpload(frame, "旧客户端更新"), &updated), "replace without source")
+	if updated.ImageSourceHash != nil || updated.ImageRenderPreset != "auto" {
+		t.Fatalf("stale source after replacement: %+v", updated)
+	}
+	h.must(404, h.call("GET", "/api/blobs/"+hash, owner, nil, nil), "removed source download")
 }
 
 func TestNote4GrayRendition(t *testing.T) {

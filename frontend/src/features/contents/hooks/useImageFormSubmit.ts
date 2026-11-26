@@ -1,8 +1,6 @@
 import { useCallback } from 'react';
 import type { Content } from '@/api';
-import type { ImageRenderPreset } from '@/lib/eink/render-preset';
-import type { DitherMode } from '@/lib/eink/dither';
-import { renderFrames, type CropOptions } from '@/lib/eink/image-preview';
+import { renderFrames, type CropOptions, type DitherSettings } from '@/lib/eink/image-preview';
 
 export function useImageFormSubmit({
   imageFile,
@@ -19,10 +17,8 @@ export function useImageFormSubmit({
   audioFile: File | null;
   frameName: string;
   displayMode?: Content['displayMode'];
-  threshold: number;
-  mode: DitherMode;
-  renderPreset: ImageRenderPreset;
-} & CropOptions) {
+} & CropOptions &
+  DitherSettings) {
   return useCallback(async (): Promise<FormData> => {
     const fd = new FormData();
     if (imageFile) {
@@ -30,7 +26,7 @@ export function useImageFormSubmit({
         throw new Error('图片无法解码，请换一张图片。');
       });
       try {
-        const { mono, gray, color } = renderFrames(bitmap, {
+        const { mono, gray, color, imageSource } = await renderFrames(bitmap, {
           scale,
           offset,
           threshold,
@@ -52,6 +48,8 @@ export function useImageFormSubmit({
           new Blob([color.slice()], { type: 'application/octet-stream' }),
           'frame-bwry.bin'
         );
+        fd.append('imageSource', imageSource, 'source.png');
+        fd.append('imageRenderPreset', renderPreset);
       } finally {
         bitmap.close();
       }

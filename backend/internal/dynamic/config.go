@@ -240,6 +240,9 @@ func normalizeBlock(b *api.DashboardBlock) error {
 		}
 		return "", fmt.Errorf("%s 无效", name)
 	}
+	color := func(name, value string) (string, error) {
+		return oneOf(name, value, "", "black", "white", "red", "yellow")
+	}
 	fontSize := func(v, def int) (int, error) {
 		if v == 0 {
 			return def, nil
@@ -260,10 +263,16 @@ func normalizeBlock(b *api.DashboardBlock) error {
 				return fmt.Errorf("y 坐标须为 24-299")
 			}
 		}
-		var err error
-		b.Style, err = oneOf("style", b.Style, "solid", "solid", "dashed")
-		*b = api.DashboardBlock{Type: b.Type, X1: b.X1, Y1: b.Y1, X2: b.X2, Y2: b.Y2, Style: b.Style}
-		return err
+		style, err := oneOf("style", b.Style, "solid", "solid", "dashed")
+		if err != nil {
+			return err
+		}
+		ink, err := color("color", b.Color)
+		if err != nil {
+			return err
+		}
+		*b = api.DashboardBlock{Type: b.Type, X1: b.X1, Y1: b.Y1, X2: b.X2, Y2: b.Y2, Style: style, Color: ink}
+		return nil
 	}
 	switch {
 	case b.X < 0 || b.X > 399, b.Y < 24 || b.Y > 299, b.W < 1 || b.W > 400, b.H < 1 || b.H > 276:
@@ -275,8 +284,16 @@ func normalizeBlock(b *api.DashboardBlock) error {
 	}
 	rect := api.DashboardBlock{Type: b.Type, X: b.X, Y: b.Y, W: b.W, H: b.H}
 	var err error
+	if b.Type != "rect" {
+		if rect.Color, err = color("color", b.Color); err != nil {
+			return err
+		}
+	}
 	switch b.Type {
 	case "text":
+		if rect.Color == "" {
+			rect.Color = "black"
+		}
 		if err = checkBinding("value", b.Value, true); err != nil {
 			return err
 		}
@@ -285,9 +302,6 @@ func normalizeBlock(b *api.DashboardBlock) error {
 			return err
 		}
 		if rect.Align, err = oneOf("align", b.Align, "left", "left", "center", "right"); err != nil {
-			return err
-		}
-		if rect.Color, err = oneOf("color", b.Color, "black", "black", "white", "red", "yellow"); err != nil {
 			return err
 		}
 		rect.MaxLines = b.MaxLines
@@ -354,6 +368,9 @@ func normalizeBlock(b *api.DashboardBlock) error {
 	case "rect":
 		stroke := b.Stroke == nil || *b.Stroke
 		rect.Stroke = &stroke
+		if rect.StrokeColor, err = color("strokeColor", b.StrokeColor); err != nil {
+			return err
+		}
 		if rect.Fill, err = oneOf("fill", b.Fill, "none", "none", "black", "white", "red", "yellow"); err != nil {
 			return err
 		}

@@ -37,7 +37,7 @@ export function DashboardConfigPanel({
   const activeDescription =
     ref?.kind === 'system'
       ? (systemTemplate(ref.id)?.description ?? '')
-      : '编辑 JSON 模板。进度条可用 warningAt、criticalAt 设置 Note4C 的黄、红阈值（%）。';
+      : '区块可用 color 设置颜色，矩形用 fill 和 strokeColor。支持 black、white、yellow、red，进度条可用 warningAt 和 criticalAt 设置黄、红阈值（%）。';
   const updateCustomTemplate = useCallback(
     (template: DashboardTemplate) => {
       onChange({ ...config, template: { kind: 'custom', template } });

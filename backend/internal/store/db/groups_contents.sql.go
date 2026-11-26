@@ -36,7 +36,7 @@ const blobVisibleToUser = `-- name: BlobVisibleToUser :one
 SELECT EXISTS (
     SELECT 1 FROM contents c JOIN groups g ON g.id = c.group_id
     LEFT JOIN content_audio a ON a.content_id = c.id
-    WHERE g.owner_id = $1 AND (c.image_hash = $2 OR c.color_image_hash = $2 OR c.gray_image_hash = $2 OR a.hash = $2)
+    WHERE g.owner_id = $1 AND (c.image_hash = $2 OR c.color_image_hash = $2 OR c.gray_image_hash = $2 OR c.image_source_hash = $2 OR a.hash = $2)
 )
 `
 
@@ -75,20 +75,22 @@ func (q *Queries) CountGroups(ctx context.Context, ownerID string) (int32, error
 }
 
 const createContent = `-- name: CreateContent :exec
-INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, gray_image_hash, display_mode)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::text, 'mono1'))
+INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, gray_image_hash, display_mode, image_source_hash, image_render_preset)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::text, 'mono1'), $10, COALESCE($11::text, 'auto'))
 `
 
 type CreateContentParams struct {
-	ID             string
-	GroupID        string
-	SortOrder      int32
-	Kind           ContentKind
-	FrameName      *string
-	ImageHash      string
-	ColorImageHash *string
-	GrayImageHash  *string
-	DisplayMode    *string
+	ID                string
+	GroupID           string
+	SortOrder         int32
+	Kind              ContentKind
+	FrameName         *string
+	ImageHash         string
+	ColorImageHash    *string
+	GrayImageHash     *string
+	DisplayMode       *string
+	ImageSourceHash   *string
+	ImageRenderPreset *string
 }
 
 func (q *Queries) CreateContent(ctx context.Context, arg CreateContentParams) error {
@@ -102,6 +104,8 @@ func (q *Queries) CreateContent(ctx context.Context, arg CreateContentParams) er
 		arg.ColorImageHash,
 		arg.GrayImageHash,
 		arg.DisplayMode,
+		arg.ImageSourceHash,
+		arg.ImageRenderPreset,
 	)
 	return err
 }
@@ -167,6 +171,7 @@ func (q *Queries) FirstGroupID(ctx context.Context, ownerID string) (string, err
 
 const getContent = `-- name: GetContent :one
 SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash, c.gray_image_hash, c.display_mode,
+       c.image_source_hash, c.image_render_preset,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
        d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
@@ -181,31 +186,33 @@ WHERE c.id = $1
 `
 
 type GetContentRow struct {
-	ID             string
-	GroupID        string
-	SortOrder      int32
-	Kind           ContentKind
-	FrameName      *string
-	ImageHash      string
-	ColorImageHash *string
-	GrayImageHash  *string
-	DisplayMode    string
-	DynamicType    *string
-	DynamicConfig  json.RawMessage
-	DynamicData    json.RawMessage
-	RenderedAt     *time.Time
-	NextRunAt      *time.Time
-	RefreshDueAt   *time.Time
-	DynamicError   *string
-	AudioSource    *AudioSource
-	AudioStatus    *AudioStatus
-	AudioVoice     *string
-	AudioText      *string
-	AudioHash      *string
-	AudioSize      *int32
-	AudioError     *string
-	AudioUpdatedAt *time.Time
-	OwnerID        string
+	ID                string
+	GroupID           string
+	SortOrder         int32
+	Kind              ContentKind
+	FrameName         *string
+	ImageHash         string
+	ColorImageHash    *string
+	GrayImageHash     *string
+	DisplayMode       string
+	ImageSourceHash   *string
+	ImageRenderPreset string
+	DynamicType       *string
+	DynamicConfig     json.RawMessage
+	DynamicData       json.RawMessage
+	RenderedAt        *time.Time
+	NextRunAt         *time.Time
+	RefreshDueAt      *time.Time
+	DynamicError      *string
+	AudioSource       *AudioSource
+	AudioStatus       *AudioStatus
+	AudioVoice        *string
+	AudioText         *string
+	AudioHash         *string
+	AudioSize         *int32
+	AudioError        *string
+	AudioUpdatedAt    *time.Time
+	OwnerID           string
 }
 
 func (q *Queries) GetContent(ctx context.Context, id string) (GetContentRow, error) {
@@ -221,6 +228,8 @@ func (q *Queries) GetContent(ctx context.Context, id string) (GetContentRow, err
 		&i.ColorImageHash,
 		&i.GrayImageHash,
 		&i.DisplayMode,
+		&i.ImageSourceHash,
+		&i.ImageRenderPreset,
 		&i.DynamicType,
 		&i.DynamicConfig,
 		&i.DynamicData,
@@ -285,6 +294,7 @@ func (q *Queries) ListContentIDs(ctx context.Context, groupID string) ([]string,
 
 const listContents = `-- name: ListContents :many
 SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash, c.gray_image_hash, c.display_mode,
+       c.image_source_hash, c.image_render_preset,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
        d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
@@ -298,30 +308,32 @@ ORDER BY c.sort_order
 `
 
 type ListContentsRow struct {
-	ID             string
-	GroupID        string
-	SortOrder      int32
-	Kind           ContentKind
-	FrameName      *string
-	ImageHash      string
-	ColorImageHash *string
-	GrayImageHash  *string
-	DisplayMode    string
-	DynamicType    *string
-	DynamicConfig  json.RawMessage
-	DynamicData    json.RawMessage
-	RenderedAt     *time.Time
-	NextRunAt      *time.Time
-	RefreshDueAt   *time.Time
-	DynamicError   *string
-	AudioSource    *AudioSource
-	AudioStatus    *AudioStatus
-	AudioVoice     *string
-	AudioText      *string
-	AudioHash      *string
-	AudioSize      *int32
-	AudioError     *string
-	AudioUpdatedAt *time.Time
+	ID                string
+	GroupID           string
+	SortOrder         int32
+	Kind              ContentKind
+	FrameName         *string
+	ImageHash         string
+	ColorImageHash    *string
+	GrayImageHash     *string
+	DisplayMode       string
+	ImageSourceHash   *string
+	ImageRenderPreset string
+	DynamicType       *string
+	DynamicConfig     json.RawMessage
+	DynamicData       json.RawMessage
+	RenderedAt        *time.Time
+	NextRunAt         *time.Time
+	RefreshDueAt      *time.Time
+	DynamicError      *string
+	AudioSource       *AudioSource
+	AudioStatus       *AudioStatus
+	AudioVoice        *string
+	AudioText         *string
+	AudioHash         *string
+	AudioSize         *int32
+	AudioError        *string
+	AudioUpdatedAt    *time.Time
 }
 
 func (q *Queries) ListContents(ctx context.Context, groupID string) ([]ListContentsRow, error) {
@@ -343,6 +355,8 @@ func (q *Queries) ListContents(ctx context.Context, groupID string) ([]ListConte
 			&i.ColorImageHash,
 			&i.GrayImageHash,
 			&i.DisplayMode,
+			&i.ImageSourceHash,
+			&i.ImageRenderPreset,
 			&i.DynamicType,
 			&i.DynamicConfig,
 			&i.DynamicData,
@@ -479,6 +493,8 @@ SELECT color_image_hash::text FROM contents WHERE color_image_hash IS NOT NULL
 UNION
 SELECT gray_image_hash::text FROM contents WHERE gray_image_hash IS NOT NULL
 UNION
+SELECT image_source_hash::text FROM contents WHERE image_source_hash IS NOT NULL
+UNION
 SELECT hash::text FROM content_audio WHERE hash IS NOT NULL
 `
 
@@ -550,6 +566,22 @@ func (q *Queries) SetContentImage(ctx context.Context, arg SetContentImageParams
 		arg.ColorImageHash,
 		arg.GrayImageHash,
 	)
+	return err
+}
+
+const setContentImageSource = `-- name: SetContentImageSource :exec
+UPDATE contents SET image_source_hash = $2, image_render_preset = $3, updated_at = now()
+WHERE id = $1 AND kind = 'image'
+`
+
+type SetContentImageSourceParams struct {
+	ID                string
+	ImageSourceHash   *string
+	ImageRenderPreset string
+}
+
+func (q *Queries) SetContentImageSource(ctx context.Context, arg SetContentImageSourceParams) error {
+	_, err := q.db.Exec(ctx, setContentImageSource, arg.ID, arg.ImageSourceHash, arg.ImageRenderPreset)
 	return err
 }
 

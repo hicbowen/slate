@@ -140,17 +140,19 @@ func (ns NullContentKind) Value() (driver.Value, error) {
 }
 
 type Content struct {
-	ID             string
-	GroupID        string
-	SortOrder      int32
-	Kind           ContentKind
-	FrameName      *string
-	ImageHash      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	ColorImageHash *string
-	GrayImageHash  *string
-	DisplayMode    string
+	ID                string
+	GroupID           string
+	SortOrder         int32
+	Kind              ContentKind
+	FrameName         *string
+	ImageHash         string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	ColorImageHash    *string
+	GrayImageHash     *string
+	DisplayMode       string
+	ImageSourceHash   *string
+	ImageRenderPreset string
 }
 
 type ContentAudio struct {

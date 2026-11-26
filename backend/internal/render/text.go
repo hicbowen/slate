@@ -306,7 +306,7 @@ func (d drawer) vrule(x, y, h int, dashed bool) {
 	}
 }
 
-func (d drawer) sparkline(x, y, w, h int, values []float64) {
+func (d drawer) sparkline(x, y, w, h int, values []float64, ink uint8) {
 	if len(values) < 2 || w <= 1 || h <= 1 {
 		return
 	}
@@ -330,7 +330,7 @@ func (d drawer) sparkline(x, y, w, h int, values []float64) {
 	for i := 1; i < len(values); i++ {
 		xx := x + round(float64(w*i)/float64(len(values)-1))
 		yy := level(values[i])
-		d.c.Line(px, py, xx, yy, Black)
+		d.c.Line(px, py, xx, yy, ink)
 		px, py = xx, yy
 	}
 }
