@@ -62,6 +62,12 @@ const char* KindName(UiEventKind kind) {
             return "xiaozhi_changed";
         case UiEventKind::kXiaozhiChannelClosed:
             return "xiaozhi_channel_closed";
+        case UiEventKind::kWifiEnableRequested:
+            return "wifi_enable_requested";
+        case UiEventKind::kWifiPortalRequested:
+            return "wifi_portal_requested";
+        case UiEventKind::kWifiConnectFinished:
+            return "wifi_connect_finished";
     }
     return "unknown";
 }
@@ -76,6 +82,8 @@ const char* BootStageName(BootStage stage) {
             return "wifi_connecting";
         case BootStage::kWifiFailed:
             return "wifi_failed";
+        case BootStage::kWifiDisabled:
+            return "wifi_disabled";
         case BootStage::kSntp:
             return "sntp";
         case BootStage::kRegistering:
@@ -134,6 +142,8 @@ const char* BootModeName(boot_mode::Mode mode) {
     switch (mode) {
         case boot_mode::Mode::kPortal:
             return "portal";
+        case boot_mode::Mode::kOffline:
+            return "offline";
         case boot_mode::Mode::kBackgroundRefresh:
             return "background_refresh";
         case boot_mode::Mode::kFullActive:
@@ -193,6 +203,10 @@ void Describe(const UiEvent& e, char* out, size_t cap) {
             break;
         case UiEventKind::kXiaozhiChannelClosed:
             std::snprintf(out, cap, "token=%lu", static_cast<unsigned long>(e.u.xiaozhi_channel.token));
+            break;
+        case UiEventKind::kWifiEnableRequested:
+        case UiEventKind::kWifiConnectFinished:
+            std::snprintf(out, cap, "enabled=%d", e.u.wifi_control.enabled ? 1 : 0);
             break;
         default:
             std::snprintf(out, cap, "-");

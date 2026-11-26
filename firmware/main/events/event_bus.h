@@ -33,6 +33,7 @@ bool PostChargeChanged(uint8_t state, bool present, bool charging, bool full, bo
                        TickType_t timeout = kDefaultPostTimeout);
 bool PostBatteryUpdated(int mv, int pct, TickType_t timeout = kNoWait);
 bool PostWifiState(bool connected, int rssi, TickType_t timeout = kDefaultPostTimeout);
+bool PostWifiEnableRequested(bool enabled, TickType_t timeout = kDefaultPostTimeout);
 bool PostBootStage(BootStage stage, const char* ssid = nullptr, const char* pair_code = nullptr,
                    TickType_t timeout = kDefaultPostTimeout);
 bool PostGroupReady(UiEventKind kind, const std::string& gid, const std::string& name, int content_count,

@@ -20,8 +20,12 @@ constexpr int  kSaveSecretRetryDelayMs = 200;
 namespace setup_flow {
 
 bool TryConnectAndSetup(cred::Credentials& c) {
-    evt::PostBootStage(BootStage::kWifiConnecting, c.wifi_ssid.c_str());
-    if (!Wifi::Get().Connect(c.wifi_ssid, c.wifi_pwd, 20000)) {
+    std::vector<Wifi::Network> networks;
+    networks.reserve(c.wifi_profiles.size());
+    for (const auto& profile : c.wifi_profiles)
+        networks.push_back({profile.ssid, profile.password});
+    evt::PostBootStage(BootStage::kWifiConnecting, c.last_success_ssid.c_str());
+    if (!Wifi::Get().ConnectAny(networks, c.last_success_ssid, 20000)) {
         ESP_LOGW(kTag, "wifi connect failed mode=sta");
         evt::PostBootStage(BootStage::kWifiFailed);
         return false;
@@ -34,12 +38,16 @@ bool TryConnectAndSetup(cred::Credentials& c) {
     constexpr int kSntpWaitMs = 10000;
     int           waited      = 0;
     while (!sntp::TimeSynced() && waited < kSntpWaitMs) {
+        if (!Wifi::Get().IsConnected())
+            return false;
         vTaskDelay(pdMS_TO_TICKS(200));
         waited += 200;
     }
     if (!sntp::TimeSynced())
         ESP_LOGW(kTag, "sntp sync timeout elapsed_ms=%d impact=https_register_may_fail", kSntpWaitMs);
 
+    if (!Wifi::Get().IsConnected() || !cred::WifiEnabled())
+        return false;
     if (c.device_secret.empty()) {
         evt::PostBootStage(BootStage::kRegistering);
         api::RegisterResult rr;

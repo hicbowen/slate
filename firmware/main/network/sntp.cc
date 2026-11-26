@@ -9,9 +9,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <mutex>
 
 namespace {
 constexpr char kTag[] = "sntp";
+std::mutex     sntp_mutex;
+bool           running = false;
 
 constexpr time_t kSyncedAfterEpoch = 1577836800;  // 2020-01-01 UTC
 constexpr long   kMaxClockDriftSec = 10;
@@ -19,13 +22,26 @@ constexpr long   kMaxClockDriftSec = 10;
 
 namespace sntp {
 
-void Init() {
-    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    cfg.start             = true;
-    esp_netif_sntp_init(&cfg);
-
+void ConfigureTimezone() {
     setenv("TZ", CONFIG_SLATE_DEFAULT_TIMEZONE, 1);
     tzset();
+}
+
+void Init() {
+    std::lock_guard<std::mutex> lock(sntp_mutex);
+    if (running)
+        return;
+    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    cfg.start             = true;
+    running               = esp_netif_sntp_init(&cfg) == ESP_OK;
+}
+
+void Stop() {
+    std::lock_guard<std::mutex> lock(sntp_mutex);
+    if (!running)
+        return;
+    esp_netif_sntp_deinit();
+    running = false;
 }
 
 bool TimeSynced() {

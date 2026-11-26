@@ -6,6 +6,7 @@
 // Scene 的所有方法仅由 ui_loop task 调用（OnEnter/OnExit/OnEvent）。
 
 #include <lvgl.h>
+#include <cstddef>
 #include <functional>
 #include <string>
 
@@ -36,6 +37,10 @@ struct SceneContext {
     std::function<ChargeStatus::Snapshot()> read_charge;
     std::function<bool()>                   wifi_connected;
     std::function<int()>                    wifi_rssi;
+    std::function<bool()>                   wifi_enabled;
+    std::function<size_t()>                 wifi_profile_count;
+    std::function<void(bool)>               set_wifi_enabled;
+    std::function<void()>                   open_wifi_portal;
 
     std::function<int()>                                       current_frame_seq;
     std::function<void()>                                      clear_current_frame;

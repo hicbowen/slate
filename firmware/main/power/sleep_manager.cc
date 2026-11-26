@@ -89,9 +89,10 @@ void SleepManager::Init(Policy p) {
         unbound_state_ = {};
     }
     enabled_.store(!p.disabled);
-    ESP_LOGD(kTag, "init idle_min=%u disabled=%d unbound_grace_ms=%lld low_battery_pct=%d",
-             static_cast<unsigned>(idle_timeout_min_), p.disabled ? 1 : 0, static_cast<long long>(unbound_grace_ms_),
-             low_battery_pct_);
+    network_wake_enabled_.store(p.network_wake_enabled, std::memory_order_release);
+    ESP_LOGD(kTag, "init idle_min=%u disabled=%d network_wake=%d unbound_grace_ms=%lld low_battery_pct=%d",
+             static_cast<unsigned>(idle_timeout_min_), p.disabled ? 1 : 0, p.network_wake_enabled ? 1 : 0,
+             static_cast<long long>(unbound_grace_ms_), low_battery_pct_);
 }
 
 void SleepManager::SetSleepBlocker(std::function<bool()> blocks_sleep) {
@@ -99,7 +100,16 @@ void SleepManager::SetSleepBlocker(std::function<bool()> blocks_sleep) {
 }
 
 void SleepManager::Disable() {
-    enabled_.store(false);
+    SetEnabled(false);
+}
+
+void SleepManager::SetEnabled(bool enabled) {
+    enabled_.store(enabled, std::memory_order_release);
+    last_active_ms_.store(time_utils::NowMs(), std::memory_order_release);
+}
+
+void SleepManager::SetNetworkWakeEnabled(bool enabled) {
+    network_wake_enabled_.store(enabled, std::memory_order_release);
 }
 
 void SleepManager::OnEvent(const UiEvent& e) {
@@ -140,6 +150,8 @@ void SleepManager::OnEvent(const UiEvent& e) {
 }
 
 bool SleepManager::InUnboundGrace(int64_t now_ms) const {
+    if (!network_wake_enabled_.load())
+        return false;
     std::lock_guard<std::mutex> lock(unbound_mutex_);
     if (!unbound_state_.unbound)
         return false;
@@ -158,6 +170,8 @@ bool SleepManager::MarkUnboundIfNeeded(int64_t now_ms) {
 }
 
 uint32_t SleepManager::ComputeConfiguredNextWakeSec() const {
+    if (!network_wake_enabled_.load(std::memory_order_acquire))
+        return 0;
     return power_state::ComputeNextWakeSec();
 }
 
