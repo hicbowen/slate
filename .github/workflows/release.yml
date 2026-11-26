@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: slate-release
+  queue: max
   cancel-in-progress: false
 
 defaults:
@@ -59,14 +60,7 @@ jobs:
       - name: Validate release tag ordering
         env:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          set -euo pipefail
-
-          LATEST_TAG="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
-          if [ "$LATEST_TAG" != "$RELEASE_TAG" ]; then
-            echo "Release tag must be the newest vX.Y.Z tag before publishing the latest image. Latest tag is ${LATEST_TAG}, got ${RELEASE_TAG}." >&2
-            exit 1
-          fi
+        run: bash scripts/check-release-tag.sh "$RELEASE_TAG"
 
       - name: Validate repository versions
         env:
@@ -174,6 +168,11 @@ jobs:
             type=raw,value=latest
             type=raw,value=${{ env.SHORT_SHA }}
 
+      - name: Recheck release tag before pushing images
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: bash scripts/check-release-tag.sh "$RELEASE_TAG"
+
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -209,7 +208,7 @@ jobs:
           target: esp32s3
           path: 'firmware'
           command: >-
-            idf.py -D 'SDKCONFIG_DEFAULTS=${{ matrix.defaults }}' build &&
+            idf.py -D "SDKCONFIG_DEFAULTS=${{ matrix.defaults }}" build &&
             idf.py merge-bin -o slate-full.bin &&
             cp build/slate.bin build/slate-ota.bin
 

@@ -80,12 +80,12 @@ Slate（墨笺）是一个面向 400 × 300 黑白和四色墨水屏的开源相
 
 ## 部署
 
-Note4C 需要包含四色支持的服务端。尚未发布该版本时，可从当前源码执行 `docker build -t slate:note4c-v2 .`，并在本地 `compose.yml` 旁的 `.env` 里设定 `SLATE_IMAGE=slate:note4c-v2`。
+Note4C 需要包含四色支持的服务端。正式版发布前，使用本仓库的 `compose.yml`，执行 `docker build -t slate:note4c-v2 .`，并在同目录的 `.env` 中加入 `SLATE_IMAGE=slate:note4c-v2`。
 
-准备 compose 文件和密钥，然后启动：
+正式版发布后，从本仓库的 Release 下载 `compose.yml`，生成密钥并启动：
 
 ```bash
-curl -fLO https://github.com/qiujun8023/slate/releases/latest/download/compose.yml
+curl -fLO https://github.com/hicbowen/slate/releases/latest/download/compose.yml
 cat > .env <<EOF
 POSTGRES_PASSWORD=$(openssl rand -hex 32)
 JWT_SECRET=$(openssl rand -hex 64)
@@ -121,7 +121,7 @@ v0.1.x 用 MySQL，当前版本用 PostgreSQL，数据用一次性的 `slate imp
 docker compose down
 cp -a slate slate.bak && cp -a mysql mysql.bak            # 先备份
 mv compose.yml compose.v0.1.yml
-curl -fLO https://github.com/qiujun8023/slate/releases/latest/download/compose.yml
+curl -fLO https://github.com/hicbowen/slate/releases/latest/download/compose.yml
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 32)" >> .env  # .env 里原有的 JWT_SECRET 继续用
 mkdir -p postgres
 
