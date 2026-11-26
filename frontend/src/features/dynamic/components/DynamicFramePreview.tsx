@@ -1,24 +1,21 @@
 import { Spinner } from '@/components/ui/Spinner';
 import { FrameBitmapPreview } from '@/components/eink/FrameBitmapPreview';
-import type { FrameFormatT } from 'shared';
 
 export function DynamicFramePreview({
   data,
   pending,
   hasConfig,
   caption,
-  format = 'mono1',
 }: {
   data: ArrayBuffer | null;
   pending: boolean;
   hasConfig: boolean;
   caption?: string | null;
-  format?: FrameFormatT;
 }) {
   const showPlaceholder = !data;
   return (
     <div className="frame-preview-surface">
-      <FrameBitmapPreview data={data} caption={caption} format={format} />
+      <FrameBitmapPreview data={data} caption={caption} />
       {showPlaceholder && !pending && (
         <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
           <span className="font-serif italic text-[13px] text-stone-light">
@@ -42,7 +39,6 @@ export function SavedOrLiveDynamicFramePreview({
   livePending,
   hasConfig,
   caption,
-  format = 'mono1',
 }: {
   savedData?: ArrayBuffer;
   savedPending?: boolean;
@@ -50,7 +46,6 @@ export function SavedOrLiveDynamicFramePreview({
   livePending: boolean;
   hasConfig: boolean;
   caption?: string | null;
-  format?: FrameFormatT;
 }) {
   const displayData = liveData ?? savedData ?? null;
   const pending = livePending || (!liveData && Boolean(savedPending));
@@ -61,7 +56,6 @@ export function SavedOrLiveDynamicFramePreview({
       pending={pending}
       hasConfig={hasConfig}
       caption={caption}
-      format={format}
     />
   );
 }

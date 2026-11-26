@@ -12,7 +12,8 @@
 
 class ConfirmActionPage : public SettingsPageBase {
    public:
-    ConfirmActionPage(std::string name, std::string caption, std::string warning, bool dangerous = true);
+    ConfirmActionPage(std::string name, std::string caption, std::string warning,
+                      const char* danger_label = nullptr);
     ~ConfirmActionPage() override;
 
     const char* Name() const override {
@@ -29,7 +30,7 @@ class ConfirmActionPage : public SettingsPageBase {
     std::string name_;
     std::string caption_;
     std::string warning_;
-    bool        dangerous_ = true;
+    const char* danger_label_;
 };
 
 class VolumePage : public SettingsPageBase {
@@ -57,27 +58,6 @@ class VolumePage : public SettingsPageBase {
     int                  level_       = 0;
     bool                 dirty_       = false;
     std::vector<uint8_t> test_tone_;
-};
-
-class WifiSettingsPage : public SettingsPageBase {
-   public:
-    WifiSettingsPage();
-    ~WifiSettingsPage() override;
-
-    const char* Name() const override {
-        return "wifi_settings";
-    }
-    void OnEnter(SceneContext& ctx) override;
-    void OnExit(SceneContext& ctx) override;
-    void OnEvent(SceneContext& ctx, const UiEvent& e) override;
-
-   private:
-    void Redraw(SceneContext& ctx);
-
-    lv_obj_t* value_label_  = nullptr;
-    lv_obj_t* detail_label_ = nullptr;
-    bool      enabled_      = true;
-    bool      desired_      = true;
 };
 
 class DeviceInfoPage : public Scene {
@@ -113,24 +93,13 @@ class DeviceInfoPage : public Scene {
     std::string last_text_;
     std::string wifi_ssid_;
     std::string server_url_;
-    size_t      wifi_profile_count_ = 0;
-    bool        wifi_enabled_       = true;
-    char        mac_str_[18]        = {};
+    char        mac_str_[18] = {};
 };
 
 class RestartDevicePage : public ConfirmActionPage {
    public:
     RestartDevicePage();
     ~RestartDevicePage() override;
-
-   private:
-    void Confirm(SceneContext& ctx) override;
-};
-
-class WifiPortalPage : public ConfirmActionPage {
-   public:
-    WifiPortalPage();
-    ~WifiPortalPage() override;
 
    private:
     void Confirm(SceneContext& ctx) override;

@@ -7,7 +7,6 @@
 
 #include "bsp/config.h"
 #include "drivers/display/display_profile.h"
-#include "ui/frame_view.h"
 
 namespace cache::internal {
 
@@ -16,7 +15,7 @@ inline constexpr long kMaxAudioReadBytes    = AUDIO_MAX_PCM_BYTES;
 inline constexpr long kMaxStateJsonBytes    = 4 * 1024;
 inline constexpr long kMaxManifestJsonBytes = 64 * 1024;
 inline constexpr long kMaxFrameMetaBytes    = 2 * 1024;
-inline constexpr long kMaxFrameImageBytes   = display_profile::kGrayFrameBytes;
+inline constexpr long kMaxFrameImageBytes   = display_profile::kMaxWireFrameBytes;
 
 bool DirEnsure(const std::string& dir);
 bool WriteAll(const std::string& path, const void* data, size_t len);

@@ -4,32 +4,33 @@
 //   const { sensors, currentOrder, orderedItems, onDragEnd } = useDndOrder(
 //     items,
 //     (id) => id,            // 取拖拽 id 的函数(默认就是 String(item))
-//     (newOrder, { commit, rollback }) =>
-//       mutate({ order: newOrder }, { onSuccess: commit, onError: rollback }),
+//     (newOrder) => mutateAsync({ order: newOrder }), // reject 表示保存失败
 //   );
 //
 // 本地只负责拖拽后的即时顺序和失败回滚；最终顺序由调用方 mutation 后 invalidate 的
-// React Query 数据回填。
+// React Query 数据回填。保存串行执行：请求进行中再拖拽时只记下最新顺序，等当前请求
+// 结束后再提交，避免乱序到达的旧顺序最后写入；保存期间也不用回填数据覆盖本地顺序。
+// 队列靠 onPersist 返回的 Promise 推进，组件卸载后排队的顺序照样提交；每次拖拽固定
+// 当时的 onPersist，排队的顺序不会提交到别的资源。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove } from '@dnd-kit/sortable';
 
-interface PersistControls {
-  commit: () => void;
-  rollback: () => void;
-}
+type Persist = (newOrder: string[]) => Promise<unknown>;
 
 export function useDndOrder<T>(
   items: T[] | undefined,
   getId: (item: T) => string,
-  onPersist: (newOrder: string[], controls: PersistControls) => void
+  onPersist: Persist
 ) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const [currentOrder, setCurrentOrderState] = useState<string[]>([]);
   const currentOrderRef = useRef<string[]>([]);
-  const persistSeqRef = useRef(0);
+  const savingRef = useRef(false);
+  const pendingRef = useRef<{ order: string[]; save: Persist } | null>(null);
+  const confirmedRef = useRef<string[]>([]);
 
   const setCurrentOrder = useCallback((resolved: string[]) => {
     currentOrderRef.current = resolved;
@@ -37,8 +38,38 @@ export function useDndOrder<T>(
   }, []);
 
   useEffect(() => {
-    setCurrentOrder(items?.map(getId) ?? []);
+    const order = items?.map(getId) ?? [];
+    confirmedRef.current = order;
+    if (!savingRef.current) setCurrentOrder(order);
   }, [getId, items, setCurrentOrder]);
+
+  const onPersistRef = useRef(onPersist);
+  useEffect(() => {
+    onPersistRef.current = onPersist;
+  }, [onPersist]);
+
+  const persist = useCallback(
+    function persistOrder(order: string[], save: Persist) {
+      if (savingRef.current) {
+        pendingRef.current = { order, save };
+        return;
+      }
+      savingRef.current = true;
+      const settle = (saved: boolean) => {
+        savingRef.current = false;
+        if (saved) confirmedRef.current = order;
+        const next = pendingRef.current;
+        pendingRef.current = null;
+        if (next) persistOrder(next.order, next.save);
+        else setCurrentOrder(saved ? order : confirmedRef.current);
+      };
+      save(order).then(
+        () => settle(true),
+        () => settle(false)
+      );
+    },
+    [setCurrentOrder]
+  );
 
   const orderedItems = useMemo(() => {
     const itemMap = new Map((items ?? []).map((item) => [getId(item), item]));
@@ -60,20 +91,11 @@ export function useDndOrder<T>(
       const oldPos = order.indexOf(active.id as string);
       const newPos = order.indexOf(over.id as string);
       if (oldPos < 0 || newPos < 0) return;
-      const previousOrder = [...order];
       const newOrder = arrayMove(order, oldPos, newPos);
-      const persistSeq = ++persistSeqRef.current;
       setCurrentOrder(newOrder);
-      onPersist(newOrder, {
-        commit: () => {
-          if (persistSeq === persistSeqRef.current) setCurrentOrder(newOrder);
-        },
-        rollback: () => {
-          if (persistSeq === persistSeqRef.current) setCurrentOrder(previousOrder);
-        },
-      });
+      persist(newOrder, onPersistRef.current);
     },
-    [onPersist, setCurrentOrder]
+    [persist, setCurrentOrder]
   );
 
   return { sensors, currentOrder, orderedItems, setCurrentOrder, onDragEnd };

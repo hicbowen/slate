@@ -7,11 +7,11 @@ import {
   CalendarDays,
   CloudSun,
   Flame,
-  Hourglass,
+  Timer,
   Type as TypeIcon,
   type LucideIcon,
 } from 'lucide-react';
-import type { DynamicTypeT } from 'shared';
+import type { DynamicType } from '@/api';
 
 export interface DynamicTypeMeta {
   label: string;
@@ -41,11 +41,11 @@ export const DYNAMIC_TYPE_META = {
   },
   countdown: {
     label: '倒数日',
-    hint: '目标 · 日期 · 剩余天数',
-    description: '设置一个目标日期，每天显示剩余自然日。',
+    hint: '目标日期 · 剩余天数',
+    description: '按当地日期显示剩余天数，每天刷新。',
     hasConfigurableParams: true,
     supportsAudio: false,
-    Icon: Hourglass,
+    Icon: Timer,
   },
   weather: {
     label: '天气',
@@ -103,7 +103,7 @@ export const DYNAMIC_TYPE_META = {
     supportsAudio: false,
     Icon: Flame,
   },
-} satisfies Record<DynamicTypeT, DynamicTypeMeta>;
+} satisfies Record<DynamicType, DynamicTypeMeta>;
 
 export const DYNAMIC_TYPE_ORDER = [
   'daily_calendar',
@@ -116,4 +116,4 @@ export const DYNAMIC_TYPE_ORDER = [
   'hot_list',
   'dashboard',
   'font_test',
-] as const satisfies readonly DynamicTypeT[];
+] as const satisfies readonly DynamicType[];

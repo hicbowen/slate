@@ -1,9 +1,8 @@
-import { isAudioDynamicConfig, type DynamicConfigT, type DynamicTypeT } from 'shared';
+import { isAudioDynamicConfig, type DynamicConfig, type DynamicType } from '@/api';
 import { ErrorBoundary } from '@/components/feedback/ErrorBoundary';
 import { FormSection } from '@/components/ui/FormSection';
 import { Input } from '@/components/ui/Input';
 import { DashboardConfigPanel } from '@/features/dynamic/components/config/DashboardConfig';
-import { CountdownConfigPanel } from '@/features/dynamic/components/config/CountdownConfig';
 import { DynamicAudioSection } from './config/DynamicAudioSection';
 import { DynamicRefreshSettings } from './config/RefreshSettings';
 import { FontTestConfigPanel } from './config/FontTestConfig';
@@ -25,11 +24,11 @@ export function DynamicContentFields({
   onDashboardDataChange,
   dashboardDataLabel,
 }: {
-  type: DynamicTypeT;
-  config: DynamicConfigT;
+  type: DynamicType;
+  config: DynamicConfig;
   frameName: string;
   onFrameNameChange: (value: string) => void;
-  onConfigChange: (config: DynamicConfigT) => void;
+  onConfigChange: (config: DynamicConfig) => void;
   showParams: boolean;
   showAudio: boolean;
   contentId?: string;
@@ -46,7 +45,7 @@ export function DynamicContentFields({
             maxLength={64}
             value={frameName}
             onChange={(event) => onFrameNameChange(event.target.value)}
-            placeholder="如：AI 使用统计"
+            placeholder="如：AI 限额监控"
           />
         </FormSection>
       )}
@@ -90,8 +89,8 @@ function DynamicConfigFields({
   onDashboardDataChange,
   dashboardDataLabel,
 }: {
-  config: DynamicConfigT;
-  onChange: (config: DynamicConfigT) => void;
+  config: DynamicConfig;
+  onChange: (config: DynamicConfig) => void;
   contentId?: string;
   dashboardData?: Record<string, unknown>;
   onDashboardDataChange?: (data: Record<string, unknown>) => void;
@@ -102,7 +101,27 @@ function DynamicConfigFields({
     case 'month_calendar':
       return null;
     case 'countdown':
-      return <CountdownConfigPanel config={config} onChange={onChange} />;
+      return (
+        <div className="space-y-5">
+          <Input
+            type="text"
+            label="目标"
+            value={config.goal ?? ''}
+            maxLength={32}
+            onChange={(event) => onChange({ ...config, goal: event.target.value })}
+            placeholder="如：期末考试周"
+            required
+          />
+          <Input
+            type="date"
+            label="目标日期"
+            value={config.targetDate ?? ''}
+            onChange={(event) => onChange({ ...config, targetDate: event.target.value })}
+            hint="按当地日期计算，到期当天及之后显示 0 天。"
+            required
+          />
+        </div>
+      );
     case 'weather':
       return <WeatherConfigPanel config={config} onChange={onChange} />;
     case 'history_today':

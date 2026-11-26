@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 
 #include "network/wifi.h"
 
@@ -15,6 +16,18 @@ constexpr uint32_t kBackoffSec[]       = {10, 20, 40, 80, 120, 120};
 constexpr size_t   kBackoffSize        = sizeof(kBackoffSec) / sizeof(kBackoffSec[0]);
 constexpr uint16_t kMaxSlowScanRecords = 20;
 
+size_t BoundedSsidLen(const uint8_t ssid[32]) {
+    size_t len = 0;
+    while (len < 32 && ssid[len] != 0)
+        ++len;
+    return len;
+}
+
+bool SsidEquals(const uint8_t lhs[32], const uint8_t rhs[32]) {
+    const size_t lhs_len = BoundedSsidLen(lhs);
+    const size_t rhs_len = BoundedSsidLen(rhs);
+    return lhs_len == rhs_len && std::memcmp(lhs, rhs, lhs_len) == 0;
+}
 }  // namespace
 
 WifiReconnectManager::WifiReconnectManager(Wifi* owner) : owner_(owner) {
@@ -105,14 +118,43 @@ void WifiReconnectManager::DoSlowScanReconnect() {
 void WifiReconnectManager::HandleSlowScanResult() {
     uint16_t ap_num = 0;
     esp_wifi_scan_get_ap_num(&ap_num);
-    ap_num = std::min<uint16_t>(ap_num, kMaxSlowScanRecords);
-    std::array<wifi_ap_record_t, kMaxSlowScanRecords> records{};
-    if (ap_num > 0)
-        esp_wifi_scan_get_ap_records(&ap_num, records.data());
-    if (!owner_->ConfigureBestKnownNetwork(records.data(), ap_num, true)) {
+    if (ap_num == 0) {
         Schedule();
         return;
     }
+    ap_num = std::min<uint16_t>(ap_num, kMaxSlowScanRecords);
+    std::array<wifi_ap_record_t, kMaxSlowScanRecords> records{};
+    esp_wifi_scan_get_ap_records(&ap_num, records.data());
+    std::sort(records.begin(), records.begin() + ap_num,
+              [](const wifi_ap_record_t& a, const wifi_ap_record_t& b) { return a.rssi > b.rssi; });
+
+    wifi_config_t wc = {};
+    if (esp_wifi_get_config(WIFI_IF_STA, &wc) != ESP_OK) {
+        ESP_LOGW(kTag, "slow scan config read failed");
+        Schedule();
+        return;
+    }
+    if (wc.sta.ssid[0] == '\0') {
+        ESP_LOGW(kTag, "slow scan aborted reason=target_ssid_missing");
+        return;
+    }
+    const wifi_ap_record_t* match = nullptr;
+    for (uint16_t i = 0; i < ap_num; ++i) {
+        if (SsidEquals(records[i].ssid, wc.sta.ssid)) {
+            match = &records[i];
+            break;
+        }
+    }
+
+    if (!match) {
+        Schedule();
+        return;
+    }
+
+    wc.sta.bssid_set = 1;
+    std::memcpy(wc.sta.bssid, match->bssid, 6);
+    wc.sta.channel = match->primary;
+    esp_wifi_set_config(WIFI_IF_STA, &wc);
 
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {

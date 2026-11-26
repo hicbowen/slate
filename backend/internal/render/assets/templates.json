@@ -1,0 +1,208 @@
+{
+ "system": [
+  {
+   "id": "ai_quota_monitor",
+   "label": "AI 限额监控",
+   "description": "两个限额窗口的使用率与重置时间，可用于 Claude Code、Codex 等服务；窗口名称、状态和时间文案由推送数据提供。",
+   "template": {
+    "version": 1,
+    "name": "AI 限额监控",
+    "blocks": [
+     {
+      "x": 20,
+      "y": 44,
+      "w": 110,
+      "h": 52,
+      "type": "metric",
+      "label": "服务",
+      "value": "{service_label}"
+     },
+     {
+      "x": 145,
+      "y": 44,
+      "w": 110,
+      "h": 52,
+      "type": "metric",
+      "label": "套餐",
+      "value": "{plan_label}"
+     },
+     {
+      "x": 270,
+      "y": 44,
+      "w": 110,
+      "h": 52,
+      "type": "metric",
+      "label": "状态",
+      "value": "{status_label}"
+     },
+     {
+      "x": 20,
+      "y": 120,
+      "w": 360,
+      "h": 34,
+      "type": "progress",
+      "label": "{primary_window_label}",
+      "valueText": "{primary_used_percent|int}%",
+      "percentage": "{primary_used_percent}",
+      "labelFontSize": 16,
+      "valueFontSize": 16,
+      "barHeight": 14,
+      "warningAt": 80,
+      "criticalAt": 100
+     },
+     {
+      "x": 20,
+      "y": 162,
+      "w": 360,
+      "h": 34,
+      "type": "progress",
+      "label": "{secondary_window_label}",
+      "valueText": "{secondary_used_percent|int}%",
+      "percentage": "{secondary_used_percent}",
+      "labelFontSize": 16,
+      "valueFontSize": 16,
+      "barHeight": 14,
+      "warningAt": 80,
+      "criticalAt": 100
+     },
+     {
+      "type": "line",
+      "x1": 20,
+      "y1": 210,
+      "x2": 380,
+      "y2": 210,
+      "style": "dashed"
+     },
+     {
+      "x": 20,
+      "y": 228,
+      "w": 110,
+      "h": 52,
+      "type": "metric",
+      "label": "{primary_window_label}重置",
+      "value": "{primary_reset_at_label}"
+     },
+     {
+      "x": 145,
+      "y": 228,
+      "w": 110,
+      "h": 52,
+      "type": "metric",
+      "label": "{secondary_window_label}重置",
+      "value": "{secondary_reset_at_label}"
+     },
+     {
+      "x": 270,
+      "y": 228,
+      "w": 110,
+      "h": 52,
+      "type": "metric",
+      "label": "更新",
+      "value": "{updated_label}"
+     }
+    ]
+   }
+  }
+ ],
+ "starter": {
+  "version": 1,
+  "name": "自定义模板",
+  "blocks": [
+   {
+    "x": 20,
+    "y": 34,
+    "w": 170,
+    "h": 62,
+    "type": "metric",
+    "label": "{primary_label}",
+    "value": "{primary_value}",
+    "sparkline": "{primary_trend}"
+   },
+   {
+    "x": 210,
+    "y": 34,
+    "w": 170,
+    "h": 62,
+    "type": "metric",
+    "label": "{secondary_label}",
+    "value": "{secondary_value}"
+   },
+   {
+    "x": 20,
+    "y": 106,
+    "w": 170,
+    "h": 62,
+    "type": "metric",
+    "label": "{third_label}",
+    "value": "{third_value}"
+   },
+   {
+    "x": 210,
+    "y": 106,
+    "w": 170,
+    "h": 62,
+    "type": "metric",
+    "label": "{fourth_label}",
+    "value": "{fourth_value}"
+   },
+   {
+    "type": "line",
+    "x1": 20,
+    "y1": 184,
+    "x2": 380,
+    "y2": 184,
+    "style": "dashed"
+   },
+   {
+    "x": 20,
+    "y": 198,
+    "w": 360,
+    "h": 24,
+    "type": "progress",
+    "label": "{primary_progress_label}",
+    "valueText": "{primary_progress_text}",
+    "percentage": "{primary_progress_percent}",
+    "labelFontSize": 12,
+    "valueFontSize": 12,
+    "barHeight": 9
+   },
+   {
+    "x": 20,
+    "y": 228,
+    "w": 360,
+    "h": 24,
+    "type": "progress",
+    "label": "{secondary_progress_label}",
+    "valueText": "{secondary_progress_text}",
+    "percentage": "{secondary_progress_percent}",
+    "labelFontSize": 12,
+    "valueFontSize": 12,
+    "barHeight": 9
+   },
+   {
+    "x": 20,
+    "y": 270,
+    "w": 170,
+    "h": 14,
+    "type": "text",
+    "value": "{footer_left}",
+    "fontSize": 12,
+    "align": "left",
+    "color": "black",
+    "maxLines": 1
+   },
+   {
+    "x": 210,
+    "y": 270,
+    "w": 170,
+    "h": 14,
+    "type": "text",
+    "value": "{footer_right}",
+    "fontSize": 12,
+    "align": "right",
+    "color": "black",
+    "maxLines": 1
+   }
+  ]
+ }
+}

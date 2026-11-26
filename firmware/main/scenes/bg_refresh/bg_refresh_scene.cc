@@ -11,12 +11,12 @@
 #include <new>
 #include <vector>
 
-#include "drivers/display/display_profile.h"
 #include "drivers/display/epd_ssd1683.h"
 #include "drivers/display/framebuffer_ops.h"
 #include "events/event_bus.h"
 #include "power/power_state.h"
 #include "storage/cache/cache.h"
+#include "ui/empty_group_label.h"
 #include "ui/frame_view.h"
 #include "ui/status_bar.h"
 #include "ui/theme.h"
@@ -28,7 +28,7 @@ constexpr int  kBpr   = display_profile::kBytesPerRow;
 // 后台刷新整体硬截止：从进场到完成的总时长上限。WiFi 连接 + poll + 拉帧 + EPD 刷新
 // 都算在内。超时直接投 kBgRefreshDone 回睡，不再依赖 10min idle Tick 兜底，封住
 // 「sync 卡住 → 持续亮屏连网耗电」的窗口。
-constexpr int kBgRefreshDeadlineMs = display_profile::kFourColor ? 150'000 : 40'000;
+constexpr int kBgRefreshDeadlineMs = display_profile::kFourColor ? 150'000 : 75'000;
 
 void PostBgRefreshDone() {
     evt::PostSimple(UiEventKind::kBgRefreshDone);
@@ -49,8 +49,11 @@ void WatcherEntry(void* arg) {
     std::unique_ptr<WatcherContext> ctx(static_cast<WatcherContext*>(arg));
     auto*                           epd        = ctx ? ctx->epd : nullptr;
     constexpr int                   kTimeoutMs = display_profile::kRefreshIdleTimeoutMs;
-    if (epd)
-        epd->WaitForRefreshIdle(kTimeoutMs);
+    // 只有确认刷新完成才清待重绘标记;超时则保留,下次唤醒继续全刷补画。
+    if (epd && epd->WaitForRefreshIdle(kTimeoutMs))
+        power_state::SetScreenRedrawPending(false);
+    else if (epd)
+        ESP_LOGW(kTag, "refresh wait timeout timeout_ms=%d action=keep_redraw_pending", kTimeoutMs);
     auto done_posted = ctx ? ctx->done_posted : std::shared_ptr<std::atomic<bool>>();
     PostBgRefreshDoneOnce(done_posted);
     vTaskDelete(nullptr);
@@ -89,7 +92,11 @@ BgRefreshScene::~BgRefreshScene() = default;
 
 void BgRefreshScene::OnEnter(SceneContext& ctx) {
     done_posted_->store(false, std::memory_order_release);
-    previous_screen_seeded_ = SeedPreviousFrame(ctx);
+    // 待重绘时缓存可能已不是屏幕上的画面,不能拿它当旧画面,后面直接全刷。
+    redraw_pending_         = power_state::ScreenRedrawPending();
+    if (redraw_pending_)
+        power_state::RecordRedrawAttempt();
+    previous_screen_seeded_ = !redraw_pending_ && SeedPreviousFrame(ctx);
     state_                  = State::kWaiting;
     StartDeadlineWatchdog();
 }
@@ -124,12 +131,6 @@ void BgRefreshScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
         return;
     }
 
-    if (!previous_screen_seeded_) {
-        ESP_LOGW(kTag, "render skipped reason=previous_seed_incomplete");
-        Finish();
-        return;
-    }
-
     state_ = State::kRendering;
     if (!RenderChangedFrame(ctx)) {
         Finish();
@@ -148,8 +149,8 @@ bool BgRefreshScene::SeedPreviousFrame(SceneContext& ctx) {
     }
 
     std::string gid;
-    std::string etag;
-    if (!cache::ReadStateMeta(gid, etag) || gid.empty()) {
+    std::string manifest_version;
+    if (!cache::ReadStateMeta(gid, manifest_version) || gid.empty()) {
         ESP_LOGW(kTag, "seed skipped reason=cached_group_missing");
         return false;
     }
@@ -166,11 +167,6 @@ bool BgRefreshScene::SeedPreviousFrame(SceneContext& ctx) {
         return false;
     }
 
-    cache::FrameMeta meta;
-    if (!cache::ReadFrameMeta(gid, seq, meta) || meta.image_format == display_profile::kGrayFormat) {
-        ESP_LOGW(kTag, "seed skipped reason=non_mono_frame seq=%d", seq);
-        return false;
-    }
     std::vector<uint8_t> raw;
     if (!cache::ReadFrameImage(gid, seq, raw) || raw.size() != static_cast<size_t>(FrameView::kRawBytes)) {
         ESP_LOGW(kTag, "seed skipped reason=image_miss seq=%d bytes=%u", seq, static_cast<unsigned>(raw.size()));
@@ -180,21 +176,22 @@ bool BgRefreshScene::SeedPreviousFrame(SceneContext& ctx) {
     const int y = theme::kStatusBarHeight;
     const int h = FrameView::kHeight - y;
     ctx.epd->SeedPreviousRawFrame(0, 0, epd::kStatusBarSnapshotWidth, epd::kStatusBarSnapshotHeight, status_bar.data(),
-                                  status_bar.size());
+                                 status_bar.size());
     ctx.epd->SeedPreviousRawFrame(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
     return true;
 }
 
 bool BgRefreshScene::ResolveCurrentFrame(std::string& gid, int& seq, int& content_count) {
-    std::string etag;
-    if (!cache::ReadStateMeta(gid, etag) || gid.empty()) {
-        ESP_LOGW(kTag, "render skipped reason=cached_group_missing");
-        return false;
-    }
-    if (!cache::ReadManifestContentCount(gid, content_count) || content_count <= 0) {
+    std::string manifest_version;
+    content_count = 0;
+    if (!cache::ReadStateMeta(gid, manifest_version) || gid.empty())
+        return true;  // 未选组,画空状态
+    if (!cache::ReadManifestContentCount(gid, content_count)) {
         ESP_LOGW(kTag, "render skipped reason=manifest_missing");
         return false;
     }
+    if (content_count <= 0)
+        return true;
 
     seq = power_state::GetCurrentFrameSeq();
     if (seq < 0 || seq >= content_count) {
@@ -212,19 +209,17 @@ bool BgRefreshScene::RenderChangedFrame(SceneContext& ctx) {
     int         content_count = 0;
     if (!ResolveCurrentFrame(gid, seq, content_count))
         return false;
+    if (content_count <= 0)
+        return RenderEmptyState(ctx);
 
-    cache::FrameMeta meta;
-    if (!cache::ReadFrameMeta(gid, seq, meta)) {
-        ESP_LOGW(kTag, "render skipped reason=meta_miss seq=%d", seq);
-        return false;
-    }
     std::vector<uint8_t> raw;
-    const size_t expected = static_cast<size_t>(display_profile::FrameBytesForFormat(meta.image_format));
-    if (!cache::ReadFrameImage(gid, seq, raw) || raw.size() != expected) {
+    if (!cache::ReadFrameImage(gid, seq, raw)) {
         ESP_LOGW(kTag, "render skipped reason=image_miss seq=%d bytes=%u", seq, static_cast<unsigned>(raw.size()));
         return false;
     }
 
+    cache::FrameMeta meta;
+    cache::ReadFrameMeta(gid, seq, meta);
     UpdateFrameSchedule(seq, meta);
 
     if (!ctx.epd->Lock(2000)) {
@@ -240,19 +235,47 @@ bool BgRefreshScene::RenderChangedFrame(SceneContext& ctx) {
     RefreshStatusBarFromSensors(ctx, *status_bar_);
     lv_refr_now(NULL);
 
-    // Background refresh uses LVGL only for the status bar. The frame body is
-    // written as raw profile data so it exactly matches the cached screen format.
-    if (!display_profile::kFourColor && meta.image_format == display_profile::kGrayFormat) {
-        ctx.epd->RequestGray16FullRefresh(raw.data(), raw.size());
-    } else {
-        const int y = theme::kStatusBarHeight;
-        const int h = FrameView::kHeight - y;
-        ctx.epd->WriteRawFrame(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
+    if (display_profile::IsGrayFrameSize(raw.size())) {
+        const bool queued = ctx.epd->RequestGray16FullRefresh(raw.data(), raw.size());
+        ctx.epd->Unlock();
+        if (queued)
+            StartWatcher(ctx.epd);
+        return queued;
     }
-    if (display_profile::kFourColor)
-        ctx.epd->RequestUrgentFullRefresh();
-    else if (meta.image_format != display_profile::kGrayFormat)
+
+    // Background refresh uses LVGL only for the status bar. The frame body is
+    // written in the panel frame format so it exactly matches the cached screen format.
+    const int y = theme::kStatusBarHeight;
+    const int h = FrameView::kHeight - y;
+    ctx.epd->WriteRawFrame(0, y, FrameView::kWidth, h, raw.data() + y * kBpr, h * kBpr);
+    // 旧画面未知(待重绘或快照缺失)时局刷的差异不可信,零差异还会被直接跳过,只能全刷。
+    if (previous_screen_seeded_ && !display_profile::kFourColor) {
         ctx.epd->RequestUrgentPartialRefresh();
+    } else {
+        ESP_LOGI(kTag, "render full refresh redraw_pending=%d", redraw_pending_ ? 1 : 0);
+        ctx.epd->RequestUrgentFullRefresh();
+    }
+    ctx.epd->Unlock();
+
+    StartWatcher(ctx.epd);
+    return true;
+}
+
+// 组被删或组内容清空:画和前台一致的空状态,全刷后再休眠;没有动态帧,不再定时唤醒。
+bool BgRefreshScene::RenderEmptyState(SceneContext& ctx) {
+    power_state::ClearCurrentFrame();
+    if (!ctx.epd->Lock(2000)) {
+        ESP_LOGW(kTag, "render empty failed reason=epd_lock_timeout");
+        return false;
+    }
+    root_ = CreateFullscreenRoot();
+    CreateEmptyGroupLabel(root_);
+    status_bar_ = std::make_unique<StatusBar>(root_);
+    status_bar_->SetCaption("");
+    RefreshStatusBarFromSensors(ctx, *status_bar_);
+    lv_refr_now(NULL);
+    ESP_LOGI(kTag, "render empty full refresh");
+    ctx.epd->RequestUrgentFullRefresh();
     ctx.epd->Unlock();
 
     StartWatcher(ctx.epd);

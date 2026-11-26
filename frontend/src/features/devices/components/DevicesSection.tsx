@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Cpu, MonitorSmartphone } from 'lucide-react';
-import type { DeviceSummaryT, GroupSummaryT } from 'shared';
+import type { Device, Group } from '@/api';
 import { Section } from '@/components/layout/Section';
 import { useToast } from '@/components/feedback/toast-context';
 import { Button } from '@/components/ui/Button';
@@ -17,8 +17,8 @@ import { getApiErrorMessage } from '@/lib/api-errors';
 import { appRoutes } from '@/app/routes';
 
 interface DevicesSectionProps {
-  devices: DeviceSummaryT[] | undefined;
-  groups: GroupSummaryT[] | undefined;
+  devices: Device[] | undefined;
+  groups: Group[] | undefined;
   isPending: boolean;
 }
 
@@ -40,9 +40,7 @@ export function DevicesSection({ devices, groups, isPending }: DevicesSectionPro
   }, [navigate]);
 
   const renderDevice = useCallback(
-    (device: DeviceSummaryT) => (
-      <DeviceCard device={device} groups={groups} onOpen={openDeviceById} />
-    ),
+    (device: Device) => <DeviceCard device={device} groups={groups} onOpen={openDeviceById} />,
     [groups, openDeviceById]
   );
 
@@ -51,17 +49,11 @@ export function DevicesSection({ devices, groups, isPending }: DevicesSectionPro
   const dnd = useDndOrder(
     devices,
     useCallback((device) => device.id, []),
-    (newOrder, { commit, rollback }) =>
-      reorderDevices.mutate(
-        { order: newOrder },
-        {
-          onSuccess: commit,
-          onError: (err) => {
-            rollback();
-            toast.error('排序保存失败', getApiErrorMessage(err));
-          },
-        }
-      )
+    (newOrder) =>
+      reorderDevices.mutateAsync({ order: newOrder }).catch((err: unknown) => {
+        toast.error('排序保存失败', getApiErrorMessage(err));
+        throw err;
+      })
   );
 
   return (

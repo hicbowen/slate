@@ -37,6 +37,7 @@ class StatusBar {
 
     std::string shown_wifi_;
     std::string shown_battery_;
+    bool shown_battery_low_ = false;
     // 直接缓存最终文本(可能为空,空 = 充电中只剩图标),避免再用 sentinel int 区分
     // "未知"/"隐藏"/"具体百分比"。
     std::string shown_pct_text_;

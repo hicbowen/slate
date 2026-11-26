@@ -22,7 +22,6 @@ class SplashScene : public Scene {
         kProvisioning,
         kWifiConnecting,
         kWifiFailed,
-        kWifiDisabled,
         kSntp,
         kRegistering,
         kServerUnreachable,

@@ -1,23 +1,23 @@
 import { Image as ImageIcon } from 'lucide-react';
-import type { DynamicTypeT } from 'shared';
+import type { DynamicType } from '@/api';
 import {
   DYNAMIC_TYPE_META,
   DYNAMIC_TYPE_ORDER,
   type DynamicTypeMeta,
 } from '@/features/dynamic/model/type-meta';
 
-export type AllContentType = 'image' | DynamicTypeT;
+export type AllContentType = 'image' | DynamicType;
 
 type TypeMeta = DynamicTypeMeta;
 
 const DYNAMIC_CONTENT_TYPE_META = Object.fromEntries(
   DYNAMIC_TYPE_ORDER.map((type) => [type, DYNAMIC_TYPE_META[type]])
-) as Record<DynamicTypeT, TypeMeta>;
+) as Record<DynamicType, TypeMeta>;
 
 export const TYPE_META: Record<AllContentType, TypeMeta> = {
   image: {
     label: '图片',
-    hint: '上传图片，自动转 1bpp',
+    hint: '上传图片，生成黑白、16 灰和四色帧',
     description: '上传图片并配置抖动 / 阈值；可附音频或 TTS。',
     hasConfigurableParams: true,
     supportsAudio: true,

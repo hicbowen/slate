@@ -46,9 +46,9 @@ class FrameScene : public Scene {
     std::string gid_;
     int         content_count_           = 0;
     int         idx_                     = 0;
+    bool        current_gray_            = false;
     bool        first_loaded_            = false;
     bool        first_load_full_refresh_ = true;
-    bool        current_gray_            = false;
     std::string cached_status_bar_text_;
 
     lv_obj_t*                  root_        = nullptr;

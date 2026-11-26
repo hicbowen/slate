@@ -1,85 +1,75 @@
 import { useCallback, useRef, useState } from 'react';
-import {
-  DEFAULT_IMAGE_RENDER_PRESET,
-  type ContentDetailT,
-  type FrameFormatT,
-  type ImageDisplayModeT,
-  type ImageRenderPreset,
-} from 'shared';
+import { DisplayModeMono, type Content } from '@/api';
+import type { ImageRenderPreset } from '@/lib/eink/render-preset';
+import { DEFAULT_DITHER_MODE, type DitherMode } from '@/lib/eink/dither';
 import { useAudioFormState } from './useAudioFormState';
 import { useCropState } from './useCropState';
 import { useImageFormSubmit } from './useImageFormSubmit';
 
-export function useImageContentForm(content?: ContentDetailT) {
+/** Default threshold for the threshold dither mode. */
+const BW_THRESHOLD_DEFAULT = 128;
+
+export function useImageContentForm(content?: Content) {
   const isEdit = !!content;
+  const initialDisplayMode = content?.displayMode ?? DisplayModeMono;
+  const [displayMode, setDisplayMode] = useState(initialDisplayMode);
+  const displayModeChanged = displayMode !== initialDisplayMode;
+  const hasSavedGray = !!content?.grayImageHash;
   const previewRef = useRef<HTMLCanvasElement>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const audio = useAudioFormState(content);
-  const [renderPreset, setRenderPreset] = useState<ImageRenderPreset>(
-    content?.render_preset ?? DEFAULT_IMAGE_RENDER_PRESET
-  );
-  const [previewFormat, setPreviewFormat] = useState<FrameFormatT>(
-    content?.display_mode === 'gray16' ? 'gray4' : 'mono1'
-  );
-  const [displayMode, setDisplayModeState] = useState<ImageDisplayModeT>(
-    content?.display_mode ?? 'mono1'
-  );
-  const [frameName, setFrameName] = useState(content?.frame_name ?? '');
+  const [threshold, setThreshold] = useState(BW_THRESHOLD_DEFAULT);
+  const [renderPreset, setImageRenderPreset] = useState<ImageRenderPreset>('auto');
+  const [mode, setMode] = useState<DitherMode>(DEFAULT_DITHER_MODE);
+  const [frameName, setFrameName] = useState(content?.frameName ?? '');
   const { scale, setScale, offset, setOffset, resetCrop } = useCropState();
-  const frameNameChanged = isEdit && frameName !== (content.frame_name ?? '');
-  const displayModeChanged = isEdit && displayMode !== content.display_mode;
-  const renderPresetChanged = isEdit && renderPreset !== content.render_preset;
+  const frameNameChanged = isEdit && frameName !== (content.frameName ?? '');
   const trimmedTtsText = audio.ttsText.trim();
-  const existingTtsText = content?.audio_text?.trim() ?? '';
-  const hasExistingTts = isEdit && content?.audio_source === 'tts';
+  const existingTtsText = content?.audio?.text?.trim() ?? '';
+  const hasExistingTts = isEdit && content?.audio?.source === 'tts';
   const wantsTts =
     audio.audioMode === 'tts' &&
     trimmedTtsText.length > 0 &&
     (!hasExistingTts ||
-      content?.audio_status === 'failed' ||
+      content?.audio?.status === 'failed' ||
       trimmedTtsText !== existingTtsText ||
-      audio.ttsVoice !== content?.audio_voice);
-  const hasFilePatch = !!imageFile || !!audio.audioFile;
-  const hasContentPatch =
-    hasFilePatch || frameNameChanged || displayModeChanged || renderPresetChanged;
+      audio.ttsVoice !== content?.audio?.voice);
+  const hasUploadPatch = !!imageFile || !!audio.audioFile || displayModeChanged;
+  const hasContentPatch = hasUploadPatch || frameNameChanged;
   const canCreate = !!imageFile && (audio.audioMode !== 'tts' || trimmedTtsText.length > 0);
-  const canApplyPreset = !renderPresetChanged || !!imageFile || !!content?.source_available;
   const canEdit =
-    (hasContentPatch || wantsTts) &&
-    canApplyPreset &&
-    (audio.audioMode !== 'tts' || trimmedTtsText.length > 0);
+    (hasContentPatch || wantsTts) && (audio.audioMode !== 'tts' || trimmedTtsText.length > 0);
 
   const onImagePick = useCallback(
     (file: File | null) => {
       setImageFile(file);
+      if (!file && !hasSavedGray) setDisplayMode(DisplayModeMono);
       resetCrop();
     },
-    [resetCrop]
+    [hasSavedGray, resetCrop]
   );
-
-  const setDisplayMode = useCallback((value: ImageDisplayModeT) => {
-    setDisplayModeState(value);
-    setPreviewFormat(value === 'gray16' ? 'gray4' : 'mono1');
-  }, []);
 
   const reset = useCallback(() => {
     setImageFile(null);
     audio.resetAudio();
-    setRenderPreset(DEFAULT_IMAGE_RENDER_PRESET);
-    setPreviewFormat('mono1');
-    setDisplayModeState('mono1');
+    setThreshold(BW_THRESHOLD_DEFAULT);
+    setMode(DEFAULT_DITHER_MODE);
+    setImageRenderPreset('auto');
+    setDisplayMode(initialDisplayMode);
     setFrameName('');
     resetCrop();
-  }, [audio, resetCrop]);
+  }, [audio, initialDisplayMode, resetCrop]);
 
   const buildFormData = useImageFormSubmit({
     imageFile,
     audioFile: audio.audioFile,
+    displayMode: displayModeChanged ? displayMode : undefined,
     frameName,
+    threshold,
     renderPreset,
+    mode,
     scale,
     offset,
-    displayMode,
   });
 
   return {
@@ -101,21 +91,13 @@ export function useImageContentForm(content?: ContentDetailT) {
       trimmedTtsText,
       wantsTts,
     },
-    render: {
-      preset: renderPreset,
-      setPreset: setRenderPreset,
-      changed: renderPresetChanged,
-      canApply: canApplyPreset,
-      sourceAvailable: !!content?.source_available,
-    },
-    preview: {
-      format: previewFormat,
-      setFormat: setPreviewFormat,
-    },
-    display: {
-      mode: displayMode,
-      setMode: setDisplayMode,
-      changed: displayModeChanged,
+    dither: {
+      threshold,
+      setThreshold,
+      mode,
+      setMode,
+      renderPreset,
+      setImageRenderPreset,
     },
     crop: {
       scale,
@@ -128,7 +110,9 @@ export function useImageContentForm(content?: ContentDetailT) {
     setFrameName,
     frameNameChanged,
     hasContentPatch,
-    hasFilePatch,
+    hasUploadPatch,
+    displayMode,
+    setDisplayMode,
     canCreate,
     canEdit,
     reset,

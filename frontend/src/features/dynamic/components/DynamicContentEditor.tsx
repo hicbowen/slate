@@ -2,14 +2,9 @@
 
 import { useCallback, useMemo, type FormEvent } from 'react';
 import { Sparkles } from 'lucide-react';
-import {
-  isAudioDynamicConfig,
-  type ContentDetailT,
-  type DynamicConfigT,
-  type DynamicTypeT,
-} from 'shared';
+import { isAudioDynamicConfig, type Content, type DynamicConfig, type DynamicType } from '@/api';
 import { useUpdateDynamicContent } from '@/features/dynamic/query/dynamic-content-queries';
-import { useContentImage } from '@/features/contents/query/content-image-queries';
+import { useBlob } from '@/features/contents/query/content-image-queries';
 import { useToast } from '@/components/feedback/toast-context';
 import { FormActions } from '@/components/ui/FormActions';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -23,9 +18,9 @@ import { DynamicContentFields } from './DynamicContentFields';
 
 interface DynamicContentEditorProps {
   gid: string;
-  content: ContentDetailT;
-  initialConfig: DynamicConfigT;
-  initialType: DynamicTypeT;
+  content: Content;
+  initialConfig: DynamicConfig;
+  initialType: DynamicType;
   onDone: () => void;
 }
 
@@ -40,20 +35,20 @@ export function DynamicContentEditor({
   const submitting = update.isPending;
   const toast = useToast();
   const initialDashboardData = useMemo(
-    () => (initialType === 'dashboard' ? dashboardDataRecord(content.dynamic_data) : null),
-    [content.dynamic_data, initialType]
+    () => (initialType === 'dashboard' ? dashboardDataRecord(content.dynamic?.data) : null),
+    [content.dynamic?.data, initialType]
   );
   const form = useDynamicContentForm({
     contentId: content.id,
     initialType,
     initialConfig,
-    initialFrameName: content.frame_name,
+    initialFrameName: content.frameName,
     initialDashboardData,
   });
   const { baseline, setBaseline } = useDynamicEditorBaselineSync({
     contentId: content.id,
     serverType: initialType,
-    serverFrameName: content.frame_name,
+    serverFrameName: content.frameName,
     serverConfig: initialConfig,
     type: form.type,
     frameName: form.frameName,
@@ -77,10 +72,8 @@ export function DynamicContentEditor({
     ]
   );
 
-  const savedRendition =
-    content.image_renditions[form.previewFormat] ?? content.image_renditions.mono1;
-  const savedPreviewEnabled = !!savedRendition.etag;
-  const savedPreview = useContentImage(content.id, savedRendition.etag, form.previewFormat);
+  const savedPreviewHash = form.previewColor ? content.colorImageHash : content.imageHash;
+  const savedPreview = useBlob(savedPreviewHash);
   const dynamicMeta = form.type ? DYNAMIC_TYPE_META[form.type] : null;
   const showParams = Boolean(dynamicMeta?.hasConfigurableParams);
   const showAudio = Boolean(
@@ -126,24 +119,22 @@ export function DynamicContentEditor({
         onBack={onDone}
         icon={<Sparkles size={24} />}
         title="编辑动态内容"
-        subtitle="服务端同时生成 Note4 黑白帧与 Note4C 黑白红黄帧，设备按型号下载。"
+        subtitle="服务端为 Note4 和 Note4C 生成对应的 400×300 帧。"
       />
 
       <div className="mt-6 fade-up fade-up-1">
         <DynamicContentFormShell
           onSubmit={handleSubmit}
           gridClassName="lg:grid-cols-[1.3fr_1fr]"
-          previewFormat={form.previewFormat}
-          onPreviewFormatChange={form.setPreviewFormat}
+          previewFormat={{ color: form.previewColor, onChange: form.setPreviewColor }}
           preview={
             <SavedOrLiveDynamicFramePreview
               savedData={savedPreview.data}
-              savedPending={savedPreviewEnabled && savedPreview.isPending}
+              savedPending={!!savedPreviewHash && savedPreview.isPending}
               liveData={form.livePreviewData}
               livePending={form.previewPending}
               hasConfig={!!form.config}
               caption={form.caption}
-              format={form.previewFormat}
             />
           }
           header={

@@ -35,7 +35,7 @@ export function AuthLayout({ title, subtitle, children }: AuthLayoutProps) {
         </div>
 
         <span className="font-mono text-[11px] text-stone tracking-[0.06em]">
-          Note4 黑白 / Note4C 四色 · 400 × 300 · ESP32-S3
+          400 × 300 · 1bpp · esp32-s3
         </span>
       </aside>
 

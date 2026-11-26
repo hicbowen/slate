@@ -43,18 +43,15 @@ class SleepManager {
     };
 
     struct Policy {
-        int     idle_timeout_min     = 5;
-        int64_t unbound_grace_ms     = kUnboundGraceMs;
-        int     low_battery_pct      = kLowBatteryPct;
-        bool    disabled             = false;
-        bool    network_wake_enabled = true;
+        int     idle_timeout_min = 5;
+        int64_t unbound_grace_ms = kUnboundGraceMs;
+        int     low_battery_pct  = kLowBatteryPct;
+        bool    disabled         = false;
     };
 
     void Init(Policy p);
     void SetSleepBlocker(std::function<bool()> blocks_sleep);
     void Disable();  // captive portal 等场景禁用 deep sleep
-    void SetEnabled(bool enabled);
-    void SetNetworkWakeEnabled(bool enabled);
 
     void OnEvent(const UiEvent& e);
     void Tick(int64_t now_ms);
@@ -75,7 +72,6 @@ class SleepManager {
     // blocker(语音/同步)开始连续阻止深睡的时刻；0 表示当前未被阻止。看门狗据此计时。
     std::atomic<int64_t> blocked_since_ms_{0};
     std::atomic<bool>    paused_{false};
-    std::atomic<bool>    network_wake_enabled_{true};
     int                  idle_timeout_min_ = 5;
     int64_t              unbound_grace_ms_ = kUnboundGraceMs;
     int                  low_battery_pct_  = kLowBatteryPct;

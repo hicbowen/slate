@@ -1,5 +1,7 @@
-import { FRAME_WIDTH, FRAME_HEIGHT } from 'shared';
-import type { FrameFormatT, ImageRenderPreset } from 'shared';
+import type { ImageFrameFormat } from '@/lib/eink/image-preview';
+import { FrameWidth, FrameHeight } from '@/api';
+import type { ImageRenderPreset } from '@/lib/eink/render-preset';
+import type { DitherMode } from '@/lib/eink/dither';
 import type { RefObject } from 'react';
 import { cn } from '@/lib/cn';
 import { StatusBarOverlay } from '@/components/eink/StatusBarOverlay';
@@ -7,11 +9,12 @@ import { usePreviewCanvasRenderer } from './usePreviewCanvasRenderer';
 
 interface PreviewCanvasProps {
   imageFile: File | null;
-  existingSource?: Blob;
   existingImage: ArrayBuffer | undefined;
-  existingImagePending?: boolean;
+  format: ImageFrameFormat;
   renderPreset: ImageRenderPreset;
-  format: FrameFormatT;
+  existingImagePending?: boolean;
+  threshold: number;
+  mode: DitherMode;
   scale: number;
   offset: { x: number; y: number };
   onOffsetChange: (o: { x: number; y: number }) => void;
@@ -22,11 +25,12 @@ interface PreviewCanvasProps {
 
 export function PreviewCanvas({
   imageFile,
-  existingSource,
   existingImage,
-  existingImagePending,
-  renderPreset,
   format,
+  renderPreset,
+  existingImagePending,
+  threshold,
+  mode,
   scale,
   offset,
   onOffsetChange,
@@ -36,10 +40,11 @@ export function PreviewCanvas({
 }: PreviewCanvasProps) {
   const pan = usePreviewCanvasRenderer({
     imageFile,
-    existingSource,
     existingImage,
-    renderPreset,
     format,
+    renderPreset,
+    threshold,
+    mode,
     scale,
     offset,
     onOffsetChange,
@@ -53,7 +58,7 @@ export function PreviewCanvas({
           <span className="font-serif italic text-[13px] text-stone-light">加载中…</span>
         </div>
       )}
-      {!imageFile && !existingSource && !existingImage && !existingImagePending && (
+      {!imageFile && !existingImage && !existingImagePending && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="font-serif italic text-[13px] text-stone-light">选图后显示预览</span>
         </div>
@@ -67,8 +72,8 @@ export function PreviewCanvas({
       )}
       <canvas
         ref={canvasRef}
-        width={FRAME_WIDTH}
-        height={FRAME_HEIGHT}
+        width={FrameWidth}
+        height={FrameHeight}
         className={cn('block w-full h-full', pan.isDragging && 'cursor-grabbing')}
         style={{
           imageRendering: 'auto',

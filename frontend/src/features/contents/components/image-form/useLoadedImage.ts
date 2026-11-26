@@ -1,20 +1,20 @@
 import { useEffect, useState } from 'react';
 
 export interface LoadedImage {
-  source: Blob;
+  file: File;
   image: HTMLImageElement;
 }
 
-export function useLoadedImage(source: Blob | null): LoadedImage | null {
+export function useLoadedImage(imageFile: File | null): LoadedImage | null {
   const [loadedImage, setLoadedImage] = useState<LoadedImage | null>(null);
 
   useEffect(() => {
-    if (!source) {
+    if (!imageFile) {
       setLoadedImage(null);
       return;
     }
 
-    const url = URL.createObjectURL(source);
+    const url = URL.createObjectURL(imageFile);
     let cancelled = false;
     let revoked = false;
     const revoke = () => {
@@ -25,7 +25,7 @@ export function useLoadedImage(source: Blob | null): LoadedImage | null {
     };
     const img = new Image();
     img.onload = () => {
-      if (!cancelled) setLoadedImage({ source, image: img });
+      if (!cancelled) setLoadedImage({ file: imageFile, image: img });
       revoke();
     };
     img.onerror = () => {
@@ -37,7 +37,7 @@ export function useLoadedImage(source: Blob | null): LoadedImage | null {
       cancelled = true;
       revoke();
     };
-  }, [source]);
+  }, [imageFile]);
 
   return loadedImage;
 }

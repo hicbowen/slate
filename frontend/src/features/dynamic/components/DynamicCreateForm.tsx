@@ -1,5 +1,5 @@
 import type { FormEvent, ReactNode } from 'react';
-import { isAudioDynamicConfig, type DynamicTypeT } from 'shared';
+import { isAudioDynamicConfig, type DynamicType } from '@/api';
 import { useToast } from '@/components/feedback/toast-context';
 import { FormActions } from '@/components/ui/FormActions';
 import { useCreateDynamicContent } from '@/features/dynamic/query/dynamic-content-queries';
@@ -12,7 +12,7 @@ import { getApiErrorMessage } from '@/lib/api-errors';
 
 interface DynamicCreateFormProps {
   gid: string;
-  type: DynamicTypeT;
+  type: DynamicType;
   form: ReturnType<typeof useDynamicContentForm>;
   header?: ReactNode;
   onDone: () => void;
@@ -35,10 +35,9 @@ export function DynamicCreateForm({ gid, type, form, header, onDone }: DynamicCr
     }
     try {
       await createDynamic.mutateAsync({
-        kind: 'dynamic',
         config: parsed.config,
-        frame_name: parsed.frameName,
-        initial_data: parsed.dashboardData,
+        frameName: parsed.frameName,
+        initialData: parsed.dashboardData,
       });
       toast.success('已创建');
       onDone();
@@ -56,15 +55,13 @@ export function DynamicCreateForm({ gid, type, form, header, onDone }: DynamicCr
     <DynamicContentFormShell
       onSubmit={onSubmit}
       gridClassName="lg:grid-cols-2"
-      previewFormat={form.previewFormat}
-      onPreviewFormatChange={form.setPreviewFormat}
+      previewFormat={{ color: form.previewColor, onChange: form.setPreviewColor }}
       preview={
         <DynamicFramePreview
           data={form.livePreviewData}
           pending={form.previewPending}
           hasConfig={!!form.config}
           caption={form.caption}
-          format={form.previewFormat}
         />
       }
       header={header}

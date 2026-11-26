@@ -32,16 +32,14 @@ void SettingsScene::OnEnter(SceneContext& ctx) {
     status_bar_->SetCaption("设置");
 
     // 三段语义分组(MenuList 不显式画分隔,靠顺序传达):
-    //   偏好    音量调节 / Wi-Fi
-    //   信息    网络管理 / 设备信息
-    //   危险    重启设备 / 恢复出厂(永远末尾,避免误触)
+    //   偏好    音量调节
+    //   信息    设备信息
+    //   维护    重启设备 / 恢复出厂（末尾，恢复出厂标出清除风险）
     auto*                       stack = ctx.stack;
     std::vector<MenuList::Item> items = {
         {"音量调节", [stack]() { stack->RequestPush(std::make_unique<VolumePage>()); }},
-        {"Wi-Fi 开关", [stack]() { stack->RequestPush(std::make_unique<WifiSettingsPage>()); }},
-        {"管理 Wi-Fi", [stack]() { stack->RequestPush(std::make_unique<WifiPortalPage>()); }},
         {"设备信息", [stack]() { stack->RequestPush(std::make_unique<DeviceInfoPage>()); }},
-        {"重启设备", [stack]() { stack->RequestPush(std::make_unique<RestartDevicePage>()); }, MenuList::Tone::kDanger},
+        {"重启设备", [stack]() { stack->RequestPush(std::make_unique<RestartDevicePage>()); }},
         {"恢复出厂", [stack]() { stack->RequestPush(std::make_unique<FactoryResetPage>()); }, MenuList::Tone::kDanger},
     };
     menu_ = std::make_unique<MenuList>(root_, std::move(items), saved_cursor_);
@@ -85,7 +83,9 @@ void SettingsScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
                 case ButtonId::kUp:
                     SyncRender(
                         ctx,
-                        [this]() {
+                        [this, &ctx]() {
+                            if (display_profile::kFourColor && status_bar_)
+                                RefreshStatusBarFromSensors(ctx, *status_bar_);
                             const int before = menu_->Cursor();
                             menu_->OnUp();
                             ESP_LOGD(kTag, "button short btn=up action=menu_up from=%d to=%d", before, menu_->Cursor());
@@ -95,7 +95,9 @@ void SettingsScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
                 case ButtonId::kDown:
                     SyncRender(
                         ctx,
-                        [this]() {
+                        [this, &ctx]() {
+                            if (display_profile::kFourColor && status_bar_)
+                                RefreshStatusBarFromSensors(ctx, *status_bar_);
                             const int before = menu_->Cursor();
                             menu_->OnDown();
                             ESP_LOGD(kTag, "button short btn=down action=menu_down from=%d to=%d", before,

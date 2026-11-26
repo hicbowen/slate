@@ -1,27 +1,19 @@
 import { useMutation } from '@tanstack/react-query';
 import type {
-  ContentMutationResponseT,
-  CreateDynamicContentRequestT,
-  DynamicConfigT,
-  FrameFormatT,
-  IngestResponseT,
-} from 'shared';
-import { API_PREFIX, api } from '@/lib/http';
+  Content,
+  CreateDynamicContentRequest,
+  DynamicConfig,
+  PatchContentRequest,
+  PreviewDynamicRequest,
+} from '@/api';
+import { api, http, SLOW_REQUEST } from '@/lib/http';
 import { useInvalidateContentDependencies } from '@/features/contents/query/content-cache-helpers';
 
 export function useCreateDynamicContent(gid: string) {
   const invalidate = useInvalidateContentDependencies(gid);
   return useMutation({
-    mutationFn: async (body: CreateDynamicContentRequestT) => {
-      const { data } = await api.post<ContentMutationResponseT>(
-        `${API_PREFIX}/groups/${gid}/contents`,
-        body,
-        {
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
-      return data;
-    },
+    mutationFn: (body: CreateDynamicContentRequest) =>
+      http.post<Content>(`/groups/${gid}/contents`, body, SLOW_REQUEST),
     onSuccess: (data) => {
       invalidate(data.id);
     },
@@ -31,23 +23,19 @@ export function useCreateDynamicContent(gid: string) {
 export function useUpdateDynamicContent(gid: string) {
   const invalidate = useInvalidateContentDependencies(gid);
   return useMutation({
-    mutationFn: async ({
+    mutationFn: ({
       contentId,
       frameName,
       config,
     }: {
       contentId: string;
       frameName?: string | null;
-      config?: DynamicConfigT;
+      config?: DynamicConfig;
     }) => {
-      const body: { frame_name?: string | null; config?: DynamicConfigT } = {};
-      if (frameName !== undefined) body.frame_name = frameName;
+      const body: PatchContentRequest = {};
+      if (frameName !== undefined) body.frameName = frameName;
       if (config !== undefined) body.config = config;
-      const { data } = await api.patch<ContentMutationResponseT>(
-        `${API_PREFIX}/contents/${contentId}`,
-        body
-      );
-      return data;
+      return http.patch<Content>(`/contents/${contentId}`, body, SLOW_REQUEST);
     },
     onSuccess: (data) => {
       invalidate(data.id);
@@ -58,12 +46,8 @@ export function useUpdateDynamicContent(gid: string) {
 export function useRefreshDynamicContent(gid: string) {
   const invalidate = useInvalidateContentDependencies(gid);
   return useMutation({
-    mutationFn: async (contentId: string) => {
-      const { data } = await api.post<IngestResponseT>(
-        `${API_PREFIX}/contents/${contentId}/refresh`
-      );
-      return data;
-    },
+    mutationFn: (contentId: string) =>
+      http.post<Content>(`/contents/${contentId}/refresh`, undefined, SLOW_REQUEST),
     onSuccess: (_data, contentId) => {
       invalidate(contentId);
     },
@@ -74,22 +58,19 @@ export function usePreviewDynamicContent(contentId: string | undefined) {
   return useMutation({
     mutationFn: async ({
       config,
-      frameName,
       data: previewData,
       format,
       signal,
     }: {
-      config: DynamicConfigT;
-      frameName?: string | null;
+      config: DynamicConfig;
       data?: Record<string, unknown>;
-      format: FrameFormatT;
+      format?: string;
       signal?: AbortSignal;
     }) => {
-      const url = contentId
-        ? `${API_PREFIX}/contents/${contentId}/preview`
-        : `${API_PREFIX}/contents/preview`;
-      const body = { config, frame_name: frameName, data: previewData };
+      const url = contentId ? `/contents/${contentId}/preview` : '/contents/preview';
+      const body: PreviewDynamicRequest = { config, data: previewData };
       const { data } = await api.post<ArrayBuffer>(url, body, {
+        ...SLOW_REQUEST,
         responseType: 'arraybuffer',
         params: { format },
         signal,

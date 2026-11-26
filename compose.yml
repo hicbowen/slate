@@ -1,52 +1,47 @@
-# Slate 单机 docker compose 样例。开箱即用,自带 MySQL,适合自托管。
-# 生产部署用外部 MySQL 或反代时按需改造(去掉 mysql service,改 DATABASE_URL,加 traefik labels)。
+# Slate 自托管样例：Slate 加一个自带的 PostgreSQL。
 #
-# 首次启动:
-#   1. 创建 .env，至少设置 JWT_SECRET 和 MYSQL_PASSWORD
-#   2. docker compose up -d
-#   3. 浏览器访问 http://localhost:3001/register 注册第一个账号
+# 首次启动：
+#   1. 在本文件旁创建 .env，写入两项必填配置（可选配置见仓库 backend/README.md）：
+#        POSTGRES_PASSWORD=<openssl rand -hex 32 的输出>
+#        JWT_SECRET=<openssl rand -hex 64 的输出>
+#   2. mkdir -p slate postgres && sudo chown -R 1000:1000 slate   # Slate 容器以 uid 1000 运行
+#   3. docker compose up -d                                         # 启动时自动建表、迁移
+#   4. 浏览器打开 http://<主机>:9494/register 注册第一个账号
 #
-# 升级:
-#   docker compose pull && docker compose up -d
+# 升级：docker compose pull && docker compose up -d
+# 从 v0.1.x（MySQL）迁移：见仓库 README「从 v0.1.x 升级」。
 #
-# 持久化目录(compose 启动后会在 cwd 自动创建):
-#   ./slate/blobs/   frame image + audio,容器内 /data/blobs
-#   ./mysql/         MySQL datadir
-# 备份建议:每天 mysqldump + tar ./slate/blobs。
+# 数据：./slate/blobs（图片、音频）和 ./postgres。备份 = pg_dump + 打包 ./slate。
+# 已有 PostgreSQL 时删掉 postgres 服务，把 DATABASE_URL 指过去；放在反向代理后面时
+# 可以把端口改成 127.0.0.1:9494:9494，只让代理访问。
 
 services:
   slate:
-    image: ghcr.io/qiujun8023/slate:latest
-    container_name: slate
+    image: ${SLATE_IMAGE:-ghcr.io/qiujun8023/slate:latest}
     restart: unless-stopped
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
     ports:
-      - '3001:3001'
+      - '9494:9494'
     volumes:
       - ./slate:/data
     env_file:
       - .env
     environment:
-      - DATABASE_URL=mysql://slate:${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}@mysql:3306/slate
-      - NODE_ENV=production
-      - PORT=${PORT:-3001}
-      - BLOB_DIR=/data/blobs
+      DATABASE_URL: postgresql://slate:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/slate
 
-  mysql:
-    image: mysql:8
-    container_name: slate-mysql
+  postgres:
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: slate
-      MYSQL_USER: slate
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
-      MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+      POSTGRES_DB: slate
+      POSTGRES_USER: slate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
-      - ./mysql:/var/lib/mysql
+      - ./postgres:/var/lib/postgresql
     healthcheck:
-      test: ['CMD-SHELL', 'mysqladmin ping -h localhost -uslate -p$${MYSQL_PASSWORD}']
+      test: ['CMD-SHELL', 'pg_isready -U slate -d slate']
       interval: 5s
       timeout: 3s
       retries: 12

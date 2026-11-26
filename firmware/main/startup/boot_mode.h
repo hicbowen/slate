@@ -17,7 +17,6 @@ enum class WakeCause : uint8_t {
 
 enum class Mode : uint8_t {
     kPortal,
-    kOffline,
     kBackgroundRefresh,
     kFullActive,
 };

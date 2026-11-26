@@ -186,12 +186,6 @@ button.primary {
 button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
 button.primary:hover:not(:disabled) { background: var(--paper); color: var(--ink); }
 button.primary .arrow { font-family: ui-monospace, monospace; font-size: 16px; letter-spacing: 0; }
-.saved-head { margin: 0 0 8px; color: var(--mute); font-size: 11px; letter-spacing: 0.08em; }
-.forget {
-  border: 1px solid var(--line); background: transparent; color: var(--red);
-  padding: 3px 8px; font: 10px ui-monospace, monospace; cursor: pointer;
-}
-.preferred { margin-left: 8px; color: var(--mute); font: 9px ui-monospace, monospace; }
 
 /* Status */
 .status {
@@ -288,10 +282,6 @@ button.primary .arrow { font-family: ui-monospace, monospace; font-size: 16px; l
         <h2>无线网络</h2>
         <span class="eyebrow">wifi</span>
       </header>
-      <div id="saved-wrap" style="display:none">
-        <p class="saved-head mono">已保存网络（最多 5 个）</p>
-        <ul id="saved" class="networks"></ul>
-      </div>
       <ul id="nets" class="networks">
         <li class="placeholder"><span class="ssid">扫描中</span><span class="meta"><span class="spin"></span></span></li>
       </ul>
@@ -301,7 +291,7 @@ button.primary .arrow { font-family: ui-monospace, monospace; font-size: 16px; l
       </label>
       <label>
         <span class="lbl">password</span>
-        <input id="password" name="password" type="password" maxlength="63" placeholder="开放网络留空即可">
+        <input id="password" name="password" type="password" maxlength="64" placeholder="开放网络留空即可">
       </label>
     </section>
 
@@ -317,7 +307,7 @@ button.primary .arrow { font-family: ui-monospace, monospace; font-size: 16px; l
                value="{{SERVER_URL}}"
                placeholder="https://slate.your-domain.com">
       </label>
-      <p class="hint">填运行 slate 后端的地址。本地调试用 http://&lt;LAN-IP&gt;:3001 即可。</p>
+      <p class="hint">填运行 slate 后端的地址。本地调试用 http://&lt;LAN-IP&gt;:9494 即可。</p>
     </section>
 
     <button type="submit" class="primary" id="btn">
@@ -349,54 +339,6 @@ const rssiBars = (r) => {
   return '▒▒▒▒';
 };
 let scanning = false;
-async function loadSaved() {
-  try {
-    const r = await fetch('/profiles', { cache: 'no-store' });
-    if (!r.ok) throw new Error('profiles failed');
-    const list = await r.json();
-    const wrap = $('saved-wrap');
-    const ul = $('saved');
-    ul.innerHTML = '';
-    wrap.style.display = list.length ? 'block' : 'none';
-    for (const item of list) {
-      const li = document.createElement('li');
-      const left = document.createElement('span');
-      left.className = 'ssid';
-      left.textContent = item.ssid;
-      if (item.preferred) {
-        const tag = document.createElement('span');
-        tag.className = 'preferred';
-        tag.textContent = '最近使用';
-        left.appendChild(tag);
-      }
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'forget';
-      button.textContent = '忘记';
-      button.addEventListener('click', async () => {
-        button.disabled = true;
-        try {
-          const resp = await fetch('/forget', {
-            method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ ssid: item.ssid }),
-          });
-          const data = await resp.json();
-          if (!resp.ok || !data.success) throw new Error(data.error || 'forget failed');
-          await loadSaved();
-        } catch (e) {
-          setStatus('删除失败 · 请重试', 'err');
-          button.disabled = false;
-        }
-      });
-      li.appendChild(left);
-      li.appendChild(button);
-      ul.appendChild(li);
-    }
-  } catch (e) {
-    $('saved-wrap').style.display = 'none';
-  }
-}
-
 async function scan() {
   if (scanning) return;
   scanning = true;
@@ -447,7 +389,6 @@ async function scan() {
   }
 }
 scan();
-loadSaved();
 const scanTimer = setInterval(scan, 5000);
 
 function showSuccess(ssid) {

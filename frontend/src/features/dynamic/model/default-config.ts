@@ -1,97 +1,39 @@
-import {
-  DASHBOARD_CUSTOM_STARTER_TEMPLATE,
-  DEFAULT_TTS_VOICE,
-  type DynamicConfigT,
-  type DynamicTypeT,
-} from 'shared';
-import { zonedDateParts } from '@/features/dynamic/lib/date';
+import { DEFAULT_TTS_VOICE, catalog, type DynamicConfig, type DynamicType } from '@/api';
 
 const LOCAL_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-export function defaultConfig(type: DynamicTypeT): DynamicConfigT {
+export function defaultConfig(type: DynamicType): DynamicConfig {
+  const audio = { audioEnabled: false, audioVoice: DEFAULT_TTS_VOICE };
   switch (type) {
     case 'daily_calendar':
-      return {
-        type: 'daily_calendar',
-        tz: LOCAL_TIME_ZONE,
-        audio_enabled: false,
-        audio_voice: DEFAULT_TTS_VOICE,
-      };
     case 'month_calendar':
-      return {
-        type: 'month_calendar',
-        tz: LOCAL_TIME_ZONE,
-        audio_enabled: false,
-        audio_voice: DEFAULT_TTS_VOICE,
-      };
+      return { type, tz: LOCAL_TIME_ZONE, ...audio };
     case 'countdown':
-      return {
-        type: 'countdown',
-        tz: LOCAL_TIME_ZONE,
-        goal: '重要的日子',
-        target_date: defaultTargetDate(LOCAL_TIME_ZONE),
-      };
+      return { type, tz: LOCAL_TIME_ZONE, goal: '', targetDate: '' };
     case 'weather':
       return {
-        type: 'weather',
+        type,
         tz: LOCAL_TIME_ZONE,
-        provider: 'qweather',
-        location_id: '101010100',
-        location_label: '北京',
-        audio_enabled: false,
-        audio_voice: DEFAULT_TTS_VOICE,
-        refresh_interval_sec: 600,
+        locationId: '101010100',
+        locationLabel: '北京',
+        refreshIntervalSec: 600,
+        ...audio,
       };
     case 'history_today':
-      return {
-        type: 'history_today',
-        tz: LOCAL_TIME_ZONE,
-        source: 'wikipedia',
-        audio_enabled: false,
-        audio_voice: DEFAULT_TTS_VOICE,
-      };
+      return { type, tz: LOCAL_TIME_ZONE, source: 'wikipedia', ...audio };
     case 'weather_alert':
-      return {
-        type: 'weather_alert',
-        province: '',
-        refresh_interval_sec: 600,
-        audio_enabled: false,
-        audio_voice: DEFAULT_TTS_VOICE,
-      };
+      return { type, province: '', refreshIntervalSec: 600, ...audio };
     case 'earthquake_report':
-      return {
-        type: 'earthquake_report',
-        refresh_interval_sec: 600,
-        audio_enabled: false,
-        audio_voice: DEFAULT_TTS_VOICE,
-      };
+      return { type, refreshIntervalSec: 600, ...audio };
     case 'dashboard':
       return {
-        type: 'dashboard',
-        template: { kind: 'custom', template: DASHBOARD_CUSTOM_STARTER_TEMPLATE },
-        refresh_interval_sec: 600,
+        type,
+        template: { kind: 'custom', template: catalog.dashboardStarter },
+        refreshIntervalSec: 600,
       };
     case 'font_test':
-      return {
-        type: 'font_test',
-        font_id: 'fusion_pixel_12',
-        invert: false,
-      };
+      return { type, fontId: 'fusion_pixel_12', invert: false };
     case 'hot_list':
-      return {
-        type: 'hot_list',
-        source: 'weibo',
-        refresh_interval_sec: 600,
-      };
+      return { type, source: 'weibo', refreshIntervalSec: 600 };
   }
-}
-
-function defaultTargetDate(timeZone: string): string {
-  const today = zonedDateParts(new Date(), timeZone);
-  const target = new Date(Date.UTC(today.year, today.month - 1, today.day + 30));
-  return [
-    target.getUTCFullYear(),
-    String(target.getUTCMonth() + 1).padStart(2, '0'),
-    String(target.getUTCDate()).padStart(2, '0'),
-  ].join('-');
 }

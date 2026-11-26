@@ -1,9 +1,9 @@
 import { memo } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
-import type { ContentDetailT, FrameFormatT } from 'shared';
+import type { Content } from '@/api';
 import { DragHandle } from '@/components/ui/DragHandle';
 import { useRefreshDynamicContent } from '@/features/dynamic/query/dynamic-content-queries';
-import { useContentImage } from '@/features/contents/query/content-image-queries';
+import { useBlob } from '@/features/contents/query/content-image-queries';
 import { useMutationAction } from '@/hooks/useMutationAction';
 import { AudioPlayPreview } from '../audio/AudioPlayPreview';
 import { AudioStatusBadge } from './AudioStatusBadge';
@@ -15,25 +15,22 @@ import { useSortableStyle } from '@/components/dnd/useSortableStyle';
 
 interface ContentCardProps {
   gid: string;
-  content: ContentDetailT;
-  onEdit: (content: ContentDetailT) => void;
-  previewFormat?: FrameFormatT;
+  content: Content;
+  onEdit: (content: Content) => void;
 }
 
-export const ContentCard = memo(function ContentCard({
-  gid,
-  content,
-  onEdit,
-  previewFormat = 'mono1',
-}: ContentCardProps) {
+export const ContentCard = memo(function ContentCard({ gid, content, onEdit }: ContentCardProps) {
   const isDynamic = content.kind === 'dynamic';
   const refresh = useRefreshDynamicContent(gid);
   const { deleteWithConfirm, isPending: deletePending } = useDeleteContentWithConfirm({
     gid,
     content,
   });
-  const rendition = content.image_renditions[previewFormat] ?? content.image_renditions.mono1;
-  const img = useContentImage(content.id, rendition.etag, previewFormat);
+  const img = useBlob(
+    content.displayMode === 'gray16'
+      ? (content.grayImageHash ?? content.imageHash)
+      : content.imageHash
+  );
   const { attributes, listeners, setNodeRef, style, isDragging } = useSortableStyle(content.id);
   const refreshContent = useMutationAction<string>({
     isPending: refresh.isPending,
@@ -49,31 +46,26 @@ export const ContentCard = memo(function ContentCard({
       isDragging={isDragging}
       loading={img.isPending}
       error={!!img.error}
-      frameName={content.frame_name}
+      frameName={content.frameName}
       seq={content.seq}
       preview={
-        <FrameBitmapPreview
-          data={img.data}
-          caption={content.device_status_bar_text}
-          showStatusBar={false}
-          format={previewFormat}
-        />
+        <FrameBitmapPreview data={img.data} caption={content.statusBarText} showStatusBar={false} />
       }
       topRight={
         <AudioStatusBadge
-          status={content.audio_status}
-          etag={content.audio_etag}
-          error={isDynamic ? content.audio_error : undefined}
+          status={content.audio?.status ?? null}
+          hash={content.audio?.hash ?? null}
+          error={isDynamic ? (content.audio?.error ?? null) : undefined}
         />
       }
       titleMeta={
-        isDynamic && content.dynamic_render_error ? (
+        isDynamic && content.dynamic?.error ? (
           <p
             className="mt-0.5 flex items-center gap-1 truncate font-sans text-[11px] text-clay"
-            title={content.dynamic_render_error}
+            title={content.dynamic?.error}
           >
             <AlertCircle size={11} className="shrink-0" />
-            <span className="truncate">{content.dynamic_render_error}</span>
+            <span className="truncate">{content.dynamic?.error}</span>
           </p>
         ) : undefined
       }
@@ -94,11 +86,7 @@ export const ContentCard = memo(function ContentCard({
               </button>
             ) : null
           }
-          audioPreview={
-            content.audio_etag ? (
-              <AudioPlayPreview contentId={content.id} etag={content.audio_etag} />
-            ) : null
-          }
+          audioPreview={content.audio?.hash ? <AudioPlayPreview hash={content.audio.hash} /> : null}
           onEdit={() => onEdit(content)}
           onDelete={deleteWithConfirm}
           deleteDisabled={deletePending}

@@ -7,23 +7,16 @@
 #include <freertos/task.h>
 
 #include <algorithm>
-#include <array>
 #include <cstdio>
 #include <cstring>
 #include <utility>
-#include <vector>
 
 #include "utils/time_utils.h"
 
 namespace {
-constexpr char     kTag[]                 = "wifi";
-constexpr int      kWifiBitConnected      = BIT0;
-constexpr int      kWifiBitConnectionFail = BIT1;
-constexpr int      kInitialFastFailCount  = 1;
-constexpr int      kRuntimeFastFailCount  = 5;
-constexpr int      kCandidateMaxWaitMs    = 6000;
-constexpr int      kCandidateMinWaitMs    = 2500;
-constexpr uint16_t kMaxInitialScanRecords = 40;
+constexpr char kTag[]                 = "wifi";
+constexpr int  kWifiBitConnected      = BIT0;
+constexpr int  kWifiBitConnectionFail = BIT1;
 
 EventGroupHandle_t& WifiEventGroup() {
     static EventGroupHandle_t s_event_group = nullptr;
@@ -66,19 +59,6 @@ bool FillStaConfig(wifi_config_t& wc, const std::string& ssid, const std::string
     wc.sta.pmf_cfg.required   = false;
     return true;
 }
-
-std::string WifiSsidToString(const uint8_t ssid[32]) {
-    size_t len = 0;
-    while (len < 32 && ssid[len] != 0)
-        ++len;
-    return std::string(reinterpret_cast<const char*>(ssid), len);
-}
-
-struct ConnectCandidate {
-    Wifi::Network    network;
-    bool             visible = false;
-    wifi_ap_record_t ap{};
-};
 
 std::string DisconnectReasonZh(int reason) {
     switch (reason) {
@@ -136,17 +116,15 @@ void Wifi::EventHandler(void* arg, esp_event_base_t base, int32_t id, void* data
             auto*      d              = static_cast<wifi_event_sta_disconnected_t*>(data);
             const bool want_reconnect = self->want_reconnect_.load(std::memory_order_acquire);
             const int  fail_count     = self->fail_count_.load(std::memory_order_acquire);
-            const int  max_fast_fail  = self->max_fast_fail_.load(std::memory_order_acquire);
             ESP_LOGW(kTag, "sta disconnected reason=%d want_reconnect=%d fail_count=%d max_fast_fail=%d", d->reason,
-                     want_reconnect, fail_count, max_fast_fail);
+                     want_reconnect, fail_count, self->max_fast_fail_);
             self->last_disconnect_reason_.store(d->reason, std::memory_order_release);
-            self->ClearIpString();
             DisconnectCb on_disconnect;
             {
                 std::lock_guard<std::mutex> lock(self->callback_mutex_);
                 on_disconnect = self->on_disconnect_;
             }
-            if (on_disconnect && !self->probe_connect_.load(std::memory_order_acquire))
+            if (on_disconnect)
                 on_disconnect(d->reason);
 
             if (!want_reconnect) {
@@ -155,7 +133,7 @@ void Wifi::EventHandler(void* arg, esp_event_base_t base, int32_t id, void* data
                 return;
             }
 
-            if (fail_count < max_fast_fail) {
+            if (fail_count < self->max_fast_fail_) {
                 self->fail_count_.fetch_add(1, std::memory_order_acq_rel);
                 esp_err_t e = esp_wifi_connect();
                 if (e != ESP_OK) {
@@ -166,8 +144,7 @@ void Wifi::EventHandler(void* arg, esp_event_base_t base, int32_t id, void* data
 
             self->state_.store(State::Disconnected);
             xEventGroupSetBits(WifiEventGroup(), kWifiBitConnectionFail);
-            if (!self->selecting_network_.load(std::memory_order_acquire))
-                self->reconnect_.Schedule();
+            self->reconnect_.Schedule();
             return;
         }
 
@@ -189,21 +166,7 @@ void Wifi::EventHandler(void* arg, esp_event_base_t base, int32_t id, void* data
         self->reconnect_.ResetBackoff();
         self->reconnect_.Stop();
         self->state_.store(State::Connected);
-        wifi_config_t wc = {};
-        if (esp_wifi_get_config(WIFI_IF_STA, &wc) == ESP_OK) {
-            const std::string           ssid = WifiSsidToString(wc.sta.ssid);
-            std::lock_guard<std::mutex> lock(self->connection_mutex_);
-            self->target_ssid_  = ssid;
-            self->current_ssid_ = ssid;
-        }
         xEventGroupSetBits(WifiEventGroup(), kWifiBitConnected);
-        ConnectedCb on_connected;
-        {
-            std::lock_guard<std::mutex> lock(self->callback_mutex_);
-            on_connected = self->on_connected_;
-        }
-        if (on_connected && !self->probe_connect_.load(std::memory_order_acquire))
-            on_connected(self->GetSsid(), self->GetRssi());
         return;
     }
 }
@@ -247,24 +210,9 @@ void Wifi::Init() {
 }
 
 bool Wifi::Connect(const std::string& ssid, const std::string& password, int timeout_ms) {
-    return ConnectAny({Network{ssid, password}}, ssid, timeout_ms);
-}
-
-bool Wifi::ConnectAny(const std::vector<Network>& networks, const std::string& preferred_ssid, int timeout_ms) {
     Init();
-    std::vector<Network> valid;
-    valid.reserve(networks.size());
-    for (const auto& network : networks) {
-        wifi_config_t ignored = {};
-        if (!FillStaConfig(ignored, network.ssid, network.password, nullptr))
-            continue;
-        const auto duplicate =
-            std::find_if(valid.begin(), valid.end(), [&](const auto& item) { return item.ssid == network.ssid; });
-        if (duplicate == valid.end())
-            valid.push_back(network);
-    }
-    if (valid.empty()) {
-        ESP_LOGW(kTag, "connect any failed reason=no_valid_networks");
+    if (ssid.empty()) {
+        ESP_LOGW(kTag, "connect failed reason=ssid_empty");
         return false;
     }
     if (mode_.load(std::memory_order_acquire) == Mode::AccessPoint)
@@ -272,134 +220,32 @@ bool Wifi::ConnectAny(const std::vector<Network>& networks, const std::string& p
     if (mode_.load(std::memory_order_acquire) != Mode::Station)
         StartStationInternal();
 
-    {
-        std::lock_guard<std::mutex> lock(connection_mutex_);
-        known_networks_ = valid;
-        current_ssid_.clear();
-        target_ssid_.clear();
-    }
-
-    const int64_t deadline_ms = time_utils::NowMs() + std::max(timeout_ms, kCandidateMinWaitMs);
-    selecting_network_.store(true, std::memory_order_release);
-    want_reconnect_.store(false, std::memory_order_release);
-    reconnect_.Stop();
-    reconnect_.ResetBackoff();
-
-    wifi_scan_config_t scan_cfg                                 = {};
-    scan_cfg.show_hidden                                        = true;
-    scan_cfg.scan_type                                          = WIFI_SCAN_TYPE_ACTIVE;
-    scan_cfg.scan_time.active.min                               = 20;
-    scan_cfg.scan_time.active.max                               = 80;
-    uint16_t                                             ap_num = 0;
-    std::array<wifi_ap_record_t, kMaxInitialScanRecords> records{};
-    esp_err_t                                            scan_err = esp_wifi_scan_start(&scan_cfg, true);
-    if (scan_err == ESP_OK) {
-        esp_wifi_scan_get_ap_num(&ap_num);
-        ap_num = std::min<uint16_t>(ap_num, kMaxInitialScanRecords);
-        if (ap_num > 0)
-            esp_wifi_scan_get_ap_records(&ap_num, records.data());
-    } else {
-        ESP_LOGW(kTag, "initial scan failed err=%s action=direct_connect", esp_err_to_name(scan_err));
-    }
-    if (!selecting_network_.load(std::memory_order_acquire) || mode_.load(std::memory_order_acquire) != Mode::Station) {
-        ESP_LOGI(kTag, "connect any cancelled after scan");
-        state_.store(State::Disconnected);
+    wifi_config_t wc = {};
+    if (!FillStaConfig(wc, ssid, password, nullptr)) {
+        ESP_LOGW(kTag, "connect failed reason=invalid_credentials ssid_len=%u password_len=%u",
+                 static_cast<unsigned>(ssid.size()), static_cast<unsigned>(password.size()));
         return false;
     }
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
 
-    std::vector<ConnectCandidate> candidates;
-    candidates.reserve(valid.size());
-    for (const auto& network : valid) {
-        ConnectCandidate candidate;
-        candidate.network = network;
-        for (uint16_t i = 0; i < ap_num; ++i) {
-            if (WifiSsidToString(records[i].ssid) != network.ssid)
-                continue;
-            if (!candidate.visible || records[i].rssi > candidate.ap.rssi) {
-                candidate.visible = true;
-                candidate.ap      = records[i];
-            }
-        }
-        candidates.push_back(std::move(candidate));
-    }
-    std::stable_sort(candidates.begin(), candidates.end(), [&](const auto& a, const auto& b) {
-        const bool a_preferred = a.network.ssid == preferred_ssid;
-        const bool b_preferred = b.network.ssid == preferred_ssid;
-        if (a.visible != b.visible)
-            return a.visible;
-        if (a_preferred != b_preferred)
-            return a_preferred;
-        return a.visible && b.visible ? a.ap.rssi > b.ap.rssi : false;
-    });
+    state_.store(State::Connecting);
+    fail_count_.store(0, std::memory_order_release);
+    reconnect_.ResetBackoff();
+    want_reconnect_.store(true, std::memory_order_release);
 
-    for (size_t i = 0; i < candidates.size(); ++i) {
-        const int remaining_ms = static_cast<int>(deadline_ms - time_utils::NowMs());
-        if (remaining_ms <= 0)
-            break;
-        const int candidates_left = static_cast<int>(candidates.size() - i);
-        const int fair_share      = std::max(kCandidateMinWaitMs, remaining_ms / candidates_left);
-        const int wait_ms         = std::min({remaining_ms, fair_share, kCandidateMaxWaitMs});
-        auto&     candidate       = candidates[i];
+    xEventGroupClearBits(WifiEventGroup(), kWifiBitConnected | kWifiBitConnectionFail);
+    esp_wifi_disconnect();
+    esp_wifi_connect();
 
-        wifi_config_t wc = {};
-        if (!FillStaConfig(wc, candidate.network.ssid, candidate.network.password, nullptr))
-            continue;
-        if (candidate.visible) {
-            wc.sta.bssid_set = 1;
-            std::memcpy(wc.sta.bssid, candidate.ap.bssid, sizeof(wc.sta.bssid));
-            wc.sta.channel = candidate.ap.primary;
-        }
-        const esp_err_t config_err = esp_wifi_set_config(WIFI_IF_STA, &wc);
-        if (config_err != ESP_OK) {
-            ESP_LOGW(kTag, "configure candidate failed ssid=%s err=%s", candidate.network.ssid.c_str(),
-                     esp_err_to_name(config_err));
-            if (!selecting_network_.load(std::memory_order_acquire))
-                break;
-            continue;
-        }
-        SetTargetSsid(candidate.network.ssid);
-        ESP_LOGI(kTag, "connect candidate ssid=%s visible=%d rssi=%d attempt=%u total=%u wait_ms=%d",
-                 candidate.network.ssid.c_str(), candidate.visible ? 1 : 0, candidate.visible ? candidate.ap.rssi : 0,
-                 static_cast<unsigned>(i + 1), static_cast<unsigned>(candidates.size()), wait_ms);
-
-        state_.store(State::Connecting);
-        fail_count_.store(0, std::memory_order_release);
-        last_disconnect_reason_.store(0, std::memory_order_release);
-        max_fast_fail_.store(kInitialFastFailCount, std::memory_order_release);
-        want_reconnect_.store(true, std::memory_order_release);
-        xEventGroupClearBits(WifiEventGroup(), kWifiBitConnected | kWifiBitConnectionFail);
-        const esp_err_t connect_err = esp_wifi_connect();
-        if (connect_err != ESP_OK) {
-            ESP_LOGW(kTag, "connect candidate start failed ssid=%s err=%s", candidate.network.ssid.c_str(),
-                     esp_err_to_name(connect_err));
-            want_reconnect_.store(false, std::memory_order_release);
-            continue;
-        }
-        const EventBits_t bits = xEventGroupWaitBits(WifiEventGroup(), kWifiBitConnected | kWifiBitConnectionFail,
-                                                     pdFALSE, pdFALSE, pdMS_TO_TICKS(wait_ms));
-        if (!selecting_network_.load(std::memory_order_acquire) ||
-            mode_.load(std::memory_order_acquire) != Mode::Station) {
-            ESP_LOGI(kTag, "connect any cancelled");
-            break;
-        }
-        if (bits & kWifiBitConnected) {
-            selecting_network_.store(false, std::memory_order_release);
-            max_fast_fail_.store(kRuntimeFastFailCount, std::memory_order_release);
-            want_reconnect_.store(true, std::memory_order_release);
-            esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
-            return true;
-        }
-        ESP_LOGW(kTag, "connect candidate failed ssid=%s reason=%d", candidate.network.ssid.c_str(),
-                 last_disconnect_reason_.load(std::memory_order_acquire));
-        want_reconnect_.store(false, std::memory_order_release);
-        esp_wifi_disconnect();
-        vTaskDelay(pdMS_TO_TICKS(100));
+    EventBits_t bits = xEventGroupWaitBits(WifiEventGroup(), kWifiBitConnected | kWifiBitConnectionFail, pdFALSE,
+                                           pdFALSE, pdMS_TO_TICKS(timeout_ms));
+    if (bits & kWifiBitConnected) {
+        esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+        return true;
     }
 
-    ESP_LOGW(kTag, "connect any failed profiles=%u last_reason=%d action=disable_auto_reconnect",
-             static_cast<unsigned>(valid.size()), last_disconnect_reason_.load(std::memory_order_acquire));
-    selecting_network_.store(false, std::memory_order_release);
-    max_fast_fail_.store(kRuntimeFastFailCount, std::memory_order_release);
+    ESP_LOGW(kTag, "connect failed reason=timeout_or_fail last_reason=%d action=disable_auto_reconnect",
+             last_disconnect_reason_.load(std::memory_order_acquire));
     want_reconnect_.store(false, std::memory_order_release);
     reconnect_.Stop();
     state_.store(State::Disconnected);
@@ -421,13 +267,10 @@ bool Wifi::TryConnect(const std::string& ssid, const std::string& password, int 
     fail_count_.store(0, std::memory_order_release);
     last_disconnect_reason_.store(0, std::memory_order_release);
     reconnect_.Stop();
-    probe_connect_.store(true, std::memory_order_release);
 
     wifi_config_t wc = {};
-    if (!FillStaConfig(wc, ssid, password, &out_reason)) {
-        probe_connect_.store(false, std::memory_order_release);
+    if (!FillStaConfig(wc, ssid, password, &out_reason))
         return false;
-    }
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
 
     constexpr int kMaxAttempts         = 3;
@@ -456,10 +299,8 @@ bool Wifi::TryConnect(const std::string& ssid, const std::string& password, int 
 
         if (bits & kWifiBitConnected) {
             esp_wifi_disconnect();
-            vTaskDelay(pdMS_TO_TICKS(100));
             state_.store(State::Idle);
             xEventGroupClearBits(WifiEventGroup(), kWifiBitConnected | kWifiBitConnectionFail);
-            probe_connect_.store(false, std::memory_order_release);
             return true;
         }
         if (bits & kWifiBitConnectionFail) {
@@ -479,8 +320,6 @@ bool Wifi::TryConnect(const std::string& ssid, const std::string& password, int 
         out_reason = "连接超时,可能信号弱或路由器无响应";
     }
     esp_wifi_disconnect();
-    vTaskDelay(pdMS_TO_TICKS(100));
-    probe_connect_.store(false, std::memory_order_release);
     ESP_LOGW(kTag, "try connect failed reason=%s", out_reason.c_str());
     return false;
 }
@@ -491,20 +330,6 @@ void Wifi::Disconnect() {
     if (mode_.load(std::memory_order_acquire) == Mode::Station)
         esp_wifi_disconnect();
     state_.store(State::Disconnected);
-}
-
-void Wifi::Stop() {
-    want_reconnect_.store(false, std::memory_order_release);
-    selecting_network_.store(false, std::memory_order_release);
-    probe_connect_.store(false, std::memory_order_release);
-    reconnect_.Stop();
-    if (WifiEventGroup())
-        xEventGroupSetBits(WifiEventGroup(), kWifiBitConnectionFail);
-    const Mode mode = mode_.load(std::memory_order_acquire);
-    if (mode == Mode::Station)
-        StopStationInternal();
-    else if (mode == Mode::AccessPoint)
-        StopApInternal();
 }
 
 bool Wifi::IsConnected() const {
@@ -523,11 +348,6 @@ int8_t Wifi::GetRssi() const {
 std::string Wifi::GetIp() const {
     std::lock_guard<std::mutex> lock(ip_mutex_);
     return ip_str_;
-}
-
-std::string Wifi::GetSsid() const {
-    std::lock_guard<std::mutex> lock(connection_mutex_);
-    return current_ssid_;
 }
 
 void Wifi::SetIpString(const char* ip) {
@@ -555,85 +375,6 @@ void Wifi::ResetFastFailCount() {
     fail_count_.store(0, std::memory_order_release);
 }
 
-void Wifi::SetTargetSsid(const std::string& ssid) {
-    std::lock_guard<std::mutex> lock(connection_mutex_);
-    target_ssid_ = ssid;
-}
-
-std::string Wifi::TargetSsid() const {
-    std::lock_guard<std::mutex> lock(connection_mutex_);
-    return target_ssid_;
-}
-
-bool Wifi::ConfigureBestKnownNetwork(const wifi_ap_record_t* records, size_t count, bool prefer_alternative) {
-    std::vector<Network> networks;
-    std::string          failed_target;
-    {
-        std::lock_guard<std::mutex> lock(connection_mutex_);
-        networks      = known_networks_;
-        failed_target = target_ssid_;
-    }
-    struct Match {
-        Network          network;
-        wifi_ap_record_t ap;
-    };
-    std::vector<Match> matches;
-    for (const auto& network : networks) {
-        const wifi_ap_record_t* strongest = nullptr;
-        for (size_t i = 0; i < count; ++i) {
-            if (WifiSsidToString(records[i].ssid) != network.ssid)
-                continue;
-            if (!strongest || records[i].rssi > strongest->rssi)
-                strongest = &records[i];
-        }
-        if (strongest)
-            matches.push_back({network, *strongest});
-    }
-    if (matches.empty()) {
-        if (networks.empty())
-            return false;
-        size_t     fallback_index = 0;
-        const auto failed         = std::find_if(networks.begin(), networks.end(),
-                                                 [&](const Network& network) { return network.ssid == failed_target; });
-        if (failed != networks.end())
-            fallback_index = (static_cast<size_t>(std::distance(networks.begin(), failed)) + 1) % networks.size();
-
-        wifi_config_t wc       = {};
-        const auto&   fallback = networks[fallback_index];
-        if (!FillStaConfig(wc, fallback.ssid, fallback.password, nullptr))
-            return false;
-        const esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wc);
-        if (err != ESP_OK) {
-            ESP_LOGW(kTag, "direct retry config failed ssid=%s err=%s", fallback.ssid.c_str(), esp_err_to_name(err));
-            return false;
-        }
-        SetTargetSsid(fallback.ssid);
-        ESP_LOGI(kTag, "no saved ap found in scan; direct retry ssid=%s", fallback.ssid.c_str());
-        return true;
-    }
-    std::sort(matches.begin(), matches.end(), [](const auto& a, const auto& b) { return a.ap.rssi > b.ap.rssi; });
-    auto selected = matches.begin();
-    if (prefer_alternative && matches.size() > 1) {
-        const auto alternative = std::find_if(matches.begin(), matches.end(),
-                                              [&](const auto& match) { return match.network.ssid != failed_target; });
-        if (alternative != matches.end())
-            selected = alternative;
-    }
-
-    wifi_config_t wc = {};
-    if (!FillStaConfig(wc, selected->network.ssid, selected->network.password, nullptr))
-        return false;
-    wc.sta.bssid_set = 1;
-    std::memcpy(wc.sta.bssid, selected->ap.bssid, sizeof(wc.sta.bssid));
-    wc.sta.channel = selected->ap.primary;
-    if (esp_wifi_set_config(WIFI_IF_STA, &wc) != ESP_OK)
-        return false;
-    SetTargetSsid(selected->network.ssid);
-    ESP_LOGI(kTag, "slow reconnect candidate ssid=%s rssi=%d previous=%s", selected->network.ssid.c_str(),
-             selected->ap.rssi, failed_target.c_str());
-    return true;
-}
-
 bool Wifi::StartAp(const std::string& ssid_prefix) {
     Init();
     if (mode_.load(std::memory_order_acquire) == Mode::AccessPoint) {
@@ -651,11 +392,6 @@ void Wifi::StopAp() {
 void Wifi::OnDisconnected(DisconnectCb cb) {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     on_disconnect_ = std::move(cb);
-}
-
-void Wifi::OnConnected(ConnectedCb cb) {
-    std::lock_guard<std::mutex> lock(callback_mutex_);
-    on_connected_ = std::move(cb);
 }
 
 void Wifi::StartStationInternal() {
@@ -679,11 +415,6 @@ void Wifi::StopStationInternal() {
     }
     state_.store(State::Idle);
     want_reconnect_.store(false, std::memory_order_release);
-    {
-        std::lock_guard<std::mutex> lock(connection_mutex_);
-        target_ssid_.clear();
-        current_ssid_.clear();
-    }
     ClearIpString();
     mode_.store(Mode::Off, std::memory_order_release);
 }
@@ -732,11 +463,6 @@ void Wifi::StopApInternal() {
     }
     state_.store(State::Idle);
     want_reconnect_.store(false, std::memory_order_release);
-    {
-        std::lock_guard<std::mutex> lock(connection_mutex_);
-        target_ssid_.clear();
-        current_ssid_.clear();
-    }
     ClearIpString();
     mode_.store(Mode::Off, std::memory_order_release);
 }

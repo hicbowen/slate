@@ -1,0 +1,57 @@
+name: Firmware CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'firmware/**'
+      - .github/workflows/firmware-ci.yml
+      - '!**.md'
+  pull_request:
+    paths:
+      - 'firmware/**'
+      - .github/workflows/firmware-ci.yml
+      - '!**.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - panel: note4
+            defaults: sdkconfig.defaults
+          - panel: note4c
+            defaults: 'sdkconfig.defaults;sdkconfig.note4c.defaults'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: ESP-IDF build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: 'v5.5.6'
+          target: esp32s3
+          path: 'firmware'
+          command: >-
+            idf.py -D 'SDKCONFIG_DEFAULTS=${{ matrix.defaults }}' build &&
+            idf.py merge-bin -o slate-full.bin &&
+            cp build/slate.bin build/slate-ota.bin
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware-${{ matrix.panel }}
+          path: |
+            firmware/build/slate-full.bin
+            firmware/build/slate-ota.bin
+          if-no-files-found: error
+          retention-days: 14

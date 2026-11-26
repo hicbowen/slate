@@ -1,542 +1,269 @@
 # Slate / Firmware
 
-ESP-IDF 5.5.x 固件，目标芯片 ESP32-S3，支持 **ZecTrix Note4** 黑白屏与 **ZecTrix Note4C** 黑白红黄四色屏。两者共用主板、音频、按键、电源与业务代码，显示面板通过编译期 profile 选择。
+ESP-IDF 5.5.x 固件，目标芯片 ESP32-S3，支持 **ZecTrix Note4 V1.0** 黑白及 16 灰屏和 **ZecTrix Note4C** 黑白红黄四色屏。构建时选择屏幕型号。
 
-本目录是独立 ESP-IDF 工程，不属于 Bun workspace。
+本目录是独立的 ESP-IDF 工程。
 
 ## 构建与烧录
-
-以下命令从仓库根目录执行：
 
 ```bash
 source $IDF_PATH/export.sh
 cd firmware
 
-# Note4 黑白屏（默认）
-idf.py -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
-  -D SDKCONFIG_DEFAULTS=sdkconfig.defaults build
-idf.py -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
-  -D SDKCONFIG_DEFAULTS=sdkconfig.defaults -p <serial> flash monitor
+# Note4 黑白和 16 灰
+idf.py -B build-note4 -D SDKCONFIG=build-note4/sdkconfig build
 
 # Note4C 四色屏
 idf.py -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
-  -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults" build
-idf.py -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
-  -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults" \
-  -p <serial> flash monitor
+  -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults' build
 ```
 
-CI 使用 ESP-IDF v5.5.2 构建：
+- 使用对应型号的同一组构建参数，将 `build` 换成 `-p <serial> flash monitor` 即可烧录。两种屏幕固件需按型号选择。
+- CI 使用 v5.5.6 分别构建 Note4 和 Note4C，完整烧录包以 `-full.bin` 结尾，应用包以 `-ota.bin` 结尾。
+- 分区表和设备密钥键沿用 v0.2.0。只更新应用可使用 `app-flash` 保留 NVS；旧 fork 的多 Wi-Fi 列表会优先读取上次连通的配置，重新配网后使用新保存的单条配置。升级到本分支的缓存版本时，设备会按机型检查并重建 LittleFS 帧缓存。16 灰和四色同步需要本分支的 v2 服务端。
 
-```bash
-idf.py -B build-note4 -D SDKCONFIG=build-note4/sdkconfig \
-  -D SDKCONFIG_DEFAULTS=sdkconfig.defaults build
-idf.py -B build-note4 merge-bin -o slate-note4-full.bin
+## 代码结构
 
-idf.py -B build-note4c -D SDKCONFIG=build-note4c/sdkconfig \
-  -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.note4c.defaults" build
-idf.py -B build-note4c merge-bin -o slate-note4c-full.bin
-```
+| 目录 | 内容 |
+| --- | --- |
+| `main/app/` | 生命周期编排 |
+| `main/startup/` | 启动模式判定、首次注册流程 |
+| `main/bsp/` | 板级 GPIO、电源、ADC、充电状态 |
+| `main/drivers/` | EPD（SSD1683 兼容）、ES8311 音频、I2C 总线、按键 |
+| `main/network/` | Wi-Fi、SNTP、配网页（SoftAP + DNS 劫持）、凭据存储 |
+| `main/sync/` | 后端 API 客户端与同步服务 |
+| `main/storage/` | LittleFS 缓存、NVS |
+| `main/scenes/` | 界面场景：Splash、Frame、BgRefresh、Settings、Xiaozhi |
+| `main/ui/` | 状态栏、帧视图、菜单 |
+| `main/events/` | 事件总线与 UI 事件 |
+| `main/power/` | 电源状态、休眠管理、关机、分钟时钟 |
+| `main/xiaozhi/` | 小智：配置激活、协议（MQTT / WebSocket）、MCP、对话服务 |
+| `main/resources/` | 配网页 HTML、内置字体 |
+| `main/utils/` | JSON、字节、GPIO、MAC 工具 |
 
-target、Flash、PSRAM、分区表已在 `sdkconfig.defaults` 固化。`sdkconfig.note4c.defaults` 只叠加四色面板选择。两套命令必须同时指定独立的 `SDKCONFIG`，避免先构建的面板配置污染后一个构建。两种面板命令和帧格式不同，不能混刷固件。
+---
 
-## 工程结构
-
-```text
-firmware/
-├── CMakeLists.txt
-├── partitions.csv              4 MB factory app + 12 MB LittleFS storage
-├── sdkconfig.defaults          ESP32-S3 / Flash / PSRAM / PM / TLS / Slate 配置
-├── tools/                      字体生成工具
-└── main/
-    ├── app/                    App 生命周期编排
-    ├── bsp/                    板级 GPIO、电源、I2C、EPD、按键、ADC、充电状态
-    ├── drivers/
-    │   ├── audio/              ES8311 + I2S duplex 音频播放/录音
-    │   ├── bus/                I2C 设备封装、总线锁、电源自救 hook
-    │   ├── display/            SSD2683/SSD1683-compatible EPD 驱动
-    │   └── input/              按键封装
-    ├── events/                 boot stage、group sync status、UI 事件与事件总线
-    ├── network/                Wi-Fi、SNTP、DNS hijack、captive portal、凭据存储
-    ├── power/                  power state、sleep manager、重启/关机、分钟级时钟
-    ├── resources/              captive portal HTML 与内置字体
-    ├── scenes/                 BootSplash、BgRefresh、Frame、Xiaozhi、Settings 及子页
-    ├── startup/                boot mode、首次启动/注册流程
-    ├── storage/                LittleFS cache、NVS schema
-    ├── sync/                   Slate backend HTTP API client 与 SyncService
-    ├── ui/                     状态栏、frame view、menu list、主题
-    ├── utils/                  JSON、时间、字节、锁 helper
-    └── xiaozhi/                小智配置、协议、MCP、对话服务
-```
-
-## 硬件规格
+## 硬件
 
 | 项 | 规格 |
 | --- | --- |
-| MCU | ESP32-S3-WROOM-1 N16R8V，16 MB QIO Flash + 8 MB Octal PSRAM |
-| 显示 | Note4：4.2" 黑白 EPD；Note4C：4.2" 黑白红黄 EPD；均为 400 x 300 |
-| 音频 | ES8311 codec，单声道扬声器，MEMS 麦，差分 D 类 PA |
-| 传感 | PCF8563 RTC、GT23SC6699 NFC |
-| 电源 | 单节 4.2 V 锂电，软锁存主电源，独立 EPD rail 与音频/I2C rail |
-| 按键 | GPIO0 确认 / BOOT，GPIO39 上，GPIO18 下 / 开机，EN 硬复位 |
-| 接口 | USB-C CDC/JTAG、喇叭座、调试座 |
+| MCU | ESP32-S3-WROOM-1 N16R8V：16 MB QIO Flash + 8 MB Octal PSRAM |
+| 显示 | 4.2" EPD，400×300，Note4 黑白 / Note4C 黑白红黄 |
+| 音频 | ES8311 codec、单声道扬声器、MEMS 麦克风、差分 D 类功放 |
+| 其他 | PCF8563 RTC、GT23SC6699 NFC、USB-C（CDC/JTAG） |
+| 按键 | 确认 / BOOT、上、下 / 开机，另有 EN 硬复位 |
 
-Flash 是 QIO，PSRAM 是 Octal。`CONFIG_ESPTOOLPY_OCT_FLASH=n` 与 `CONFIG_SPIRAM_MODE_OCT=y` 是正确组合。
+Flash 为 QIO、PSRAM 为 Octal，所以 `CONFIG_ESPTOOLPY_OCT_FLASH=n` 配合 `CONFIG_SPIRAM_MODE_OCT=y`。GPIO 26–37 被 PSRAM 占用。
 
-## GPIO
+### GPIO
 
-```text
-GPIO0   KEY_ENTER       确认 + BOOT，低有效
-GPIO1   STDBY_H         充电 IC 满电状态
-GPIO2   CHRG_L          充电 IC 充电状态
-GPIO3   LED_G           绿色 LED，低有效
-GPIO4   ADC_BAT         VBAT 1:2 分压
-GPIO5   RTC_INT         PCF8563 INT#
-GPIO6   EPD_PWR_EN      EPD rail
-GPIO7   NFC_FD          NFC 场检测
-GPIO8   EPD_BUSY        active-low，低=忙，高=空闲
-GPIO9   EPD_NRES
-GPIO10  EPD_NDC
-GPIO11  EPD_NCS         软件控制 CS
-GPIO12  EPD_SCK
-GPIO13  EPD_SDA         SPI MOSI
-GPIO14  I2S_MCLK
-GPIO15  I2S_SCLK
-GPIO16  I2S_ASDOUT      MIC DIN
-GPIO17  PWR_ON          主电源软锁存，高=保持供电
-GPIO18  KEY_DET / PGDN  下键 + 开机反馈
-GPIO19  USB_DN
-GPIO20  USB_DP
-GPIO21  NFC_PWR
-GPIO38  I2S_LRCK
-GPIO39  KEY_PGUP        上键，非 RTC IO，不能 ext1 唤醒
-GPIO42  PA_PWR_EN       AVDD_3V3：音频 + I2C 上拉
-GPIO43  TXD0
-GPIO44  RXD0
-GPIO45  I2S_DSDIN       喇叭 DOUT
-GPIO46  PA_CTRL         PA enable，高=出声
-GPIO47  I2C_SDA
-GPIO48  I2C_SCL
-```
-
-GPIO 26-37 被 Octal PSRAM 占用，不能用作普通 GPIO。
-
-## 电源
-
-主电源软锁存：
-
-```text
-USB/VBAT -> Q5 PMOS -> VIN -> Buck -> 3V3
-              ^
-              ├─ SW1 / GPIO18 下键拉低栅极：按住开机
-              └─ GPIO17 PWR_ON 自锁：固件拉高后松手不断电
-```
-
-三条关键 rail：
-
-| Rail | 控制 | 说明 |
+| 引脚 | 网络名 | 说明 |
 | --- | --- | --- |
-| 主电源 | GPIO17 | 拉低会整机断电；deep sleep 前必须 RTC GPIO hold 高 |
-| EPD 3V3 | GPIO6 | 关闭后屏幕内容保留，但 controller/电荷泵失效；醒来需完整 init |
-| AVDD_3V3 | GPIO42 | 音频供电 + I2C 上拉；任何 I2C 操作前必须打开并 hold |
+| GPIO0 | `KEY_ENTER` | 确认 / BOOT，低有效 |
+| GPIO1 | `STDBY_H` | 充电 IC 充满状态 |
+| GPIO2 | `CHRG_L` | 充电 IC 充电状态 |
+| GPIO3 | `LED_G` | 绿灯，低有效 |
+| GPIO4 | `ADC_BAT` | VBAT 1:2 分压（ADC1 CH3） |
+| GPIO5 | `RTC_INT` | PCF8563 INT# |
+| GPIO6 | `EPD_PWR_EN` | EPD 供电 |
+| GPIO7 | `NFC_FD` | NFC 场检测 |
+| GPIO8 | `EPD_BUSY` | 低 = 忙，高 = 空闲 |
+| GPIO9 | `EPD_NRES` | EPD 复位 |
+| GPIO10 | `EPD_NDC` | EPD 数据 / 命令选择 |
+| GPIO11 | `EPD_NCS` | EPD 片选，软件控制 |
+| GPIO12 | `EPD_SCK` | SPI 时钟 |
+| GPIO13 | `EPD_SDA` | SPI MOSI |
+| GPIO14 | `I2S_MCLK` | I2S 主时钟 |
+| GPIO15 | `I2S_SCLK` | I2S 位时钟 |
+| GPIO16 | `I2S_ASDOUT` | 麦克风数据 |
+| GPIO17 | `PWR_ON` | 主电源自锁，高 = 保持供电 |
+| GPIO18 | `KEY_DET` | 下键 / 开机 |
+| GPIO19 | `USB_DN` | USB D− |
+| GPIO20 | `USB_DP` | USB D+ |
+| GPIO21 | `NFC_PWR` | NFC 供电 |
+| GPIO38 | `I2S_LRCK` | I2S 帧时钟 |
+| GPIO39 | `KEY_PGUP` | 上键；不是 RTC IO，不能唤醒深睡 |
+| GPIO42 | `PA_PWR_EN` | AVDD_3V3：音频供电 + I2C 上拉 |
+| GPIO43 | `TXD0` | UART0 TX |
+| GPIO44 | `RXD0` | UART0 RX |
+| GPIO45 | `I2S_DSDIN` | 扬声器数据 |
+| GPIO46 | `PA_CTRL` | 功放使能，高 = 出声 |
+| GPIO47 | `I2C_SDA` | I2C 数据 |
+| GPIO48 | `I2C_SCL` | I2C 时钟 |
 
-开机阶段必须等待 GPIO18 松开后再交给按键驱动，否则下键会被误识别为一次普通按键。
+### 总线
 
-## 总线
+| 总线 | 引脚 | 设备 |
+| --- | --- | --- |
+| I2C0 | SDA=47、SCL=48 | ES8311 0x18、PCF8563 0x51、GT23SC6699 0x55 |
+| SPI3 | SCK=12、MOSI=13、CS=11、DC=10、RST=9、BUSY=8 | EPD，40 MHz，mode 0 |
+| I2S0 | MCLK=14、BCLK=15、WS=38、DIN=16、DOUT=45 | ES8311 全双工 |
 
-| 总线 | 端口 | 引脚 | 设备 |
+### 电源
+
+按住下键（GPIO18）会拉低 PMOS 栅极接通主电源，固件随后把 GPIO17 拉高自锁，松手也不会断电。开机时要等 GPIO18 松开再交给按键驱动，否则开机那一下会被识别成按键。
+
+| 供电 | 控制 | 注意 |
+| --- | --- | --- |
+| 主电源 | GPIO17 | 拉低即整机断电；深睡前必须用 RTC GPIO hold 保持高电平，否则按键无法唤醒 |
+| EPD | GPIO6 | 关闭后画面保留，但控制器状态丢失，重新上电需完整初始化 |
+| AVDD_3V3 | GPIO42 | 音频与 I2C 上拉；关闭后所有 I2C 操作都会失败 |
+
+### 分区
+
+| 分区 | 偏移 | 大小 | 用途 |
 | --- | --- | --- | --- |
-| I2C | `I2C_NUM_0` | SDA=47, SCL=48 | ES8311 0x18、PCF8563 0x51、GT23SC6699 0x55 |
-| SPI | `SPI3_HOST` | SCK=12, MOSI=13, CS=11, DC=10, RST=9, BUSY=8 | EPD，40 MHz mode 0 |
-| I2S | `I2S_NUM_0` | MCLK=14, BCLK=15, WS=38, DIN=16, DOUT=45 | ES8311 duplex |
-| ADC | ADC1 CH3 | GPIO4 | VBAT 分压 |
+| `nvs` | `0x9000` | 24 KB | Wi-Fi、服务端地址、设备密钥、小智配置 |
+| `phy_init` | `0xf000` | 4 KB | 射频校准数据 |
+| `factory` | `0x10000` | 4 MB | 应用固件 |
+| `storage` | `0x410000` | 约 12 MB | LittleFS，缓存帧与音频 |
 
-## 分区
+---
 
-[partitions.csv](partitions.csv)：
+## 启动
 
-```text
-nvs      0x9000    0x6000
-phy_init 0xf000    0x1000
-factory  0x10000   0x400000
-storage  0x410000  0xBF0000
-```
-
-`storage` 是 LittleFS，约 12 MB。Note4 黑白帧 15 KB、16 灰帧 60 KB，Note4C 每帧 30 KB，另加可选 PCM；缓存元数据记录实际 `image_format`，格式或尺寸不匹配时会自动重新下载。
-
-## 启动模式
-
-`boot_mode::Decide()` 根据凭据和唤醒原因决定：
+启动模式由 `boot_mode::Decide()` 决定：
 
 | 模式 | 条件 | 行为 |
 | --- | --- | --- |
-| `kPortal` | 没有 Wi-Fi 凭据 | 启动 SoftAP captive portal |
-| `kOffline` | 用户关闭设备端 Wi-Fi 开关 | 不初始化射频、不扫描，直接显示本地缓存；睡眠时不配置网络刷新 timer |
-| `kBackgroundRefresh` | RTC timer 唤醒、已有 device secret、且有缓存内容组 | 后台刷新当前动态帧，完成后继续 deep sleep |
-| `kFullActive` | 冷启动、按键唤醒、充电唤醒或其他情况 | 显示 UI，联网同步，允许用户操作 |
+| Portal | 没有 Wi-Fi 凭据 | 开启配网热点 |
+| BackgroundRefresh | 定时器唤醒，且已注册、有缓存 | 不点亮界面，同步当前组，当前帧变化时才刷屏，然后继续深睡 |
+| FullActive | 其他情况 | 显示界面、联网同步 |
 
-`wake_reason` 会随 poll 上报给后端：
+### 配网
 
-```text
-timer | button | power_on | charge | other
-```
+- 热点名为 `Slate-XXXX`：前缀可配置，后缀取 MAC 后两字节。所有 DNS 请求都指向 `192.168.4.1`。
+- 配网页分两步填写 Wi-Fi 和服务端地址。
+- 固件先试连 Wi-Fi，成功后才保存并重启。
 
-## 启动流程
+### 注册
 
-`App::Init()` 当前顺序：
+1. 联网并完成 SNTP 对时（HTTPS 需要正确时间）。
+2. 如果 NVS 里还没有设备密钥（`dev_sec`），调用 `POST /api/device/register` 注册。
+3. 屏幕显示配对码，等待在 Web 端绑定。
 
-```text
-nvs_flash_init + LittleFS mount
-  -> Board::Init()
-  -> AudioPlayer::Init()
-  -> evt::Init()
-  -> xiaozhi::XiaozhiService::Start()
-  -> SceneStack::SetContext()
-  -> load credentials + boot_mode::Decide()
-  -> SleepManager::Init()
-  -> StartUiLoop()
-  -> AttachInputs()
-  -> StartMinuteTick()
-  -> StartSleep()
-  -> 按 boot mode 启动 captive portal 或 Wi-Fi + SyncService
-  -> esp_pm_configure(80-240 MHz DFS)
-```
+之后的请求都带 `Authorization: Bearer <设备密钥>`。连续收到 5 次 401 时清除密钥并重启，重新注册。
 
-`Run()` 直接删除 main task，让 `ui_loop`、`slate_sync`、`audio_play`、EPD refresh 等后台 task 接管。
+---
 
-## Captive Portal
+## 同步
 
-没有 Wi-Fi 凭据、所有已保存网络在正常启动时均连接失败，或用户从设置选择“管理 Wi-Fi”时：
+同步服务运行在 `slate_sync` task 中，接口定义见 [backend/README.md](../backend/README.md#设备协议-v2)。
 
-- 启动 SoftAP：`{SLATE_AP_SSID_PREFIX}-{MAC后2字节}`，默认 `Slate-XXXX`。
-- DNS hijack 所有查询到 `192.168.4.1`。
-- HTTP portal 提供两步表单：Wi-Fi SSID/password 与 backend `server_url`。
-- 页面只返回已保存网络的 SSID，不返回密码；支持忘记指定网络。
-- 提交后先 `Wifi::TryConnect()` 验证，再按 SSID 添加/更新 NVS 并重启，不清除其他网络。
-- 最多保存 5 组网络；第 6 组会淘汰最久未成功连接的网络。
+### 轮询
 
-凭据结构：
-
-```cpp
-std::vector<WifiProfile> wifi_profiles;
-std::string last_success_ssid;
-bool wifi_enabled;
-std::string server_url;
-std::string device_id;
-std::string device_secret;
-```
-
-`wifi_profiles` 与最近成功项序列化在 `slate.net/wifi_list`；旧固件的 `ssid` / `pwd` 会在首次读取时无感迁移。`server_url` 和设备身份仍是设备级配置，不随 Wi-Fi profile 重复保存。首次配网后 `device_secret` 为空，重启进入注册流程。工厂重置会清空凭据并把 Wi-Fi 开关恢复成默认开启，下次开机重新进入 portal。
-
-## 多 Wi-Fi 与设备端开关
-
-开机联网使用单个约 20 秒的总预算：先全信道扫描一次，在已保存网络中优先尝试最近成功且当前可见的 SSID，其余可见项按信号排序，隐藏或未出现在扫描结果里的 SSID 放到末尾定向尝试。不会对每组凭据分别等待 20 秒。
-
-运行期断线先对当前网络快速重连最多 5 次；仍失败后按 `10 → 20 → 40 → 80 → 120 → 120` 秒退避扫描全部已保存网络，并优先尝试不同于刚失败目标的可用 SSID。同一 SSID 有多个 AP 时选 RSSI 最强的 BSSID。
-
-设置页提供“Wi-Fi 开关”和“管理 Wi-Fi”：
-
-- 关闭会持久化 `wifi_on=0`，停止 SyncService、小智网络会话、重连 timer 和 Wi-Fi driver，但保留全部凭据与内容缓存。
-- 关闭期间不启动 captive portal，也不为动态内容配置 RTC 网络刷新唤醒。
-- 开启后有凭据则在后台自动选网，没有凭据则进入 captive portal。
-- “管理 Wi-Fi”会暂时断开 STA 并开启 `Slate-XXXX`，提交成功后重启恢复正常模式。
-
-当前 NVS encryption 未启用，Wi-Fi 密码沿用既有方案保存在设备 NVS 中；Portal 的 profile API 永远不返回密码。
-
-## 设备注册与绑定
-
-联网后：
-
-1. SNTP 对时，HTTPS 需要有效系统时间。
-2. `api::Init(server_url, mac, device_secret)`。
-3. 如果 NVS 没有 `device_secret`，调用：
-
-```text
-POST /api/v1/devices
-```
-
-4. 保存后端返回的 `device_id` 与 64 字符 `device_secret`。
-5. 屏幕显示 `pair_code`，等待 Web claim。
-
-后续所有受保护设备 API 都使用：
-
-```text
-Authorization: Bearer <device_secret>
-```
-
-如果连续 5 次收到 401，固件会投递 `kSecretInvalid`，在 UI 主线程清除 secret 并重启，走重新注册流程。
-
-## 同步协议
-
-`SyncService` 运行在 `slate_sync` task，事件位包括：
-
-- 普通 poll
-- 手动 trigger
-- next/prev 切组
-- timer wake background refresh
-- stop
-
-轮询周期：
-
-| 状态 | 周期 |
+| 状态 | 间隔 |
 | --- | --- |
 | 已绑定 | 60 秒 |
-| 未绑定前 10 分钟 | 10 秒 |
-| 未绑定 10-30 分钟 | 30 秒 |
-| 未绑定 30 分钟后 | 60 秒 |
+| 未绑定，前 10 分钟 | 10 秒 |
+| 未绑定，10–30 分钟 | 30 秒 |
+| 未绑定，30 分钟后 | 60 秒 |
 
-poll telemetry：
+- 每次 `sync` / `group` 请求都带上本地缓存的 `manifestVersion`。版本一致时服务端不返回 manifest，设备不下载任何内容。
+- 版本变化时响应里直接带新 manifest。设备按 sha256 只下载缺失或变化的图片和音频（`GET /api/device/blobs/{hash}`），并校验大小和哈希。
+- Note4 在同步与切组时带 `?frameFormat=gray4`，保留 v2 JSON 请求体。服务端只对选了 16 灰的静态图片提供灰阶帧；原版 v2 服务端仍可提供黑白帧。
+- Note4C 在同步与切组时请求 `frameFormat: "bwry2"`。收到 30000 字节四色帧时直接显示，收到 15000 字节旧黑白帧时在上屏前展开为黑白像素。LittleFS 保留原始下载字节及其哈希。
+- 服务端返回 426 表示固件协议版本过旧，需要升级固件。
 
-```json
-{
-  "telemetry": {
-    "battery_pct": 85,
-    "rssi_dbm": -56,
-    "fw_version": "0.1.0",
-    "wake_reason": "timer",
-    "current_group": "gid",
-    "current_content_seq": 3,
-    "current_content_etag": "etag",
-    "manifest_etag": "etag",
-    "display_profile": "note4c_bwry"
-  }
-}
-```
+### 定时刷新
 
-同步策略：
+- 动态帧带 `refreshAt`（Unix 秒）。深睡前按 `refreshAt - 当前时间` 设置 RTC 定时器，最短 60 秒。
+- 连续联系不上服务器时按指数退避，最长 1 小时。
+- 定时器唤醒时上报当前帧的 `currentContentId`。服务端会先重新渲染这一帧（如果已到期），设备在同一次唤醒中拿到新图。
+- 只有当前帧的图片或状态栏变化时才刷新屏幕。
 
-- manifest etag 未变：只写当前 state，触发缓存命中 UI。
-- manifest etag 变化：`GET /groups/:gid/manifest`，再增量下载缺失 image/audio。
-- manifest 中 Note4 静态图片按 `display_mode` 选择 `image_renditions.mono1` 或 `image_renditions.gray4`，Note4 动态内容使用 mono1，Note4C 始终使用 bwry2；图片下载请求显式带实际 `format`。
-- 每个资源请求带 `If-None-Match`，后端命中返回 304。
-- timer wake 且 manifest 未变时，如果后端返回 `current_content`，只更新当前帧。
-- 切组调用 `/devices/current/group/next` 或 `/prev`，然后同步目标组。
+### 缓存写入
 
-## LittleFS 缓存
+整组同步分两步，保证任何时候失败都不会留下半份缓存：
 
-布局：
+1. **下载**：缺失的文件先下载到该组的暂存目录。这一步失败不影响已有缓存。
+2. **提交**：全部下载完成后逐帧替换（每帧的图片、音频和 meta 一起换），最后才写 manifest 版本。提交中途失败或断电时版本号保持旧值，下一轮同步会拿到完整 manifest，按 hash 补齐不一致的帧。
 
-```text
-/littlefs/state.json
-/littlefs/groups/{gid}/manifest.json
-/littlefs/groups/{gid}/frames/{idx}.img
-/littlefs/groups/{gid}/frames/{idx}.img.etag
-/littlefs/groups/{gid}/frames/{idx}.pcm
-/littlefs/groups/{gid}/frames/{idx}.pcm.etag
-/littlefs/groups/{gid}/frames/{idx}.meta
-```
+缓存最多保留 4 个组，并保证至少 1 MB 空闲空间。下载前按待下载体积先清理其他组；目标组本身放不下时同步报错。
 
-`FrameMeta` 包含：
+### 屏幕待重绘
 
-```cpp
-status_bar_text
-content_etag
-image_etag
-image_format
-audio_etag
-has_ttl
-ttl_sec
-```
+提交前设备会标记「屏幕待重绘」，确认物理屏幕已显示新缓存后才清除：
 
-完整 manifest 同步使用 per-group staging area：
+- 前台模式：提交成功即清除，界面用真实的上一帧缓冲重绘。
+- 后台刷新：等 EPD 刷新完成才清除；刷新超时或撞到截止时间则保留。
 
-1. `BeginFrameStage(gid)`
-2. 下载所有缺失 image/audio 到 stage
-3. 写 staged meta
-4. 全部成功后逐帧 `CommitStagedFrame`
-5. 写 manifest 与 state
-6. 清理旧帧与旧音频
+标记存在时，下一轮成功同步按内容已变化处理。后台刷新不拿缓存当旧画面做局刷，而是全刷当前帧。
 
-这样失败同步不会把已提交缓存写成半更新状态。同步后会按空闲空间和组数量清理旧组，当前配置为至少保留 1 MB，最多缓存 4 个组。
+### 缓存布局
 
-## UI 与按键
+| 路径 | 内容 |
+| --- | --- |
+| `/littlefs/layout` | 缓存布局版本，不一致时启动时整体格式化 |
+| `/littlefs/state.json` | 所选组、manifest 版本、当前帧位置、访问计数 |
+| `/littlefs/groups/{gid}/manifest.json` | 组名、manifest 版本、帧数、最近访问序号 |
+| `/littlefs/groups/{gid}/frames/{idx}.img` / `.pcm` / `.meta` | 帧的图片、音频和元数据，idx 为帧在 manifest 中的位置 |
 
-唯一 UI 消费者是 `ui_loop` task。事件通过 FreeRTOS queue 传递，`UiEvent` 必须保持 trivially-copyable，不允许放 `std::string` 或 owning 容器。
+---
 
-按键：
+## 按键与界面
 
 | 操作 | 行为 |
 | --- | --- |
-| UP 短按 | 上一帧 |
-| UP 长按 | 上一个内容组 |
-| DOWN 短按 | 下一帧 |
-| DOWN 长按 | 下一个内容组 |
-| ENTER 短按 | 下一帧 |
-| ENTER 长按 | 设置页 |
-| ENTER 双击 | 小智语音页 |
-| UP + DOWN 同时按 | 紧急全屏刷新，清残影 |
+| 上 / 下 短按 | 上一帧 / 下一帧 |
+| 上 / 下 长按 | 上一个 / 下一个内容组 |
+| 确认 短按 | 下一帧 |
+| 确认 长按 | 设置：音量调节、设备信息、重启设备、恢复出厂 |
+| 确认 双击 | 小智语音对话 |
+| 上 + 下 同时按 | 全屏刷新，清除残影 |
 
-Scene：
+所有界面操作都在 `ui_loop` task 中执行，其他 task 通过 FreeRTOS 队列投递事件。`UiEvent` 必须可以按值拷贝，不能包含 `std::string` 或其他持有内存的容器。
 
-```text
-BootSplashScene      启动、配网、注册、等待绑定/内容组
-BgRefreshScene       timer wake 后台刷新
-FrameScene           常规显示与翻页
-XiaozhiScene         小智语音对话
-SettingsScene        设置页
-  ├─ VolumePage      音量调节
-  ├─ DeviceInfoPage
-  ├─ RestartDevicePage
-  └─ FactoryResetPage
-```
+## 显示
 
-## EPD
-
-两种 profile：
-
-| profile | 服务端帧 | 刷新策略 | 状态信息策略 |
-| --- | --- | --- | --- |
-| `note4_mono` | 15000 B mono1 或 60000 B gray4，4bpp 中 0=黑/15=白 | mono1 支持局刷；gray4 仅全刷 | 显示实时 Wi-Fi、电量百分比和充电状态；灰度驻留时抑制状态栏局刷 |
-| `note4c_bwry` | 30000 B，2bpp，00 黑/01 白/10 黄/11 红 | 仅全刷；请求合并且相邻刷新至少间隔 12 秒 | 固定 Wi-Fi 与中性电量图标，隐藏百分比；设备信息页进入后不自动重绘 |
-
-Note4C 会忽略信号格、电量采样、充电状态、分钟 tick 和同步进度文案造成的纯状态栏更新；图片 rendition 变化、用户切帧、切组和设置操作仍可触发刷新。动态内容的实际图片发生变化时仍按服务端 `next_wake_sec` 刷新。
-
-固件 UI 使用纸白、正文黑、强调黄、危险红四个语义色。Note4C 的启动状态条、配对码底板、状态栏分隔、菜单光标、进度条和小智会话角色使用黄色，连接错误及重启/恢复出厂等危险操作使用红色；LVGL RGB565 输出会转换为面板的 BWRY 2bpp 编码。Note4 编译时强调色与危险色均退化为黑色，不改变原有双色布局和像素输出。
-
-Note4 模式切换固定遵循：
-
-1. 日常 UI 与动态内容使用 mono1；小面积变化局刷，变化过大或累计 8 次局刷后全刷清残影。
-2. 进入 gray4 静态图片时，刷新任务先用 OTP 1bpp 波形写入纯白全屏基底，再用外置 5 段波形完成 16 灰全刷。
-3. gray4 显示期间不做状态栏或同步文案局刷。
-4. 离开 gray4 后把 mono1 基底标记为失效，下一次 mono1 刷新强制全刷；之后才恢复局刷。
-
-16 灰初始化与 LUT 数据基于 Zectrix Lab 官方 demo 固定提交 `ca285c98ed0641f86780edb1f5ec77b0335fe649`，许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。灰度刷新最长等待按 45 秒配置。
-
-共同约束：
-
-- BUSY 极性是 active-low：低=忙，高=空闲。
-- Note4 BUSY 超时 5 秒；Note4C 全刷慢，BUSY 超时 120 秒。
-- Note4 读屏内温度并写补偿寄存器；Note4C 使用独立的四色初始化与 deep-sleep 命令序列。
-
-deep sleep 前只等待已有 EPD refresh 完成，不主动全刷；屏幕内容依靠墨水屏双稳态保留。
+- Note4 黑白帧为 15000 字节；SSD2683 按 2bpp 传输，SPI 数据量是 30 KB。
+- Note4 16 灰帧为 60000 字节。驱动先写入全白底，再使用五段波形全刷。灰阶驻留期间暂停状态栏局刷，离开灰阶时先全刷，再恢复普通局刷。上、下键同时按会按当前格式清除残影。
+- 灰阶波形和初始化来自 Zectrix Lab 示例，许可见 [第三方声明](THIRD_PARTY_NOTICES.md)。Note4 灰阶刷新等待上限为 45 秒。
+- 全刷约 2–3 秒，局刷约 0.3–0.6 秒；连续局刷 8 次后做一次全刷清残影。
+- Note4C 在换帧、进入场景或背景重绘时采样状态栏。Wi-Fi 离线及电量低于 20% 时标红，设备信息页显示进入时的完整快照。
+- 温度补偿读数缓存 60 秒。
+- 深睡前只等待进行中的刷新完成，不额外刷屏，画面靠墨水屏自身保持。
 
 ## 音频
 
-`AudioPlayer` 初始化 I2S0 duplex：
+I2S0 全双工，16 kHz、单声道、16-bit，MCLK = 256 × fs。
 
-- 16 kHz
-- mono
-- 16-bit
-- MCLK = 256 x fs
-- TX 用于内容音频和小智下行播放
-- RX 用于小智麦克风上行
+- 发送方向播放内容音频和小智回复，接收方向用于小智录音。
+- 内容音频格式与后端一致（raw s16le PCM），与小智共用同一个音量设置。
+- ES8311 在第一次播放时才打开；打开后等 100 ms 再开功放，切换音频前先静音，以减少爆音。
 
-ES8311 使用 lazy open：
+## 休眠
 
-1. 初始化时创建 codec handle，但不立即 open。
-2. 第一次播放或语音进入时 open codec。
-3. DAC bias 等 100 ms 后再拉高 GPIO46 PA。
-4. 切歌前静音并等待 DMA 残留，减少爆音。
+闲置 `SLATE_IDLE_DEEP_SLEEP_MIN`（默认 3）分钟后进入深睡。
 
-内容音频格式与后端一致：
+**不进入深睡的情况**
 
-```text
-16 kHz mono signed 16-bit little-endian raw PCM
-```
+- 配网模式
+- 插着 USB 或正在充电
+- 小智对话中
+- 设备未绑定的前 2 小时（便于在 Web 端绑定，低电量时例外）
 
-内容播放和小智对话共用同一个音量设置。
+**唤醒源**：确认键（GPIO0）、下键（GPIO18）、插入 USB（GPIO2）。当前帧是需要定时刷新的动态帧时，额外开启 RTC 定时唤醒。
 
-## 小智语音
+**进入顺序**：停止小智、同步、音频 → 等待屏幕刷新完成 → 关闭 EPD 和 AVDD 供电 → hold 住 GPIO17 → 配置唤醒源。
 
-`xiaozhi/` 子系统包含：
-
-- `config/`：`activation_client` / `settings`，向小智配置服务获取 MQTT/WebSocket 配置与 activation 信息，并保存 UUID、协议配置、音量等 NVS 设置。
-- `mcp/`：`mcp_dispatcher` / `mcp_tools`，MCP 协议分发与工具注册。
-- `protocol/`：`protocol` / `mqtt_protocol` / `websocket_protocol` / `audio_stream_packet`，对话协议。
-- `service/`：`xiaozhi_service`、`xiaozhi_phase`、`audio_service`、`message_handler`，对话状态机、麦克风、播放、语音处理。
-
-进入方式：ENTER 双击打开 `XiaozhiScene`。如果尚无协议配置，会先走配置/激活流程；配置完成后进入待机。语音活动、配置任务或播放中会阻止 deep sleep。
-
-## 休眠与唤醒
-
-`SleepManager` 策略：
-
-- 默认闲置 3 分钟 deep sleep，可由 `SLATE_IDLE_DEEP_SLEEP_MIN` 配置。
-- captive portal 模式禁用 deep sleep。
-- USB/充电存在时暂停 deep sleep。
-- 未绑定后 2 小时内阻止 deep sleep，方便用户在 Web claim 后设备快速响应；低电量会退出 grace。
-- 小智活动中阻止 deep sleep。
-
-唤醒源：
-
-- ENTER / GPIO0
-- DOWN / GPIO18
-- CHARGE_DETECT / GPIO2
-- RTC timer（仅当前动态帧需要定时刷新时启用）
-
-GPIO39 上键不是 RTC IO，不能作为 deep sleep ext1 唤醒源。
-
-进入 deep sleep 前：
-
-1. 停止小智、同步和音频。
-2. 等待 EPD 当前刷新完成，保存状态栏快照。
-3. 关闭 EPD rail。
-4. 关闭音频/I2C rail。
-5. 使用 RTC GPIO hold 住 GPIO17 主电源。
-6. 配置 ext1 和可选 timer。
+---
 
 ## 配置项
 
-[main/Kconfig.projbuild](main/Kconfig.projbuild)：
+在 [main/Kconfig.projbuild](main/Kconfig.projbuild) 中：
 
 | 项 | 默认 | 说明 |
 | --- | --- | --- |
-| `SLATE_DISPLAY_NOTE4` | 选中 | Note4 黑白面板，1bpp + 局刷 |
-| `SLATE_DISPLAY_NOTE4C` | 未选 | Note4C 四色面板，2bpp + 仅全刷 |
-| `SLATE_DEFAULT_SERVER_URL` | 空 | captive portal 服务端 URL 预填值 |
-| `SLATE_AP_SSID_PREFIX` | `Slate` | SoftAP SSID 前缀 |
-| `SLATE_DEFAULT_TIMEZONE` | `CST-8` | SNTP 后设置的 POSIX TZ |
-| `SLATE_IDLE_DEEP_SLEEP_MIN` | `3` | 闲置多少分钟进 deep sleep |
+| `SLATE_DEFAULT_SERVER_URL` | 空 | 配网页里预填的服务端地址 |
+| `SLATE_AP_SSID_PREFIX` | `Slate` | 热点名前缀 |
+| `SLATE_DEFAULT_TIMEZONE` | `CST-8` | POSIX 时区 |
+| `SLATE_IDLE_DEEP_SLEEP_MIN` | `3` | 闲置多少分钟后深睡 |
 
-`sdkconfig.defaults` 还固化：
+组件依赖见 [main/idf_component.yml](main/idf_component.yml)。内置字体由仓库根目录的 `scripts/fonts/firmware.sh` 生成。
 
-- ESP32-S3 target
-- 16 MB QIO Flash
-- 8 MB Octal PSRAM
-- LittleFS 分区表
-- LVGL 9.5
-- TLS root CA bundle
-- mbedTLS dynamic buffer 与 external mem alloc
-- DFS 80-240 MHz
-- tickless idle
-- deep sleep leakage workaround
+## 调试提示
 
-## 依赖
-
-[main/idf_component.yml](main/idf_component.yml)：
-
-```yaml
-espressif/button: ~4.1.5
-espressif/esp_codec_dev: ~1.5.6
-78/esp-ml307: ~3.6.5
-espressif/esp_audio_codec: ~2.4.1
-espressif/esp_audio_effects: ~1.2.1
-lvgl/lvgl: ~9.5.0
-espressif/esp_lvgl_port: ~2.7.2
-joltwallet/littlefs: ~1.16.0
-idf: ">=5.5"
-```
-
-## 字体
-
-固件内置字体在 `main/resources/fonts/`：
-
-- `zfull_16.c`
-- `zfull_12.c`
-- `font_awesome_14_1.c`
-- `font_awesome_30_1.c`
-
-生成脚本：
-
-```bash
-firmware/tools/gen_zfull_fonts.sh
-```
-
-## 调试要点
-
-- HTTP base URL 接受 `http://` 和 `https://`；authenticated HTTP 会打印警告。
-- HTTPS 需要 SNTP 时间同步，否则证书校验可能失败。
-- `/api/v1` 前缀写死在 `sync/api_client.cc`，要与 shared/backend 保持一致。
-- EPD BUSY 是低忙高闲，调试新屏或新板时不要按 SSD1683 datasheet 默认极性判断。
-- AVDD_3V3 关闭后 I2C 上拉消失，任何 I2C 操作都会失败。
-- deep sleep 前 GPIO17 必须切 RTC GPIO hold 高，否则会整机断电，按键唤不醒。
+- 服务端地址可以是 `http://`，但鉴权请求走明文时会打印警告。
+- 设备协议版本是 `api::kProtocol`（`sync/api_client.h`），要和后端 `api.DeviceProtocol` 一致。
+- 调试 EPD 时注意：BUSY 是低电平表示忙，和 SSD1683 手册的默认极性相反。

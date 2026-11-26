@@ -1,13 +1,32 @@
 #include "storage/cache/cache.h"
 
+#include <cstring>
+
 #include <esp_littlefs.h>
 #include <esp_log.h>
 
+#include "drivers/display/display_profile.h"
 #include "storage/cache/cache_internal.h"
 #include "storage/cache/cache_io.h"
 #include "storage/cache/cache_paths.h"
 
 namespace cache {
+namespace {
+
+// 缓存布局版本。帧元数据、manifest 或 state.json 的格式变化时递增：Init 发现不一致会
+// 整体格式化，固件不需要读旧格式。
+constexpr const char* kLayoutVersion = display_profile::kFourColor ? "2-note4c" : "3";
+
+std::string LayoutPath() {
+    return std::string(internal::kRoot) + "/layout";
+}
+
+bool LayoutCurrent() {
+    std::vector<uint8_t> buf;
+    return internal::ReadAll(LayoutPath(), buf, 16) && std::string(buf.begin(), buf.end()) == kLayoutVersion;
+}
+
+}  // namespace
 
 bool Init() {
     esp_vfs_littlefs_conf_t cfg = {};
@@ -23,6 +42,11 @@ bool Init() {
     }
     size_t total = 0, used = 0;
     esp_littlefs_info(cfg.partition_label, &total, &used);
+    if (!LayoutCurrent()) {
+        ESP_LOGW(internal::kTag, "cache layout mismatch want=%s action=format", kLayoutVersion);
+        if (!FormatAll())
+            return false;
+    }
     internal::DirEnsure(std::string(internal::kRoot) + "/groups");
     return true;
 }
@@ -52,7 +76,7 @@ bool FormatAll() {
     }
     internal::ResetStateCache();
     internal::DirEnsure(std::string(internal::kRoot) + "/groups");
-    return true;
+    return internal::WriteAll(LayoutPath(), kLayoutVersion, std::strlen(kLayoutVersion));
 }
 
 }  // namespace cache

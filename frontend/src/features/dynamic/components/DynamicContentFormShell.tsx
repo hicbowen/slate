@@ -1,26 +1,23 @@
 import type { FormEvent, ReactNode } from 'react';
-import type { FrameFormatT } from 'shared';
+import { FramePreviewFormat } from '@/components/eink/FramePreviewFormat';
 import { cn } from '@/lib/cn';
-import { FrameFormatToggle } from '@/components/eink/FrameFormatToggle';
 
 export function DynamicContentFormShell({
   onSubmit,
   preview,
+  previewFormat,
   header,
   fields,
   actions,
   gridClassName,
-  previewFormat,
-  onPreviewFormatChange,
 }: {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   preview: ReactNode;
+  previewFormat?: { color: boolean; onChange: (color: boolean) => void };
   header: ReactNode;
   fields?: ReactNode;
   actions?: ReactNode;
   gridClassName?: string;
-  previewFormat?: FrameFormatT;
-  onPreviewFormatChange?: (format: FrameFormatT) => void;
 }) {
   return (
     <form
@@ -28,14 +25,16 @@ export function DynamicContentFormShell({
       className={cn('grid grid-cols-1 gap-6 lg:gap-8', gridClassName ?? 'lg:grid-cols-[1.3fr_1fr]')}
     >
       <div className="order-2 min-w-0 lg:order-1">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 ml-0.5">
-          <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em]">
+        {previewFormat ? (
+          <FramePreviewFormat
+            format={previewFormat.color ? 'bwry2' : 'mono1'}
+            onChange={(format) => previewFormat.onChange(format === 'bwry2')}
+          />
+        ) : (
+          <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em] ml-0.5 mb-2">
             设备预览
           </p>
-          {previewFormat && onPreviewFormatChange && (
-            <FrameFormatToggle value={previewFormat} onChange={onPreviewFormatChange} />
-          )}
-        </div>
+        )}
         {preview}
       </div>
 

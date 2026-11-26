@@ -1,0 +1,103 @@
+name: Server CI
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - LICENSE
+      - .gitignore
+      - 'firmware/**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - LICENSE
+      - .gitignore
+      - 'firmware/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/slate
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: slate
+          POSTGRES_PASSWORD: slate
+          POSTGRES_DB: slate_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U slate -d slate_test"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+    env:
+      SLATE_TEST_DATABASE_URL: postgresql://slate:slate@127.0.0.1:5432/slate_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: scripts/check.sh backend
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: scripts/check.sh frontend
+
+  docker:
+    needs: [backend, frontend]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set short SHA
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=master
+            type=raw,value=${{ env.SHORT_SHA }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

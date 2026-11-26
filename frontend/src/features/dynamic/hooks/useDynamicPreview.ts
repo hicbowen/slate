@@ -1,25 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DynamicConfig, type DynamicConfigT, type DynamicTypeT, type FrameFormatT } from 'shared';
-import { effectiveDynamicFrameName } from '@/features/dynamic/model/display-name';
+import { ColorFrameFormat, type DynamicConfig, type DynamicType } from '@/api';
 import { usePreviewDynamicContent } from '@/features/dynamic/query/dynamic-content-queries';
 
-type PreviewContentType = DynamicTypeT | 'image';
+type PreviewContentType = DynamicType | 'image';
 
 export function useDynamicPreview({
   contentId,
   type,
   config,
-  frameName,
   dashboardData,
-  format,
+  color,
   debounceMs = 800,
 }: {
   contentId?: string;
   type: PreviewContentType | null;
-  config: DynamicConfigT | null;
-  frameName: string;
+  config: DynamicConfig | null;
   dashboardData?: Record<string, unknown> | null;
-  format: FrameFormatT;
+  color: boolean;
   debounceMs?: number;
 }) {
   const preview = usePreviewDynamicContent(contentId);
@@ -37,21 +34,15 @@ export function useDynamicPreview({
       invalidatePreview();
       return;
     }
-    const parsed = DynamicConfig.safeParse(config);
-    if (!parsed.success) {
-      invalidatePreview();
-      return;
-    }
     const seq = ++previewSeq.current;
     setLivePreviewData(null);
     const controller = new AbortController();
     const timer = setTimeout(() => {
       previewMutate(
         {
-          config: parsed.data,
-          frameName: effectiveDynamicFrameName(type, parsed.data, frameName),
-          data: parsed.data.type === 'dashboard' ? (dashboardData ?? undefined) : undefined,
-          format,
+          config,
+          data: config.type === 'dashboard' ? (dashboardData ?? undefined) : undefined,
+          format: color ? ColorFrameFormat : undefined,
           signal: controller.signal,
         },
         {
@@ -68,16 +59,7 @@ export function useDynamicPreview({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [
-    config,
-    dashboardData,
-    debounceMs,
-    format,
-    frameName,
-    invalidatePreview,
-    previewMutate,
-    type,
-  ]);
+  }, [color, config, dashboardData, debounceMs, invalidatePreview, previewMutate, type]);
 
   return { livePreviewData, previewPending: preview.isPending, invalidatePreview };
 }

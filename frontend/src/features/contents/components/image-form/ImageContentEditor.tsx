@@ -1,20 +1,19 @@
 // 图片内容编辑器 — 仅用于编辑已有图片内容；新建流程走 ContentCreateEditor。
 //
 // 拆分：
-//   PreviewCanvas   — 1bpp 预览 + 拖拽/缩放交互
+//   PreviewCanvas   — 帧预览 + 拖拽/缩放交互
 //   ImageDropzone   — 选图(可选)
 //   AudioDropzone   — 选音频 + 删除已有音频
-//   ImageRenderPresetControls — 缩放 / 图片优化风格
+//   DitherControls  — 缩放 / 抖动算法 / 阈值
 
 import type { FormEvent } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
-import type { ContentDetailT } from 'shared';
+import type { Content } from '@/api';
 import { useGenerateContentTts } from '@/features/contents/query/content-audio-queries';
 import {
-  useContentImage,
-  useContentImageSource,
-} from '@/features/contents/query/content-image-queries';
-import { useUpdateImageContent } from '@/features/contents/query/content-mutation-queries';
+  usePatchContentFrameName,
+  useUpdateImageContent,
+} from '@/features/contents/query/content-mutation-queries';
 import { useToast } from '@/components/feedback/toast-context';
 import { FormActions } from '@/components/ui/FormActions';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -25,31 +24,31 @@ import { ImageFormBody } from './ImageFormBody';
 
 interface ImageContentEditorProps {
   gid: string;
-  content: ContentDetailT;
+  content: Content;
   onDone: () => void;
 }
 
 export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorProps) {
   const updateImageContent = useUpdateImageContent(gid);
+  const patchFrameName = usePatchContentFrameName(gid);
   const generateTts = useGenerateContentTts(gid);
-  const submitting = updateImageContent.isPending || generateTts.isPending;
+  const submitting =
+    updateImageContent.isPending || patchFrameName.isPending || generateTts.isPending;
   const toast = useToast();
   const form = useImageContentForm(content);
 
-  const rendition = content.image_renditions[form.preview.format] ?? content.image_renditions.mono1;
-  const existingImg = useContentImage(
-    content.id,
-    !form.image.file ? rendition.etag : null,
-    form.preview.format
-  );
-  const existingSource = useContentImageSource(content.id, content.source_available);
   const canSubmit = form.canEdit;
 
   async function submitContent() {
     try {
-      if (form.hasContentPatch) {
+      if (form.hasUploadPatch) {
         const fd = await form.buildFormData();
         await updateImageContent.mutateAsync({ contentId: content.id, form: fd });
+      } else if (form.frameNameChanged) {
+        await patchFrameName.mutateAsync({
+          contentId: content.id,
+          frameName: form.frameName.trim() || null,
+        });
       }
       if (form.audio.wantsTts) {
         try {
@@ -90,15 +89,13 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
             gid={gid}
             form={form}
             isEdit
-            existingImage={existingImg.data}
-            existingSource={!form.image.file ? existingSource.data : undefined}
-            existingImagePending={
-              (existingImg.isPending || existingSource.isPending) && !form.image.file
-            }
-            hasExistingAudio={!!content.audio_etag}
+            imageHash={content.imageHash}
+            colorImageHash={content.colorImageHash}
+            grayImageHash={content.grayImageHash}
+            hasExistingAudio={!!content.audio?.hash}
             editingContentId={content.id}
-            audioStatus={content.audio_status}
-            audioError={content.audio_error}
+            audioStatus={content.audio?.status ?? null}
+            audioError={content.audio?.error ?? null}
             beforeFields={
               <div className="space-y-3">
                 <p className="font-sans text-[12px] text-stone leading-relaxed">

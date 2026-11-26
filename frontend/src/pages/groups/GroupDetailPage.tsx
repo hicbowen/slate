@@ -2,13 +2,12 @@
 //
 // dnd-kit reorder 通过 useDndOrder 复用；本地顺序会在保存失败时回滚。
 
-import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Layers } from 'lucide-react';
 import { useGroup, useUpdateGroup } from '@/features/groups/query/group-queries';
 import { useGroupContents } from '@/features/contents/query/content-read-queries';
 import { useReorderContents } from '@/features/contents/query/content-mutation-queries';
-import type { ContentDetailT, FrameFormatT, GroupSummaryT } from 'shared';
+import type { Content, Group } from '@/api';
 import { Spinner } from '@/components/ui/Spinner';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -23,7 +22,6 @@ import { getApiErrorMessage } from '@/lib/api-errors';
 import { formatBytes } from '@/lib/format';
 import { useDndOrder } from '@/components/dnd/useDndOrder';
 import { appRoutes } from '@/app/routes';
-import { FrameFormatToggle } from '@/components/eink/FrameFormatToggle';
 
 export function GroupDetailPage() {
   const navigate = useNavigate();
@@ -34,7 +32,7 @@ export function GroupDetailPage() {
       hint="请从总览页进入具体内容组。"
       action={<BackHomeLink />}
     >
-      {({ gid }) => <GroupDetailContent gid={gid} navigate={navigate} />}
+      {({ gid }) => <GroupDetailContent key={gid} gid={gid} navigate={navigate} />}
     </RequireRouteParams>
   );
 }
@@ -50,27 +48,20 @@ function GroupDetailContent({
   const contents = useGroupContents(gid);
   const reorder = useReorderContents(gid);
   const toast = useToast();
-  const [previewFormat, setPreviewFormat] = useState<FrameFormatT>('mono1');
 
   const group = groupQuery.data;
   const { sensors, currentOrder, orderedItems, onDragEnd } = useDndOrder(
     contents.data,
     getContentId,
-    (newOrder, { commit, rollback }) =>
-      reorder.mutate(
-        { order: newOrder },
-        {
-          onSuccess: commit,
-          onError: (err) => {
-            rollback();
-            toast.error('排序保存失败', getApiErrorMessage(err));
-          },
-        }
-      )
+    (newOrder) =>
+      reorder.mutateAsync({ order: newOrder }).catch((err: unknown) => {
+        toast.error('排序保存失败', getApiErrorMessage(err));
+        throw err;
+      })
   );
 
   const openCreate = () => navigate(appRoutes.newContent(gid));
-  const openEdit = (content: ContentDetailT) => {
+  const openEdit = (content: Content) => {
     if (content.kind === 'dynamic') {
       navigate(appRoutes.editDynamicContent(gid, content.id));
     } else {
@@ -113,30 +104,15 @@ function GroupDetailContent({
         ) : contents.isError ? (
           <EmptyState title="加载失败" hint="请刷新重试。" />
         ) : contents.data && contents.data.length > 0 ? (
-          <>
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-stone">
-                设备效果预览
-              </p>
-              <FrameFormatToggle value={previewFormat} onChange={setPreviewFormat} allowGray />
-            </div>
-            <SortableGrid
-              sensors={sensors}
-              order={currentOrder}
-              items={orderedItems}
-              onDragEnd={onDragEnd}
-              getKey={(content) => content.id}
-              className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-              renderItem={(content) => (
-                <ContentCard
-                  gid={gid}
-                  content={content}
-                  onEdit={openEdit}
-                  previewFormat={previewFormat}
-                />
-              )}
-            />
-          </>
+          <SortableGrid
+            sensors={sensors}
+            order={currentOrder}
+            items={orderedItems}
+            onDragEnd={onDragEnd}
+            getKey={(content) => content.id}
+            className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+            renderItem={(content) => <ContentCard gid={gid} content={content} onEdit={openEdit} />}
+          />
         ) : (
           <EmptyState
             title="尚无内容"
@@ -153,7 +129,7 @@ function GroupDetailContent({
   );
 }
 
-function getContentId(content: ContentDetailT): string {
+function getContentId(content: Content): string {
   return content.id;
 }
 
@@ -174,7 +150,7 @@ function GroupHeader({
   onBack,
   onAdd,
 }: {
-  group: GroupSummaryT;
+  group: Group;
   onBack: () => void;
   onAdd: () => void;
 }) {
@@ -215,7 +191,7 @@ function GroupHeader({
           buttonClassName="p-2 -m-1"
         />
       }
-      subtitle={`${group.content_count} 项 · ${formatBytes(group.total_bytes)}`}
+      subtitle={`${group.contentCount} 项 · ${formatBytes(group.totalBytes)}`}
       action={
         <Button iconLeft={<Plus size={16} />} size="sm" onClick={onAdd}>
           新建帧

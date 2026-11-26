@@ -32,7 +32,7 @@ class EpdSsd1683 {
     // 进深睡 / 关 rail / 后台刷新结束前用它确保不在刷新中途切断 EPD 电源。
     bool WaitForRefreshIdle(int timeout_ms);
     void RequestUrgentPartialRefresh();  // partial(~1s 残影)
-    void RequestUrgentFullRefresh();     // full(~5s 干净)
+    void RequestUrgentFullRefresh(bool preserve_gray = false);
     // Note4 专用：提交 60000B gray4 全帧。驱动会把当前 LVGL 顶部状态栏合成到灰阶帧，
     // 然后原子执行 OTP 白底全刷 + 官方五轮 16 灰波形。
     bool RequestGray16FullRefresh(const uint8_t* data, size_t len);
@@ -87,6 +87,7 @@ class EpdSsd1683 {
     bool                 prev_snapshot_synced_     = false;
     bool                 refresh_in_progress_      = false;
     bool                 gray_refresh_pending_     = false;
+    bool                 gray_selected_            = false;
     TickType_t           last_sample_tick_         = 0;
     TickType_t           last_flush_tick_          = 0;  // LVGL 最后一次 flush_cb 的时刻,用于等待静默
     int                  sample_interval_ms_       = display_profile::kMinRefreshIntervalMs;

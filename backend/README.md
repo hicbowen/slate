@@ -1,527 +1,293 @@
 # Slate / Backend
 
-后端是 Bun 运行的 NestJS 11（Fastify）服务，使用 Prisma 7 + MySQL 8。单进程承担四类工作：
+单个 Go 二进制 `slate`，负责 Web API、设备协议、动态内容渲染、音频转码与 TTS。生产环境同时托管 `frontend/dist`（SPA fallback）。
 
-1. Web 管理 API：给 frontend 使用，JWT 鉴权。
-2. 设备协议：给 firmware 使用，`Authorization: Bearer <device_secret>` 鉴权。
-3. 内容渲染与资源下发：图片、动态帧、音频、manifest，支持 ETag / 304。
-4. 生产静态托管：同镜像内托管 frontend `dist/`，并提供 SPA fallback。
+- **数据**：PostgreSQL 18；图片和音频是按 sha256 寻址的文件。
+- **依赖**：标准库 `net/http`、pgx v5 + sqlc、ffmpeg（只用于音频）。没有 Web 框架和 ORM。
 
-## 技术栈
+## 命令
 
-| 层 | 选型 |
+| 命令 | 作用 |
 | --- | --- |
-| Runtime | Bun 1.x，直接 `bun run src/main.ts` 运行 TypeScript |
-| HTTP | NestJS 11 + Fastify 5 + `@nestjs/platform-fastify` |
-| ORM | Prisma 7 + `@prisma/adapter-mariadb`，直连 MySQL |
-| 校验 | zod 4 + 全局 `ZodValidationPipe` |
-| 日志 | nestjs-pino + pino |
-| 图像 | sharp 0.34 + shared 1bpp mono / 4bpp 16 灰 / 2bpp BWRY 量化 |
-| 音频 | ffmpeg 转 16 kHz mono s16le PCM |
-| 认证 | bcryptjs 密码哈希 + jsonwebtoken JWT |
+| `slate serve` | 应用迁移后启动 HTTP 服务和后台任务（默认） |
+| `slate migrate` | 只应用迁移 |
+| `slate import <mysql-url>` | 把 v0.1.x 的 MySQL 部署导入空库 |
+
+启动时读取当前目录的 `.env`，已有的环境变量优先。日志为 JSON，输出到 stdout。
 
 ## 目录
 
-```text
-backend/
-├── src/
-│   ├── main.ts                  Fastify bootstrap、/api/v1 前缀、multipart、static dist、SPA fallback
-│   ├── app.module.ts            全局 filter / guard / pipe / interceptor 与业务模块装配
-│   ├── common/
-│   │   ├── db/                  行锁与批量 sort_order 更新 helper
-│   │   ├── errors/              AppError 体系与 Prisma error map
-│   │   ├── http/                fetch timeout、SSE parser、client IP
-│   │   ├── nest/                @Public/@JsonBody、JWT/device guards、filter、request id、zod pipe
-│   │   ├── rate-limit/          固定窗口限速
-│   │   ├── utils/               cache、ETag、HTML 文本、intl、value helper
-│   │   └── worker/              keyed promise queue、worker loop
-│   ├── infra/
-│   │   ├── auth/                JWT token service、device secret auth cache
-│   │   ├── assets/              运行时资产路径定位
-│   │   ├── blob/                image/audio blob 原子写入与清理
-│   │   ├── config/              env schema 与 AppConfig
-│   │   ├── logger/              pino 配置
-│   │   └── prisma/              PrismaService + MariaDB adapter
-│   └── modules/
-│       ├── ai/                  OpenAI-compatible chat completions，用于历史事件优化
-│       ├── audio/               ffmpeg 音频转码与重采样
-│       ├── auth/                注册、登录、当前用户
-│       ├── contents/            内容 CRUD、manifest、binary、preview、dashboard ingest
-│       ├── devices/             Web 设备管理 + 固件设备协议
-│       ├── dynamic-content/     动态内容 provider、调度、layout engine、渲染入口
-│       ├── groups/              内容组 CRUD、排序、设备切组
-│       ├── health/              /healthz
-│       ├── hot-list/            热榜抓取与源注册
-│       ├── image-renderer/      sharp 图片管线 + 渲染缓存
-│       ├── tts/                 OpenAI-compatible TTS
-│       └── users/               用户表操作
-├── assets/
-│   ├── fonts/bitmap-1bpp/       动态帧运行时位图字库
-│   ├── fonts/vector/            字体源资产
-│   ├── icons/qweather/          天气图标
-│   └── vehicles/                示例脚本资产
-├── prisma/
-│   ├── schema.prisma
-│   └── migrations/
-└── scripts/
-    ├── jobs/                    可选临时 dashboard 推送 sidecar job
-    ├── maintenance/             一次性创建或修正内容组
-    ├── fonts/                   位图字体提取和生成工具
-    ├── debug/                   本地渲染调试
-    ├── helpers/                 Nest bootstrap、脚本日志 helper
-    └── lib/                     job 共享 env / HTTP / Slate ingest helper
-```
+| 目录 | 内容 |
+| --- | --- |
+| `cmd/slate/` | 入口与子命令 |
+| `cmd/gencatalog/` | 生成前端用的 `catalog.json`：音色、热榜源、字体、模板 |
+| `cmd/genfont/` | 把 LVGL C 字体或 BDF 字体转成点阵 JSON |
+| `internal/api/` | 请求与响应类型，前端类型由此生成 |
+| `internal/httpapi/` | 路由、鉴权、限流、handler |
+| `internal/store/` | sqlc 查询（`sql/`）与生成代码（`db/`） |
+| `internal/dynamic/` | 动态内容：配置校验、数据源、调度、TTS 队列、blob GC |
+| `internal/render/` | 黑白和 BWRY 四色帧绘制：点阵字体、布局、各类型模板 |
+| `internal/hotlist/` | 热榜抓取，`sources.json` 是榜单源清单 |
+| `internal/blob/` | sha256 内容寻址文件存储 |
+| `internal/media/` | ffmpeg 音频转码 |
+| `internal/legacyimport/` | v0.1.x MySQL 导入 |
+| `internal/fetch/` | 第三方数据源的 HTTP 客户端 |
+| `internal/config/` | 环境变量与 `.env` |
+| `migrations/` | 嵌入式 SQL 迁移 |
+
+---
 
 ## 数据模型
 
-核心模型在 [prisma/schema.prisma](prisma/schema.prisma)：
+定义见 [migrations/0001_init.sql](migrations/0001_init.sql)。
 
-```text
-User
-  id, email(unique), username(unique), password(bcrypt)
-  └─ owns Device / Group
+- `users` 拥有 `devices` 和 `groups`，`groups` 包含 `contents`，删组时级联删内容。
+- 动态内容的配置、数据和调度状态在 `content_dynamic`，音频和 TTS 队列在 `content_audio`。
+- `contents.image_hash`、`content_audio.hash` 指向 blob。blob 不可变，内容变化就是换 hash。
 
-Device
-  mac(unique), secret_hash(unique), pair_code(unique)
-  owner_user_id?, selected_group_id?, sort_order
-  display_profile, last_registered_at?, last_seen_at?, battery_pct?, rssi_dbm?, fw_version?
+**设备**
 
-Group
-  name, owner_user_id?, sort_order
-  structure_etag, manifest_etag
-  └─ contents cascade delete
+- 以 `mac` 标识。同一 mac 重新注册视为物理重置：清空归属和所选内容组，轮换 secret 与配对码。
+- secret 只在注册响应里出现一次，库里存 sha256。
+- 配对码在绑定、解绑后轮换。
 
-Content
-  group_id, sort_order, frame_name?
-  kind = image | dynamic
-  image_etag, image_size, image_gray_etag?, image_gray_size?
-  image_source_etag?, image_source_size?, image_render_preset
-  image_bwry_etag?, image_bwry_size?, display_mode, content_etag
-  audio_etag?, audio_size?, audio_status, audio_source?, audio_voice?, audio_text?
-  dynamic_type?, dynamic_config?, dynamic_data?
-  dynamic_last_run_at?, dynamic_next_run_at?, dynamic_refresh_due_at?
-  lease / retry 字段用于 TTS 与动态刷新 worker
-```
+**迁移**
 
-关键语义：
+- 按文件名顺序执行，记录在 `schema_migrations` 并校验 checksum。
+- 已应用的文件不能改，改 schema 就加新文件。
+- 多个实例同时启动时由 advisory lock 串行。
 
-- `Device.mac` 是物理设备锚点。同 mac 再注册会走 reset 语义：清 owner、清 selected group、轮换 secret 和 pair code。
-- `device_secret` 只在注册响应返回一次，数据库只存 `sha256(secret)`。
-- `pair_code` 用于 Web claim；绑定或解绑后都会轮换，避免截图复用。
-- `Group.structure_etag` 反映组结构变化，`manifest_etag` 反映完整 manifest 变化。
-- `Content.content_etag` 是设备当前帧快速刷新用摘要；图片、音频、标题、动态类型和动态数据变化都会影响相关 etag。
+---
 
 ## API
 
-除 `/healthz` 外，所有端点都在 `/api/v1` 下。
-
-### 公开端点
-
-```text
-POST /api/v1/users
-POST /api/v1/sessions
-GET  /healthz
-```
-
-注册 body：
+全部在 `/api` 下，JSON 字段 camelCase，时间为 UTC ISO 8601。响应统一为：
 
 ```json
-{ "email": "you@example.com", "username": "you", "password": "password123" }
+{ "success": true, "message": "操作成功", "data": {} }
 ```
 
-登录 body：
+- 失败时 `success` 为 false，`message` 是可直接展示的中文说明，HTTP 状态码表达错误类型。
+- JSON 请求体必须是单个对象，未知字段报错。
+- 类型定义在 `internal/api`，前端从生成的 TypeScript 引用。
 
-```json
-{ "identifier": "you@example.com", "password": "password123" }
-```
+### 账号
 
-`identifier` 支持邮箱或用户名。
-
-### Web 管理端点（JWT）
-
-```text
-GET    /api/v1/users/current
-DELETE /api/v1/sessions/current
-
-GET    /api/v1/devices
-PUT    /api/v1/devices/order
-POST   /api/v1/devices/claims
-GET    /api/v1/devices/:id
-PATCH  /api/v1/devices/:id
-DELETE /api/v1/devices/:id/binding
-
-GET    /api/v1/groups
-POST   /api/v1/groups
-PUT    /api/v1/groups/order
-GET    /api/v1/groups/:groupId
-PATCH  /api/v1/groups/:groupId
-DELETE /api/v1/groups/:groupId
-
-POST   /api/v1/groups/:groupId/contents
-PUT    /api/v1/groups/:groupId/contents/order
-PATCH  /api/v1/contents/:contentId
-DELETE /api/v1/contents/:contentId
-DELETE /api/v1/contents/:contentId/audio
-POST   /api/v1/contents/:contentId/audio/tts
-POST   /api/v1/contents/:contentId/refresh
-POST   /api/v1/contents/preview
-POST   /api/v1/contents/:contentId/preview
-
-GET    /api/v1/dynamic/weather/cities?q=北京
-```
-
-`POST /groups/:groupId/contents` 和 `PATCH /contents/:contentId` 支持两种 content type：
-
-- `multipart/form-data`：图片内容。字段包括 `image`、`audio`、`render_preset=auto|photo|vivid|graphic`、`frame_name`、`display_mode=mono1|gray16`；`threshold` / `mode` 仅保留旧客户端兼容。
-- `application/json`：动态内容。body 符合 `shared` 的 `CreateDynamicContentRequest` 或 `PatchDynamicContentRequest`。
-
-### 内容读取与设备资源下发（JWT 或 device secret）
-
-```text
-GET /api/v1/groups/:groupId/contents
-GET /api/v1/groups/:groupId/manifest
-GET /api/v1/contents/:contentId
-GET /api/v1/contents/:contentId/image?format=mono1|gray4|bwry2
-GET /api/v1/contents/:contentId/source
-GET /api/v1/contents/:contentId/audio
-```
-
-manifest、image、audio 由 `JwtOrDeviceAuthGuard` 保护，Web 预览和固件同步共用读取路径；source 仅 JWT Web 用户可读。所有二进制端点都支持 ETag，命中时返回 304。
-
-manifest response：
-
-```ts
-{
-  group: {
-    id: string;
-    structure_etag: string;
-    manifest_etag: string;
-    name: string;
-    sort_order: number;
-    position: { current: number; total: number };
-  };
-  contents: Array<{
-    id: string;
-    seq: number;
-    content_etag: string;
-    frame_name: string | null;
-    display_mode: 'mono1' | 'gray16';
-    device_status_bar_text: string;
-    image_etag: string;
-    image_renditions: {
-      mono1: { etag: string; size: number };
-      gray4?: { etag: string; size: number };
-      bwry2: { etag: string; size: number };
-    };
-    audio_etag: string | null;
-    image_size: number;
-    audio_size: number | null;
-    audio_status: 'none' | 'pending' | 'generating' | 'ready' | 'failed';
-    audio_source: 'upload' | 'tts' | null;
-    audio_voice: string | null;
-    kind: 'image' | 'dynamic';
-    dynamic_type: string | null;
-    next_wake_sec: number | null;
-  }>;
-}
-```
-
-### Dashboard 外部数据推送
-
-```text
-POST /api/v1/contents/:contentId/data
-```
-
-该端点只用于 `dashboard` 动态内容，不需要 JWT。`contentId` 本身是 capability URL 凭证；拿到 URL 就能推送。保护措施是 body limit 64 KB 与 `30 req/min/contentId` 固定窗口限速。泄漏后应删除内容重建。
-
-body：
-
-```json
-{
-  "version": 1,
-  "data": {
-    "service_label": "Claude Code",
-    "primary_used_percent": 68,
-    "primary_reset_at_label": "05-27 20:00"
-  }
-}
-```
-
-模板保存在内容配置里；推送接口只接收数据。
-
-### 设备协议
-
-注册端点无鉴权：
-
-```text
-POST /api/v1/devices
-```
-
-body：
-
-```json
-{ "mac": "AA:BB:CC:DD:EE:FF" }
-```
-
-响应：
-
-```ts
-{
-  id: string;
-  mac: string;
-  device_secret: string; // 64 hex
-  pair_code: string;     // 6 chars
-  reclaimed: boolean;
-  server_time: string;
-}
-```
-
-后续设备端点使用 `Authorization: Bearer <device_secret>`：
-
-```text
-POST /api/v1/devices/current/poll
-PUT  /api/v1/devices/current/group
-POST /api/v1/devices/current/group/next
-POST /api/v1/devices/current/group/prev
-```
-
-poll body 可选：
-
-```json
-{
-  "telemetry": {
-    "battery_pct": 85,
-    "rssi_dbm": -56,
-    "fw_version": "0.1.0",
-    "wake_reason": "timer",
-    "current_group": "gid",
-    "current_content_seq": 3,
-    "current_content_etag": "etag",
-    "manifest_etag": "etag"
-  }
-}
-```
-
-`DeviceState`：
-
-```ts
-{
-  device: {
-    id: string;
-    mac: string;
-    name: string | null;
-    bound: boolean;
-    pair_code: string | null;
-    server_time: string;
-  };
-  group: {
-    id: string;
-    structure_etag: string;
-    manifest_etag: string;
-    name: string;
-    content_count: number;
-    sort_order: number;
-    position: { current: number; total: number };
-  } | null;
-  current_content?: ContentSummary | null;
-}
-```
-
-`current_content` 只在设备上报 timer wake 且当前帧确实需要刷新、并且无需完整 manifest 同步时返回，用于固件低功耗增量刷新当前帧。
-
-## 鉴权矩阵
-
-`JwtAuthGuard` 和 `RateLimitGuard` 是全局 guard。默认所有端点都要求 JWT；例外由 `@Public()` 和局部 guard 实现，限流由 `@RateLimit(...)` 元数据启用：
-
-| 端点类型 | guard |
+| 接口 | 说明 |
 | --- | --- |
-| Web 管理 | 全局 `JwtAuthGuard` |
-| 注册、登录 | `@Public()` + `@RateLimit(authRateLimit)` |
-| 设备注册 | `@Public()` + `@RateLimit(deviceRegisterRateLimit)` |
-| 设备 current 协议 | `@Public()` + `DeviceAuthGuard` |
-| 内容读取 / binary / manifest | `@Public()` + `JwtOrDeviceAuthGuard` |
-| dashboard ingest | `@Public()` + `@RateLimit(ingestRateLimit)` + `IngestPayloadSizeGuard` |
-| `/healthz` | `@Public()` |
+| `POST /api/users` | 注册 `{ email, username, password }` |
+| `POST /api/sessions` | 登录 `{ identifier, password }`，identifier 为邮箱或用户名 |
+| `GET /api/users/me` | 当前用户 |
+| `GET /api/health` | 健康检查 |
 
-device secret 必须是 64 字符 hex bearer token；JWT 与 device secret 不会互相误判。
+### Web 管理
 
-## 渲染与存储
+以下接口都需要 `Authorization: Bearer <JWT>`。
 
-### Blob
+**设备**
 
-默认 `BLOB_DIR=./blobs`，Docker 中为 `/data/blobs`。
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/devices` | 设备列表 |
+| `PUT /api/devices/order` | 排序 |
+| `POST /api/devices/claims` | 用配对码绑定 `{ pairCode }` |
+| `GET` `PATCH /api/devices/{id}` | 读取、修改 `{ name?, groupId? }` |
+| `DELETE /api/devices/{id}/binding` | 解绑 |
 
-```text
-{BLOB_DIR}/
-├── {groupId}/{contentId}.img                   400 x 300 1bpp packed，15000 bytes
-├── {groupId}/{contentId}.gray                  400 x 300 4bpp 16 灰，60000 bytes
-├── {groupId}/{contentId}.bwry                  400 x 300 2bpp BWRY，30000 bytes
-├── {groupId}/{contentId}.source.png            规范化彩色编辑源，400 x 300 PNG
-├── {groupId}/{contentId}.{audioEtag}.pcm       16 kHz mono s16le raw PCM
-└── image-render-cache/{xx}/{key}.bin
-```
+**内容组**
 
-写入使用临时文件 + rename，按 blob key 串行化，启动时清理 24 小时以上的 `.tmp`。
+| 接口 | 说明 |
+| --- | --- |
+| `GET` `POST /api/groups` | 列表、创建 |
+| `PUT /api/groups/order` | 排序 |
+| `GET` `PATCH` `DELETE /api/groups/{id}` | 读取、修改、删除 |
+| `GET` `POST /api/groups/{id}/contents` | 组内内容列表、创建内容 |
+| `PUT /api/groups/{id}/contents/order` | 组内内容排序 |
 
-### 图片内容
+**内容**
 
-`ImageRendererService` 管线：
+| 接口 | 说明 |
+| --- | --- |
+| `GET` `PATCH` `DELETE /api/contents/{id}` | 读取、修改、删除 |
+| `POST /api/contents/{id}/refresh` | 立即刷新动态内容 |
+| `POST /api/contents/preview` | 预览未保存的动态配置 |
+| `POST /api/contents/{id}/preview` | 用已保存内容的数据预览新配置 |
+| `DELETE /api/contents/{id}/audio` | 删除音频 |
+| `POST /api/contents/{id}/audio/tts` | 设置 TTS 朗读 |
+| `GET /api/blobs/{hash}` | 帧或音频原始字节 |
+| `GET /api/weather/cities?q=` | 城市搜索 |
 
-1. sharp 解码，白底 flatten。
-2. resize 到 400 x 300，默认 `contain` letterbox。
-3. 保存规范化彩色 PNG，供以后无损切换优化风格。
-4. 按 `render_preset` 执行固定的自动对比度、反相与照片色调策略。
-5. mono1 映射到适合风格的二值抖动；gray4 针对实机非线性灰阶做相邻级混合；bwry2 在 OKLab 中分离红黄彩墨与黑白明暗，照片经过保边平滑后使用细噪声，图文的高彩度暖色只在红黄彩墨内混合并保留其余明暗细节。
+**图片内容**用 `multipart/form-data` 创建和修改，接受以下字段：
 
-mono1 为 MSB-first，bit=1 白/0 黑；gray4 每字节 2 像素且高 nibble 在前，0 黑/15 白；bwry2 每字节 4 像素，00 黑/01 白/10 黄/11 红。`display_mode` 只选择 Note4 静态图片的实际下发格式，不改变 Note4C rendition。渲染缓存键包含算法版本与风格，算法升级不会复用旧结果。
+| 字段 | 内容 |
+| --- | --- |
+| `frame` | 浏览器渲染好的 400×300 packed 1bpp，15000 字节，MSB first，1 为白 |
+| `colorFrame` | 可选，400×300 packed BWRY 2bpp，30000 字节，色号 00 黑、01 白、10 黄、11 红，需同时上传 `frame` |
+| `grayFrame` | 可选，400×300 packed 4bpp，60000 字节，高半字节在左，0 为黑、15 为白，需同时上传 `frame` |
+| `displayMode` | Note4 上屏方式，`mono1`（默认）或 `gray16`。可单独修改，启用 16 灰需要已有灰阶帧 |
+| `audio` | 任意支持格式的音频，≤ 5 MB |
+| `frameName` | 状态栏标题 |
 
-### 动态内容
+- 其他字段或重复字段直接报错，请求体总大小不超过各文件上限之和加 64 KB。
+- 服务端不处理图片像素，只校验长度。
+- 换图片会保留已有音频，删除音频走 `DELETE /audio`。
 
-动态类型在 `shared/src/dynamic/config.ts` 定义，在 `dynamic-content-registry.ts` 注册 provider 与 JSON definition。当前类型：
+**动态内容**用 JSON（`CreateDynamicContentRequest` / `PatchContentRequest`）。修改配置时先按新配置取数并渲染，成功后才落库。倒数日接受 `goal`、`targetDate` 和 `tz`，按当地午夜刷新。动态预览默认返回黑白帧，加 `?format=bwry2` 返回四色帧。
 
-- `daily_calendar`
-- `month_calendar`
-- `countdown`
-- `weather`
-- `history_today`
-- `weather_alert`
-- `earthquake_report`
-- `dashboard`
-- `font_test`
-- `hot_list`
-
-动态帧由 `DynamicFrameRendererService` 直接用 bitmap canvas 和位图字体同时绘制 mono1 / bwry2，不走浏览器或 SVG。渲染器先导出兼容的 mono1，再复制像素画布叠加 Note4C 红黄语义色，保证四色优化不会改变 Note4 输出。`DynamicContentSchedulerService` 在 `BACKGROUND_WORKERS=true` 时启动，每次最多 claim 5 个到期任务，失败后指数退避。
-
-刷新时间语义：
-
-- provider 计算数据，renderer 写 image blob 和 etag。
-- `dynamic_next_run_at` 是下次内容应更新的目标时间。
-- `dynamic_refresh_due_at` 是 worker 提前刷新时间，通常会预留 lead time。
-- manifest 下发 `next_wake_sec`，固件据此配置 RTC timer。
-- `daily_calendar`、`month_calendar`、`history_today` 和 `countdown` 按配置时区的本地零点调度；倒数日到期后保持为 0，不产生小时级刷新。
-
-### 音频与 TTS
-
-上传音频经 ffmpeg 转成：
+### Dashboard 数据推送
 
 ```text
-16000 Hz, mono, signed 16-bit little-endian raw PCM
+POST /api/contents/{id}/data
+{ "version": 1, "data": { ... } }
 ```
 
-限制：
+- 不需要 JWT，内容 ID 本身就是凭证；泄漏后删除内容重建。
+- 请求体 ≤ 64 KB，每个内容每分钟 30 次。
 
-- 上传音频最大 5 MB。
-- 输出最长 60 秒。
-- ffmpeg 并发 2，队列上限为并发的 4 倍，繁忙时返回 429。
+内置模板「AI 限额监控」（`ai_quota_monitor`）展示一个服务的两个限额窗口，Claude Code、Codex 都适用。`data` 字段：
 
-TTS 使用 OpenAI-compatible `/chat/completions`，请求 `audio: { format: 'pcm16', voice }` 并解析 SSE 中的 base64 PCM，源采样率按 24 kHz 处理，再重采样到设备 16 kHz。
+| 字段 | 示例 | 说明 |
+| --- | --- | --- |
+| `service_label` | `Codex` | 服务名 |
+| `plan_label` | `Pro` | 套餐 |
+| `status_label` | `正常` | 状态 |
+| `primary_window_label` | `5小时` | 第一个窗口名，重置时间标题显示为「5小时重置」 |
+| `primary_used_percent` | `42` | 使用率，0–100 |
+| `primary_reset_at_label` | `14:00` | 重置时间 |
+| `secondary_window_label` | `每周` | 第二个窗口名 |
+| `secondary_used_percent` | `18` | 使用率，0–100 |
+| `secondary_reset_at_label` | `周四 09:00` | 重置时间 |
+| `updated_label` | `10-27 16:10` | 更新时间 |
 
-## 环境变量
+自定义模板可在 `progress` 区块设置 `warningAt` 和 `criticalAt`（可选，0 < 阈值 ≤ 100）。Note4C 的填充达到提醒阈值用黄墨，达到临界阈值用红墨。内置「AI 限额监控」使用 80% 和 100%。
 
-配置由 `EnvSchema` 校验，缺必填或格式错误会直接启动失败。
+### 设备协议 v2
+
+| 接口 | 请求体 |
+| --- | --- |
+| `POST /api/device/register` | `{ protocol, mac }`，无需鉴权 |
+| `POST /api/device/sync` | `{ protocol, manifestVersion, telemetry, frameFormat? }` |
+| `POST /api/device/group` | `{ protocol, action, groupId?, manifestVersion, frameFormat? }` |
+| `GET /api/device/blobs/{hash}` | — |
+
+**注册**返回 `deviceId`、`secret`（64 位 hex）、`pairCode` 和 `serverTime`（Unix 毫秒）。之后的请求都带 `Authorization: Bearer <secret>`。
+
+**切组**的 `action` 为 `next`、`prev` 或 `select`，`select` 时带 `groupId`。
+
+**`sync` 和 `group`** 返回 `DeviceState`：
+
+- 设备名、是否绑定、配对码；
+- 当前组：位置、内容数、`manifestVersion`；
+- `manifest`：只在设备上报的版本与服务端不同时附带。
+
+**manifest** 是帧列表，每帧包含 `id`、`seq`、`statusBarText`、`image {hash, size}`、`audio`、`refreshAt`。
+
+- `sync` 和 `group` 支持查询参数 `frameFormat`，也可在 JSON 中传入，JSON 字段优先。省略时使用黑白帧。
+- Note4 请求 `gray4` 时，只为启用 `gray16` 的静态图片下发 60000 字节灰阶帧。其他帧沿用原始黑白数据及其哈希。
+- Note4C 请求 `bwry2` 时优先下发四色帧，Note4 上屏设置独立生效。
+- `refreshAt` 是动态帧下次重新渲染的 Unix 秒，静态帧为 null。
+- 版本是组 ID、组名和帧列表的 sha256 前 32 位，帧的任何变化都会换版本。
+
+**定时唤醒**时设备在 telemetry 里带上 `currentContentId`。该内容已到期就先同步重新渲染，本轮即可拿到新帧。
+
+**版本**：`protocol` 与 `api.DeviceProtocol` 不一致时返回 426，固件的 `api::kProtocol` 必须同步修改。
+
+### 限流
+
+每分钟固定窗口，单进程内计数。
+
+| 端点 | 限制 |
+| --- | --- |
+| 注册 / 登录 | 每 IP 5 / 10 次 |
+| 设备注册 | 每 IP 20 次 |
+| 绑定设备 | 每 IP + 用户 5 次 |
+| 城市搜索 | 每 IP 30 次 |
+| Dashboard 推送 | 每个内容 30 次 |
+
+直连地址是本机或内网地址（即经过反向代理）时，客户端 IP 才取自 `X-Forwarded-For`。
+
+---
+
+## 存储
+
+`BLOB_DIR` 下的路径是 `sha256/<前两位>/<hash>`，写入用临时文件加 rename。
+
+后台每 6 小时清理一次：没有被引用、且超过 1 小时没被写入的文件会删除。`Put` 遇到已存在的文件会刷新 mtime，所以刚被重新引用的 blob 不会在提交前被清掉。
+
+只应有一个开启后台任务的进程使用同一个 `BLOB_DIR`。
+
+## 动态内容
+
+**配置**：`internal/dynamic/config.go` 校验并补全配置。
+
+**数据源**：在 `providers.go`。同一城市、榜单源的请求在进程内合并，按刷新间隔缓存。
+
+**历史上的今天**有两个数据源：
+
+- **Wikipedia**：取中文维基的 onthisday 接口（简体变体，带标识 Slate 的 User-Agent），再交给 AI 模型挑选最多 5 条并改写成屏幕文案。原文混杂繁简、篇幅过长，不直接上屏，所以这个源必须配置 AI。
+- **百度百科**：直接取当天词条，不经过 AI。
+
+两个源的结果都按「数据源 + 日期 + AI 模型」缓存 24 小时。
+
+**渲染**：`internal/render` 在同一布局上直接绘制并打包黑白和四色帧。改布局后运行 `go test ./internal/render -update` 重写 golden PNG，并检查图片差异。
+
+**调度**：`BACKGROUND_WORKERS=true` 时运行。
+
+- 调度器用 `FOR UPDATE SKIP LOCKED` 租约认领到期内容，每轮最多 5 个，失败后指数退避。
+- 内容新建、修改或渲染后立即重新计算下次唤醒。
+- 数据源失败且旧数据仍有效时，继续用旧数据渲染并记录错误。
+
+## 音频
+
+**上传**：ffmpeg 转成 16 kHz 单声道 s16le PCM，截断到 60 秒。ffmpeg 最多并发 2 个，排队超过 8 个返回 429。
+
+**TTS**：调用 OpenAI 兼容的 `/chat/completions`（`audio: { format: 'pcm16', voice }`），把 24 kHz PCM 重采样到 16 kHz。
+
+- 流必须以 `finish_reason: "stop"` 结束才算成功，中途断开按失败重试。
+- 任务逐条认领，最多重试 3 次。
+- 进程在最后一次尝试中退出的任务，租约过期后标为失败。
+
+---
+
+## 配置
+
+缺少必填项或格式错误时启动直接退出。
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `NODE_ENV` | `development` | `development` / `production` / `test` |
+| `DATABASE_URL` | — | 必填，`postgresql://user:pwd@host:5432/db` |
+| `JWT_SECRET` | — | 必填，至少 32 字符且熵足够 |
+| `JWT_EXPIRATION` | `7d` | 秒数或 `15m` / `1h` / `7d` / `2w` |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
-| `PORT` | `3001` | HTTP 监听端口 |
-| `DATABASE_URL` | 无 | 必填，`mysql://user:pwd@host:3306/db` |
-| `DB_ALLOW_PUBLIC_KEY_RETRIEVAL` | `false` | 本地 MySQL `caching_sha2_password` 无 TLS 时通常需设 `true` |
-| `JWT_SECRET` | 无 | 必填，至少 32 字符，且需满足基础熵检查 |
-| `JWT_EXPIRATION` | `7d` | 秒数或 `15m` / `7d` / `1h` 这类 duration |
-| `BLOB_DIR` | `./blobs` | blob 根目录 |
-| `QWEATHER_API_KEY` | 空 | 天气动态帧 |
-| `QWEATHER_API_HOST` | 空 | QWeather API Host，必须带 `https://` |
-| `AI_API_KEY` | 空 | 历史上的今天 AI 优化 |
-| `AI_BASE_URL` | 空 | OpenAI-compatible chat completions base URL |
-| `AI_MODEL` | `gpt-4o-mini` | AI 优化模型 |
-| `TTS_API_KEY` | 空 | TTS provider key |
-| `TTS_BASE_URL` | 空 | OpenAI-compatible TTS base URL |
-| `TTS_MODEL` | `mimo-v2.5-tts` | TTS 模型 |
-| `TTS_DEFAULT_VOICE` | `冰糖` | 默认音色，需属于 shared 的 `TTS_VOICES` |
-| `BACKGROUND_WORKERS` | `true` | 是否启动动态刷新后台 worker |
+| `PORT` | `9494` | |
+| `BLOB_DIR` | `./blobs` | 镜像内为 `/data/blobs` |
+| `PUBLIC_DIR` | `public` | 前端构建产物目录，镜像内为 `/app/public` |
+| `BACKGROUND_WORKERS` | `true` | 是否运行动态刷新、TTS 和 blob 清理 |
+| `QWEATHER_API_KEY` | — | 天气 |
+| `QWEATHER_API_HOST` | — | 天气，带 `https://` |
+| `AI_API_KEY` / `AI_BASE_URL` | — | 历史上的今天用 Wikipedia 源时必填 |
+| `AI_MODEL` | `gpt-4o-mini` | |
+| `TTS_API_KEY` / `TTS_BASE_URL` | — | TTS，可不配 |
+| `TTS_MODEL` | `mimo-v2.5-tts` | |
 
-开发环境示例见 [.env.example](.env.example)。
+`JWT_SECRET` 可以用 `openssl rand -hex 64` 生成。本地开发的样例见 [.env.example](.env.example)。
 
-## 本地开发
+---
 
-```bash
-cp backend/.env.example backend/.env
-bun install
-bun run --cwd backend prisma:generate
-bun run --cwd backend prisma:migrate
-bun run --cwd backend dev
-```
+## 开发
 
-`dev` 脚本会执行：
+本地启动见[根 README](../README.md#本地开发)，提交前运行 `scripts/check.sh backend`。
 
-```text
-prisma generate && prisma migrate deploy && bun --watch src/main.ts
-```
+**生成代码**：改了 `internal/store/sql`、`migrations` 或 `internal/api` 后运行 `go generate ./...`。生成物（`internal/store/db`、`frontend/src/api/generated.ts`、`catalog.json`）一起提交，CI 会检查它们与源码一致。
 
-如果需要创建新 migration，使用：
+**测试**：`go test ./...`。
 
-```bash
-bun run --cwd backend prisma:migrate
-```
+- 涉及数据库的测试需要 `SLATE_TEST_DATABASE_URL`，没设时跳过。每个测试在该库里建一个独立 schema、结束后删除，只需要建 schema 的权限。
+- `internal/media` 的测试需要本机有 ffmpeg，没有时跳过。镜像构建时会用镜像里的 ffmpeg 再跑一遍，缺格式就构建失败。
+- 热榜的线上抓取测试要设 `SLATE_TEST_LIVE_HOTLIST=1`。
 
-## 校验
+## Docker
 
-```bash
-bun run --cwd backend lint
-bun run --cwd backend typecheck
-bun run --cwd backend test
-```
+镜像只含 `slate`、前端产物和一个从源码编译的静态 ffmpeg（只开音频解码与重采样）。默认命令是 `serve`，健康检查访问 `/api/health`。
 
-根目录也提供聚合命令：
-
-```bash
-bun run lint
-bun run typecheck
-bun run format:check
-```
-
-## Docker 运行方式
-
-生产镜像内有两种运行模式，由 `SLATE_RUN_MODE` 控制：
-
-- `server`：默认模式，`entrypoint.sh` 会 `cd /app/backend`，执行 `bunx prisma migrate deploy`，再 `exec bun run src/main.ts`。
-- `job`：执行 `bun run scripts/job-runner.ts`，用于可选临时 dashboard 数据推送 sidecar。
-
-frontend `dist/` 位于 `/app/frontend/dist`，由 `main.ts` 自动发现并托管。镜像安装了 ffmpeg，并包含 `backend/scripts/`，因此部署现场的临时 job sidecar 可以复用同一个 Slate 镜像。
-
-Compose 会注入：
-
-```text
-DATABASE_URL=mysql://slate:${MYSQL_PASSWORD}@mysql:3306/slate
-NODE_ENV=production
-PORT=${PORT:-3001}
-BLOB_DIR=/data/blobs
-```
-
-### Job sidecar
-
-`SLATE_RUN_MODE=job` 时必须设置 `SLATE_JOB`。job runner 会动态加载 `scripts/jobs/<SLATE_JOB>.ts`，该文件需要导出 `job` 或 default `SlateJob`。这是给部署现场临时 sidecar 复用 Slate 镜像的入口。
-
-示例：
-
-```text
-SLATE_RUN_MODE=job
-SLATE_JOB=sub2api-usage-stats
-SLATE_JOB_INTERVAL_SECONDS=600
-```
-
-通用变量：
-
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `SLATE_JOB_INTERVAL_SECONDS` | `600` | 循环运行间隔 |
-| `SLATE_JOB_RUN_ONCE` | 空 | 设为 `1` 时只执行一次 |
-
-`scripts/jobs/sub2api-usage-stats.ts` 只支持账号密码登录。它会在进程内缓存 access token，到期后优先使用 refresh token 轮转；refresh 失败或进程重启后才重新用账号密码登录。Sub2API 的 refresh token 按会话独立存储，多个登录会话可以并存。
-
-根 [compose.yml](../compose.yml) 只包含正式 Slate 服务和 MySQL，不固定任何临时 job。需要在某台机器上长期跑某个 dashboard 推送脚本时，在部署目录追加自己的 sidecar 服务和独立 env 文件，不要把外部系统账号密码放进 Slate 主服务 `.env`。
-
-更多脚本结构见 [scripts/README.md](scripts/README.md)。
-
-更多部署步骤见根 [README.md](../README.md)。
+ffmpeg 的版本和源码包 sha256 在 `Dockerfile` 的 `FFMPEG_VERSION` / `FFMPEG_SHA256`，升级时两者一起改。

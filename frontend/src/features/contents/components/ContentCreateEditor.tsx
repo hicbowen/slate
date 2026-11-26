@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
-import { DASHBOARD_CUSTOM_STARTER_TEST_DATA } from 'shared/dynamic/test-fixtures';
+import { DASHBOARD_CUSTOM_STARTER_SAMPLE_DATA } from '@/features/dynamic/model/dashboard-samples';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { TYPE_META, type AllContentType } from '@/features/contents/model/content-type-meta';
 import { DynamicCreateForm } from '@/features/dynamic/components/DynamicCreateForm';
@@ -11,7 +11,6 @@ import { DynamicFramePreview } from '@/features/dynamic/components/DynamicFrameP
 import { useDynamicContentForm } from '@/features/dynamic/hooks/useDynamicContentForm';
 import { ContentTypeCardGrid, ContentTypePicker } from './ContentTypePicker';
 import { ImageCreateForm } from './ImageCreateForm';
-import { FrameFormatToggle } from '@/components/eink/FrameFormatToggle';
 
 // ─── 主编辑器 ──────────────────────────────────────────────────────────────────
 
@@ -31,7 +30,10 @@ export function ContentCreateEditor({ gid, onDone, onEditCreatedImage }: Content
     if (t === 'image') {
       dynamicForm.reset();
     } else {
-      dynamicForm.loadType(t, t === 'dashboard' ? { ...DASHBOARD_CUSTOM_STARTER_TEST_DATA } : null);
+      dynamicForm.loadType(
+        t,
+        t === 'dashboard' ? { ...DASHBOARD_CUSTOM_STARTER_SAMPLE_DATA } : null
+      );
     }
   }
 
@@ -63,21 +65,10 @@ export function ContentCreateEditor({ gid, onDone, onEditCreatedImage }: Content
         {!type ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
             <div className="order-2 min-w-0 lg:order-1">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 ml-0.5">
-                <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em]">
-                  设备预览
-                </p>
-                <FrameFormatToggle
-                  value={dynamicForm.previewFormat}
-                  onChange={dynamicForm.setPreviewFormat}
-                />
-              </div>
-              <DynamicFramePreview
-                data={null}
-                pending={false}
-                hasConfig={false}
-                format={dynamicForm.previewFormat}
-              />
+              <p className="font-mono text-[10px] leading-5 text-stone uppercase tracking-[0.18em] ml-0.5 mb-2">
+                设备预览
+              </p>
+              <DynamicFramePreview data={null} pending={false} hasConfig={false} />
             </div>
             <div className="order-1 min-w-0 lg:order-2 lg:mt-7">
               <div className="max-w-3xl">

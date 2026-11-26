@@ -30,8 +30,6 @@
 
 namespace {
 constexpr char kDeviceInfoTag[]   = "device_info";
-constexpr char kWifiSettingsTag[] = "wifi_settings";
-constexpr char kWifiPortalTag[]   = "wifi_portal";
 constexpr char kRestartTag[]      = "restart";
 constexpr char kFactoryResetTag[] = "factory_reset";
 constexpr int  kBarWidth          = 280;
@@ -65,8 +63,10 @@ std::vector<uint8_t> MakeTestTone() {
 }
 }  // namespace
 
-ConfirmActionPage::ConfirmActionPage(std::string name, std::string caption, std::string warning, bool dangerous)
-    : name_(std::move(name)), caption_(std::move(caption)), warning_(std::move(warning)), dangerous_(dangerous) {
+ConfirmActionPage::ConfirmActionPage(std::string name, std::string caption, std::string warning,
+                                     const char* danger_label)
+    : name_(std::move(name)), caption_(std::move(caption)), warning_(std::move(warning)),
+      danger_label_(danger_label) {
 }
 
 ConfirmActionPage::~ConfirmActionPage() = default;
@@ -77,13 +77,25 @@ void ConfirmActionPage::OnEnter(SceneContext& ctx) {
 
     auto* warn = lv_label_create(RootObj());
     lv_obj_set_style_text_font(warn, &Zfull_16, 0);
-    lv_obj_set_style_text_color(warn, dangerous_ ? theme::Danger() : theme::Accent(), 0);
+    lv_obj_set_style_text_color(warn, lv_color_black(), 0);
     lv_obj_set_style_text_align(warn, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_line_space(warn, 8, 0);
     lv_obj_set_width(warn, LV_HOR_RES - 64);
     lv_label_set_long_mode(warn, LV_LABEL_LONG_WRAP);
     lv_label_set_text(warn, warning_.c_str());
-    lv_obj_align(warn, LV_ALIGN_CENTER, 0, -8);
+    lv_obj_align(warn, LV_ALIGN_CENTER, 0, danger_label_ ? 12 : -8);
+
+    if (danger_label_) {
+        auto* badge = lv_label_create(RootObj());
+        lv_obj_set_style_text_font(badge, &Zfull_16, 0);
+        lv_obj_set_style_text_color(badge, theme::Paper(), 0);
+        lv_obj_set_style_bg_color(badge, theme::Danger(), 0);
+        lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_hor(badge, 8, 0);
+        lv_obj_set_style_pad_ver(badge, 4, 0);
+        lv_label_set_text(badge, danger_label_);
+        lv_obj_align_to(badge, warn, LV_ALIGN_OUT_TOP_MID, 0, -10);
+    }
 
     CreateBottomHint("按确认 返回   长按确认 执行");
     FinishSettingsScaffoldEnter(ctx);
@@ -115,15 +127,15 @@ void VolumePage::OnEnter(SceneContext& ctx) {
 
     value_label_ = lv_label_create(RootObj());
     lv_obj_set_style_text_font(value_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(value_label_, theme::Ink(), 0);
+    lv_obj_set_style_text_color(value_label_, lv_color_black(), 0);
     lv_obj_align(value_label_, LV_ALIGN_CENTER, 0, -32);
 
     bar_track_ = lv_obj_create(RootObj());
     lv_obj_set_size(bar_track_, kBarWidth, kBarHeight);
     lv_obj_align(bar_track_, LV_ALIGN_CENTER, 0, 4);
-    lv_obj_set_style_bg_color(bar_track_, theme::Paper(), 0);
+    lv_obj_set_style_bg_color(bar_track_, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(bar_track_, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(bar_track_, theme::Ink(), 0);
+    lv_obj_set_style_border_color(bar_track_, lv_color_black(), 0);
     lv_obj_set_style_border_width(bar_track_, 1, 0);
     lv_obj_set_style_radius(bar_track_, 0, 0);
     lv_obj_set_style_pad_all(bar_track_, 0, 0);
@@ -239,94 +251,12 @@ void VolumePage::PlayTestTone(SceneContext& ctx) {
     ctx.audio->Play(test_tone_.data(), test_tone_.size());
 }
 
-WifiSettingsPage::WifiSettingsPage()  = default;
-WifiSettingsPage::~WifiSettingsPage() = default;
-
-void WifiSettingsPage::OnEnter(SceneContext& ctx) {
-    if (!EnterSettingsScaffold(ctx, "Wi-Fi 开关"))
-        return;
-    enabled_ = ctx.wifi_enabled ? ctx.wifi_enabled() : cred::WifiEnabled();
-    desired_ = enabled_;
-
-    value_label_ = lv_label_create(RootObj());
-    lv_obj_set_style_text_font(value_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(value_label_, theme::Ink(), 0);
-    lv_obj_set_style_text_align(value_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(value_label_, LV_ALIGN_CENTER, 0, -30);
-
-    detail_label_ = lv_label_create(RootObj());
-    lv_obj_set_style_text_font(detail_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(detail_label_, theme::Ink(), 0);
-    lv_obj_set_style_text_align(detail_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(detail_label_, LV_HOR_RES - 48);
-    lv_label_set_long_mode(detail_label_, LV_LABEL_LONG_WRAP);
-    lv_obj_align(detail_label_, LV_ALIGN_CENTER, 0, 18);
-
-    CreateBottomHint("上/下 切换   按确认 返回   长按确认 应用");
-    Redraw(ctx);
-    FinishSettingsScaffoldEnter(ctx);
-}
-
-void WifiSettingsPage::OnExit(SceneContext& ctx) {
-    ExitSettingsScaffold(ctx, [this]() {
-        value_label_  = nullptr;
-        detail_label_ = nullptr;
-    });
-}
-
-void WifiSettingsPage::OnEvent(SceneContext& ctx, const UiEvent& e) {
-    if (!RootObj())
-        return;
-    if (e.kind == UiEventKind::kButtonShort) {
-        if (e.u.button.btn == ButtonId::kUp || e.u.button.btn == ButtonId::kDown) {
-            desired_ = !desired_;
-            SyncRender(ctx, [this, &ctx]() { Redraw(ctx); });
-        } else if (e.u.button.btn == ButtonId::kEnter) {
-            ctx.stack->RequestPop();
-        }
-        return;
-    }
-    if (e.kind == UiEventKind::kButtonLong && e.u.button.btn == ButtonId::kEnter) {
-        if (desired_ != enabled_ && ctx.set_wifi_enabled) {
-            ESP_LOGI(kWifiSettingsTag, "apply enabled=%d", desired_ ? 1 : 0);
-            enabled_ = desired_;
-            ctx.set_wifi_enabled(enabled_);
-            SyncRender(ctx, [this, &ctx]() { Redraw(ctx); });
-        }
-        return;
-    }
-    if (e.kind == UiEventKind::kWifiStateChanged) {
-        enabled_ = ctx.wifi_enabled ? ctx.wifi_enabled() : cred::WifiEnabled();
-        desired_ = enabled_;
-        SyncRender(ctx, [this, &ctx]() { Redraw(ctx); });
-    }
-}
-
-void WifiSettingsPage::Redraw(SceneContext& ctx) {
-    if (!value_label_ || !detail_label_)
-        return;
-    lv_obj_set_style_text_color(value_label_, desired_ ? theme::Accent() : theme::Ink(), 0);
-    lv_label_set_text(value_label_, desired_ ? "[ 开启 ]" : "[ 关闭 ]");
-    const size_t count = ctx.wifi_profile_count ? ctx.wifi_profile_count() : 0;
-    char         detail[128];
-    if (!desired_) {
-        std::snprintf(detail, sizeof(detail), "关闭后不连接、不扫描\n保留 %u 个已保存网络",
-                      static_cast<unsigned>(count));
-    } else if (Wifi::Get().IsConnected()) {
-        const std::string ssid = Wifi::Get().GetSsid();
-        std::snprintf(detail, sizeof(detail), "已连接：%s\n保存了 %u 个网络", ssid.empty() ? "-" : ssid.c_str(),
-                      static_cast<unsigned>(count));
-    } else {
-        std::snprintf(detail, sizeof(detail), "开启后自动选择可用网络\n保存了 %u 个网络", static_cast<unsigned>(count));
-    }
-    lv_label_set_text(detail_label_, detail);
-}
-
 DeviceInfoPage::DeviceInfoPage()  = default;
 DeviceInfoPage::~DeviceInfoPage() = default;
 
 void DeviceInfoPage::OnEnter(SceneContext& ctx) {
     LoadStaticInfo();
+    last_text_.clear();
 
     if (!ctx.epd->Lock(2000))
         return;
@@ -339,7 +269,7 @@ void DeviceInfoPage::OnEnter(SceneContext& ctx) {
     scroll_area_ = lv_obj_create(root_);
     lv_obj_set_size(scroll_area_, LV_HOR_RES, LV_VER_RES - theme::kStatusBarHeight);
     lv_obj_set_pos(scroll_area_, 0, theme::kStatusBarHeight);
-    lv_obj_set_style_bg_color(scroll_area_, theme::Paper(), 0);
+    lv_obj_set_style_bg_color(scroll_area_, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(scroll_area_, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(scroll_area_, 0, 0);
     lv_obj_set_style_pad_bottom(scroll_area_, 16, 0);
@@ -350,7 +280,7 @@ void DeviceInfoPage::OnEnter(SceneContext& ctx) {
 
     info_ = lv_label_create(scroll_area_);
     lv_obj_set_style_text_font(info_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(info_, theme::Ink(), 0);
+    lv_obj_set_style_text_color(info_, lv_color_black(), 0);
     lv_obj_set_style_text_line_space(info_, 4, 0);
     lv_obj_set_style_text_align(info_, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_set_width(info_, LV_HOR_RES - 48);
@@ -403,7 +333,7 @@ void DeviceInfoPage::OnEvent(SceneContext& ctx, const UiEvent& e) {
         case UiEventKind::kWifiStateChanged:
         case UiEventKind::kMinuteTick:
             if (display_profile::kFourColor)
-                break;
+                break;  // 四色屏在进入本页时读取一份完整状态。
             SyncRenderIfChanged(
                 ctx,
                 [this, &ctx]() {
@@ -458,10 +388,8 @@ void DeviceInfoPage::UpdateThumb() {
 void DeviceInfoPage::LoadStaticInfo() {
     cred::Credentials c;
     cred::Load(c);
-    wifi_ssid_          = std::move(c.last_success_ssid);
-    wifi_profile_count_ = c.wifi_profiles.size();
-    wifi_enabled_       = c.wifi_enabled;
-    server_url_         = std::move(c.server_url);
+    wifi_ssid_  = std::move(c.wifi_ssid);
+    server_url_ = std::move(c.server_url);
 
     const std::string mac = util::WifiStaMacString(util::MacStringCase::kUpper);
     std::strncpy(mac_str_, mac.c_str(), sizeof(mac_str_) - 1);
@@ -472,14 +400,12 @@ bool DeviceInfoPage::Refresh(SceneContext& ctx) {
     if (!info_)
         return false;
 
-    if (status_bar_)
-        RefreshStatusBarFromSensors(ctx, *status_bar_);
+    const bool status_changed = status_bar_ && RefreshStatusBarFromSensors(ctx, *status_bar_);
 
     const bool        wifi_on        = ctx.wifi_connected ? ctx.wifi_connected() : false;
     const int         rssi_raw       = ctx.wifi_rssi ? ctx.wifi_rssi() : 0;
     const int         rssi           = (rssi_raw / 5) * 5;
     const std::string ip             = Wifi::Get().GetIp();
-    const std::string active_ssid    = Wifi::Get().GetSsid();
     int               battery_mv_raw = 0;
     int               battery_pct    = -1;
     if (ctx.read_battery)
@@ -513,41 +439,32 @@ bool DeviceInfoPage::Refresh(SceneContext& ctx) {
     const size_t fs_free_kb  = round_kb_100(fs_total >= fs_used ? fs_total - fs_used : 0);
     const size_t fs_free_pct = available_pct(fs_free_kb, fs_total_kb);
 
-    char wifi_status[48] = {};
-    if (!wifi_enabled_)
-        std::snprintf(wifi_status, sizeof(wifi_status), "已关闭");
-    else if (wifi_on)
-        std::snprintf(wifi_status, sizeof(wifi_status), "已连接   %d dBm", rssi);
-    else
-        std::snprintf(wifi_status, sizeof(wifi_status), "未连接");
-
     char buf[1024];
-    std::snprintf(
-        buf, sizeof(buf),
-        "WiFi    %s\n"
-        "SSID    %s\n"
-        "网络    %u 个已保存\n"
-        "IP      %s\n"
-        "\n"
-        "电量    %d%%   %d mV\n"
-        "状态    %s\n"
-        "\n"
-        "DRAM    总量 %u KB，可用 %u KB（%u%%）\n"
-        "PSRAM   总量 %u KB，可用 %u KB（%u%%）\n"
-        "存储    总量 %u KB，可用 %u KB（%u%%）\n"
-        "\n"
-        "固件    %s\n"
-        "MAC     %s\n"
-        "服务器  %s",
-        wifi_status, !active_ssid.empty() ? active_ssid.c_str() : (wifi_ssid_.empty() ? "-" : wifi_ssid_.c_str()),
-        static_cast<unsigned>(wifi_profile_count_), ip.empty() ? "-" : ip.c_str(), battery_pct < 0 ? 0 : battery_pct,
-        battery_mv, ChargeText(charge), static_cast<unsigned>(dram_total_kb), static_cast<unsigned>(dram_free_kb),
-        static_cast<unsigned>(dram_free_pct), static_cast<unsigned>(psram_total_kb),
-        static_cast<unsigned>(psram_free_kb), static_cast<unsigned>(psram_free_pct), static_cast<unsigned>(fs_total_kb),
-        static_cast<unsigned>(fs_free_kb), static_cast<unsigned>(fs_free_pct), CONFIG_APP_PROJECT_VER, mac_str_,
-        server_url_.empty() ? "-" : server_url_.c_str());
+    std::snprintf(buf, sizeof(buf),
+                  "WiFi    %s   %d dBm\n"
+                  "SSID    %s\n"
+                  "IP      %s\n"
+                  "\n"
+                  "电量    %d%%   %d mV\n"
+                  "状态    %s\n"
+                  "\n"
+                  "DRAM    总量 %u KB，可用 %u KB（%u%%）\n"
+                  "PSRAM   总量 %u KB，可用 %u KB（%u%%）\n"
+                  "存储    总量 %u KB，可用 %u KB（%u%%）\n"
+                  "\n"
+                  "固件    %s\n"
+                  "MAC     %s\n"
+                  "服务器  %s",
+                  wifi_on ? "已连接" : "未连接", rssi, wifi_ssid_.empty() ? "-" : wifi_ssid_.c_str(),
+                  ip.empty() ? "-" : ip.c_str(), battery_pct < 0 ? 0 : battery_pct, battery_mv, ChargeText(charge),
+                  static_cast<unsigned>(dram_total_kb), static_cast<unsigned>(dram_free_kb),
+                  static_cast<unsigned>(dram_free_pct), static_cast<unsigned>(psram_total_kb),
+                  static_cast<unsigned>(psram_free_kb), static_cast<unsigned>(psram_free_pct),
+                  static_cast<unsigned>(fs_total_kb), static_cast<unsigned>(fs_free_kb),
+                  static_cast<unsigned>(fs_free_pct), CONFIG_APP_PROJECT_VER, mac_str_,
+                  server_url_.empty() ? "-" : server_url_.c_str());
     if (last_text_ == buf)
-        return false;
+        return status_changed;
     last_text_.assign(buf);
     lv_label_set_text(info_, buf);
     return true;
@@ -568,30 +485,14 @@ void RestartDevicePage::Confirm(SceneContext&) {
     power_shutdown::GracefulRestart(200);
 }
 
-WifiPortalPage::WifiPortalPage()
-    : ConfirmActionPage("wifi_portal", "管理 Wi-Fi",
-                        "将暂时断开当前网络并开启\n"
-                        "Slate 配网热点\n\n"
-                        "可添加、更新或忘记网络\n"
-                        "提交成功后设备自动重启",
-                        false) {
-}
-
-WifiPortalPage::~WifiPortalPage() = default;
-
-void WifiPortalPage::Confirm(SceneContext& ctx) {
-    ESP_LOGI(kWifiPortalTag, "confirm action=open_portal");
-    if (ctx.open_wifi_portal)
-        ctx.open_wifi_portal();
-}
-
 FactoryResetPage::FactoryResetPage()
     : ConfirmActionPage("factory_reset", "恢复出厂",
                         "确认要恢复出厂吗？\n\n"
                         "Wi-Fi 配置、设备绑定\n"
                         "小智配置及内容缓存\n"
                         "将全部清除\n"
-                        "重启后进入配网模式") {
+                        "重启后进入配网模式",
+                        "将清除设备配置") {
 }
 
 FactoryResetPage::~FactoryResetPage() = default;

@@ -113,74 +113,18 @@ static std::string RenderTemplate(const std::string&                            
 
 // ─── HTTP handlers ─────────────────────────────────────────────────
 esp_err_t CaptivePortal::HandleRoot(httpd_req_t* req) {
-    CaptivePortal* portal = PortalFromRequest(req);
-    uint8_t        mac[6] = {0};
+    uint8_t mac[6] = {0};
     esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
     char ap_ssid[24];
     std::snprintf(ap_ssid, sizeof(ap_ssid), "%s-%02X%02X", CONFIG_SLATE_AP_SSID_PREFIX, mac[4], mac[5]);
 
-    std::string html =
-        RenderTemplate(slate::kCaptivePortalHtml,
-                       {
-                           {"SERVER_URL", portal && !portal->server_url_.empty() ? portal->server_url_
-                                                                                 : CONFIG_SLATE_DEFAULT_SERVER_URL},
-                           {"AP_SSID", ap_ssid},
-                       });
+    std::string html = RenderTemplate(slate::kCaptivePortalHtml, {
+                                                                     {"SERVER_URL", CONFIG_SLATE_DEFAULT_SERVER_URL},
+                                                                     {"AP_SSID", ap_ssid},
+                                                                 });
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, html.c_str(), html.size());
-}
-
-esp_err_t CaptivePortal::HandleProfiles(httpd_req_t* req) {
-    CaptivePortal* portal = PortalFromRequest(req);
-    cJSON*         array  = cJSON_CreateArray();
-    if (!array) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "alloc failed");
-        return ESP_FAIL;
-    }
-    if (portal && portal->on_list_networks_) {
-        for (const auto& network : portal->on_list_networks_()) {
-            cJSON* item = cJSON_CreateObject();
-            if (!item)
-                continue;
-            cJSON_AddStringToObject(item, "ssid", network.ssid.c_str());
-            cJSON_AddBoolToObject(item, "preferred", network.preferred);
-            cJSON_AddItemToArray(array, item);
-        }
-    }
-    char* body = cJSON_PrintUnformatted(array);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_send(req, body ? body : "[]", body ? std::strlen(body) : 2);
-    cJSON_free(body);
-    cJSON_Delete(array);
-    return ESP_OK;
-}
-
-esp_err_t CaptivePortal::HandleForget(httpd_req_t* req) {
-    CaptivePortal* portal = PortalFromRequest(req);
-    if (req->content_len <= 0 || req->content_len > 256) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid body");
-        return ESP_FAIL;
-    }
-    char buf[257] = {};
-    int  total    = 0;
-    while (total < req->content_len) {
-        const int read = httpd_req_recv(req, buf + total, req->content_len - total);
-        if (read <= 0) {
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv failed");
-            return ESP_FAIL;
-        }
-        total += read;
-    }
-    cJSON*     root  = cJSON_Parse(buf);
-    cJSON*     ssid  = root ? cJSON_GetObjectItemCaseSensitive(root, "ssid") : nullptr;
-    const bool valid = cJSON_IsString(ssid) && ssid->valuestring && ssid->valuestring[0] != '\0';
-    const bool ok    = valid && portal && portal->on_forget_network_ && portal->on_forget_network_(ssid->valuestring);
-    cJSON_Delete(root);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, ok ? R"({"success":true})" : R"({"success":false,"error":"forget failed"})", -1);
-    return ESP_OK;
 }
 
 esp_err_t CaptivePortal::HandleScan(httpd_req_t* req) {
@@ -402,7 +346,7 @@ bool CaptivePortal::Start() {
     }
 
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 10;
+    cfg.max_uri_handlers = 8;
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
     // 默认 4 KB 栈不够：HandleSubmit 里调 Wifi::TryConnect（阻塞等 event）
     // + ESP_LOG（vfprintf 含 UTF-8 中文消耗大），会触发 LoadProhibited panic。
@@ -414,20 +358,16 @@ bool CaptivePortal::Start() {
         return false;
     }
 
-    httpd_uri_t uri_root     = {.uri = "/", .method = HTTP_GET, .handler = &HandleRoot, .user_ctx = this};
-    httpd_uri_t uri_scan     = {.uri = "/scan", .method = HTTP_GET, .handler = &HandleScan, .user_ctx = this};
-    httpd_uri_t uri_profiles = {.uri = "/profiles", .method = HTTP_GET, .handler = &HandleProfiles, .user_ctx = this};
-    httpd_uri_t uri_submit   = {.uri = "/submit", .method = HTTP_POST, .handler = &HandleSubmit, .user_ctx = this};
-    httpd_uri_t uri_forget   = {.uri = "/forget", .method = HTTP_POST, .handler = &HandleForget, .user_ctx = this};
-    httpd_uri_t uri_done     = {.uri = "/done", .method = HTTP_GET, .handler = &HandleDone, .user_ctx = this};
-    httpd_uri_t uri_exit     = {.uri = "/exit", .method = HTTP_POST, .handler = &HandleExit, .user_ctx = this};
-    httpd_uri_t uri_catch    = {.uri = "/*", .method = HTTP_GET, .handler = &HandleCatchAll, .user_ctx = this};
+    httpd_uri_t uri_root   = {.uri = "/", .method = HTTP_GET, .handler = &HandleRoot, .user_ctx = this};
+    httpd_uri_t uri_scan   = {.uri = "/scan", .method = HTTP_GET, .handler = &HandleScan, .user_ctx = this};
+    httpd_uri_t uri_submit = {.uri = "/submit", .method = HTTP_POST, .handler = &HandleSubmit, .user_ctx = this};
+    httpd_uri_t uri_done   = {.uri = "/done", .method = HTTP_GET, .handler = &HandleDone, .user_ctx = this};
+    httpd_uri_t uri_exit   = {.uri = "/exit", .method = HTTP_POST, .handler = &HandleExit, .user_ctx = this};
+    httpd_uri_t uri_catch  = {.uri = "/*", .method = HTTP_GET, .handler = &HandleCatchAll, .user_ctx = this};
 
     httpd_register_uri_handler(server_, &uri_root);
     httpd_register_uri_handler(server_, &uri_scan);
-    httpd_register_uri_handler(server_, &uri_profiles);
     httpd_register_uri_handler(server_, &uri_submit);
-    httpd_register_uri_handler(server_, &uri_forget);
     httpd_register_uri_handler(server_, &uri_done);
     httpd_register_uri_handler(server_, &uri_exit);
     httpd_register_uri_handler(server_, &uri_catch);
@@ -454,18 +394,6 @@ void CaptivePortal::OnSubmit(SubmitCb cb) {
 
 void CaptivePortal::OnFinished(FinishedCb cb) {
     on_finished_ = std::move(cb);
-}
-
-void CaptivePortal::OnListNetworks(ListNetworksCb cb) {
-    on_list_networks_ = std::move(cb);
-}
-
-void CaptivePortal::OnForgetNetwork(ForgetNetworkCb cb) {
-    on_forget_network_ = std::move(cb);
-}
-
-void CaptivePortal::SetServerUrl(std::string server_url) {
-    server_url_ = std::move(server_url);
 }
 
 void CaptivePortal::FinishTask(void* arg) {

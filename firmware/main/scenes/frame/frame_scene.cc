@@ -13,6 +13,7 @@
 #include "scenes/settings/settings_scene.h"
 #include "scenes/splash/splash_scene.h"
 #include "storage/cache/cache.h"
+#include "ui/empty_group_label.h"
 #include "ui/frame_view.h"
 #include "ui/status_bar.h"
 #include "ui/theme.h"
@@ -107,15 +108,7 @@ void FrameScene::OnEnter(SceneContext& ctx) {
 
     frame_view_ = std::make_unique<FrameView>(root_);
 
-    empty_label_ = lv_label_create(root_);
-    lv_obj_set_style_text_font(empty_label_, &Zfull_16, 0);
-    lv_obj_set_style_text_color(empty_label_, theme::Accent(), 0);
-    lv_obj_set_style_text_align(empty_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_line_space(empty_label_, 8, 0);
-    lv_label_set_long_mode(empty_label_, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(empty_label_, LV_HOR_RES - 32);
-    lv_label_set_text(empty_label_, "内容组暂无内容\n\n请在管理端添加内容");
-    lv_obj_align(empty_label_, LV_ALIGN_CENTER, 0, 0);
+    empty_label_ = CreateEmptyGroupLabel(root_);
     lv_obj_add_flag(empty_label_, LV_OBJ_FLAG_HIDDEN);
 
     status_bar_ = std::make_unique<StatusBar>(root_);
@@ -236,14 +229,13 @@ void FrameScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
             } else {
                 if (ctx.audio)
                     ctx.audio->Stop();
-                if (SyncRender(
-                        ctx, [this]() { ApplyEmptyState(); }, /*force_full*/ true))
+                if (SyncRender(ctx, [this]() { ApplyEmptyState(); }, /*force_full*/ true))
                     current_gray_ = false;
             }
             break;
         }
         case UiEventKind::kMinuteTick:
-            if (!current_gray_)
+            if (!display_profile::kFourColor && !current_gray_)
                 RefreshStatusBarAndRender(ctx, status_bar_.get());
             break;
         case UiEventKind::kUnbound: {
@@ -375,63 +367,61 @@ void FrameScene::LoadFrame(SceneContext& ctx, int idx, bool force_full, AudioBeh
         return;
     }
 
-    cache::FrameMeta meta;
-    if (!cache::ReadFrameMeta(gid_, idx, meta) ||
-        !display_profile::IsSupportedFrameFormat(meta.image_format)) {
-        ESP_LOGW(kTag, "load frame failed idx=%d reason=meta_miss", idx);
-        return;
-    }
-    const bool gray = !display_profile::kFourColor && meta.image_format == display_profile::kGrayFormat;
     std::vector<uint8_t> raw;
-    const size_t expected = static_cast<size_t>(display_profile::FrameBytesForFormat(meta.image_format));
-    if (!cache::ReadFrameImage(gid_, idx, raw) || raw.size() != expected) {
+    if (!cache::ReadFrameImage(gid_, idx, raw)) {
         ESP_LOGW(kTag, "load frame failed idx=%d reason=image_miss bytes=%u", idx, static_cast<unsigned>(raw.size()));
         if (ctx.audio)
             ctx.audio->Stop();
         return;
     }
+    cache::FrameMeta meta;
+    cache::ReadFrameMeta(gid_, idx, meta);
+
     if (!ctx.epd->Lock(2000)) {
         ESP_LOGW(kTag, "load frame failed idx=%d reason=epd_lock_timeout", idx);
         return;
     }
     ESP_LOGD(kTag, "lvgl refresh begin scene=frame idx=%d", idx);
     ApplyEmptyState();
-    if (status_bar_)
+    if (status_bar_) {
+        if (display_profile::kFourColor || display_profile::IsGrayFrameSize(raw.size()) || current_gray_)
+            RefreshStatusBarFromSensors(ctx, *status_bar_);
         status_bar_->SetCaption(meta.status_bar_text);
+    }
     cached_status_bar_text_ = meta.status_bar_text;
     lv_refr_now(NULL);
     ESP_LOGD(kTag, "lvgl refresh done scene=frame idx=%d", idx);
-    ctx.epd->Unlock();
-
-    const bool full = force_full || (!first_loaded_ && first_load_full_refresh_);
+    const bool gray = display_profile::IsGrayFrameSize(raw.size());
+    const bool full = gray || current_gray_ || force_full || (!first_loaded_ && first_load_full_refresh_);
     if (gray) {
         if (!ctx.epd->RequestGray16FullRefresh(raw.data(), raw.size())) {
+            ctx.epd->Unlock();
             ESP_LOGW(kTag, "load frame failed idx=%d reason=gray_request_rejected", idx);
             return;
         }
-        current_gray_ = true;
+        ctx.epd->Unlock();
     } else {
+        ctx.epd->Unlock();
         if (frame_view_)
             frame_view_->SetFrame(ctx.epd, raw);
         if (full)
             ctx.epd->RequestUrgentFullRefresh();
         else
             ctx.epd->RequestUrgentPartialRefresh();
-        current_gray_ = false;
     }
+    current_gray_ = gray;
     first_loaded_ = true;
-    ESP_LOGD(kTag, "load frame refresh idx=%d full=%d gray=%d first_loaded=%d", idx, full ? 1 : 0, gray ? 1 : 0,
-             first_loaded_ ? 1 : 0);
+    ESP_LOGD(kTag, "load frame refresh idx=%d full=%d gray=%d", idx, full ? 1 : 0, gray ? 1 : 0);
 
     if (ctx.audio) {
         std::vector<uint8_t> pcm;
-        if (!meta.audio_etag.empty() && cache::ReadFrameAudio(gid_, idx, pcm) && !pcm.empty()) {
+        if (!meta.audio_hash.empty() && cache::ReadFrameAudio(gid_, idx, pcm) && !pcm.empty()) {
             if (audio_behavior == AudioBehavior::RestartIfAvailable) {
                 ESP_LOGD(kTag, "audio play idx=%d bytes=%u", idx, static_cast<unsigned>(pcm.size()));
                 ctx.audio->Play(pcm.data(), pcm.size());
             }
         } else {
-            ESP_LOGD(kTag, "audio stop idx=%d has_audio_etag=%d", idx, meta.audio_etag.empty() ? 0 : 1);
+            ESP_LOGD(kTag, "audio stop idx=%d has_audio=%d", idx, meta.audio_hash.empty() ? 0 : 1);
             ctx.audio->Stop();
         }
     }
