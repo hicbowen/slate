@@ -102,6 +102,31 @@ docker compose up -d
 
 **升级**：`docker compose pull && docker compose up -d`，启动时自动迁移数据库。
 
+### 离线部署
+
+在能访问镜像仓库的电脑上运行（以下以固定提交和 AMD64 服务器为例）：
+
+```bash
+scripts/slate-offline-package.sh ghcr.io/hicbowen/slate:83f225c slate-linux-amd64.tar.gz linux/amd64
+```
+
+把压缩包传到服务器，在独立目录解包并核对校验值。包内含 Slate、PostgreSQL、Compose 样例和 Slate 镜像标签。
+
+```bash
+tar -xzf slate-linux-amd64.tar.gz
+sha256sum -c SHA256SUMS
+docker load -i images.tar
+```
+
+把 `slate-image.env` 中的 `SLATE_IMAGE` 填进部署目录的 `.env`，按上文准备目录和密钥后，在部署目录运行 `docker compose up -d --pull never`。
+
+### 备份和恢复
+
+以下命令在标准 Compose 部署目录运行，脚本可从仓库复制到服务器。
+
+- 备份用 `slate-compose-data.sh backup /绝对路径/备份目录`。脚本短暂停止 Slate，配套保存 PostgreSQL 和图片、音频文件，再恢复原先运行的 Slate。把部署的 `.env` 单独安全保存，恢复时需要其中的配置及 JWT 密钥。
+- 恢复需要新部署目录。准备匹配版本的镜像、Compose、`.env` 和数据目录，先运行 `docker compose up -d --wait --pull never postgres`。确认目标库为空，再运行 `slate-compose-data.sh restore /绝对路径/备份目录`，最后启动 Slate。
+
 **镜像 tag**：
 
 | tag | 含义 |
