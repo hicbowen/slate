@@ -16,6 +16,7 @@
 #include "scenes/settings/settings_scene.h"
 #include "ui/theme.h"
 #include "utils/utf8_utils.h"
+#include "xiaozhi/mcp/mcp_tools.h"
 #include "xiaozhi/service/xiaozhi_service.h"
 
 namespace {
@@ -157,10 +158,44 @@ void XiaozhiScene::EnsureServiceStarted(SceneContext& ctx) {
     }
     service->EnterMode();
     service_entered_ = true;
+    MaybeStartListening();
+}
+
+void XiaozhiScene::MaybeStartListening() {
+    if (!auto_start_ || !service_entered_)
+        return;
+    const auto snap = service_->Snapshot();
+    if (snap.state == xiaozhi::XiaozhiState::kReadyIdle && !snap.alert_active) {
+        auto_start_ = false;
+        service_->ToggleXiaozhi();
+    }
+}
+
+void XiaozhiScene::OnTick(SceneContext& ctx, int64_t now_ms) {
+    if (!root_ || !service_entered_ || !service_->ToolReplyFinished(now_ms))
+        return;
+    if (xiaozhi::mcp::PendingCardReady()) {
+        ctx.stack->RequestPop();
+        return;
+    }
+    if (sync_wait_started_ms_ == 0) {
+        sync_wait_started_ms_ = now_ms;
+        Render(ctx);
+    } else if (now_ms - sync_wait_started_ms_ >= 12000) {
+        if (!sync_wait_timed_out_) {
+            sync_wait_timed_out_ = true;
+            Render(ctx);
+        } else if (now_ms - sync_wait_started_ms_ >= 14000) {
+            xiaozhi::mcp::ResetCardActions();
+            ctx.stack->RequestPop();
+        }
+    }
 }
 
 void XiaozhiScene::OnEnter(SceneContext& ctx) {
     ESP_LOGD(kTag, "enter service_entered=%d", service_entered_ ? 1 : 0);
+    sync_wait_started_ms_ = 0;
+    sync_wait_timed_out_ = false;
     if (!ctx.epd->Lock(2000)) {
         ESP_LOGW(kTag, "enter failed reason=epd_lock_timeout");
         EnsureServiceStarted(ctx);
@@ -308,8 +343,6 @@ void XiaozhiScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
         case UiEventKind::kButtonDouble:
             if (e.u.button.btn == ButtonId::kEnter) {
                 ESP_LOGD(kTag, "button double btn=enter action=pop");
-                if (auto* service = Service(ctx))
-                    service->LeaveMode();
                 ctx.stack->RequestPop();
             }
             break;
@@ -322,6 +355,7 @@ void XiaozhiScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
             }
             break;
         case UiEventKind::kXiaozhiChanged:
+            MaybeStartListening();
             Render(ctx);
             break;
         case UiEventKind::kChargeChanged:
@@ -359,6 +393,12 @@ void XiaozhiScene::RenderContent() {
     UpdateStatusBarTitle(snap);
     HideContentViews();
     lv_obj_set_style_text_color(system_label_, theme::Ink(), 0);
+    if (sync_wait_started_ms_ != 0) {
+        RenderSystemMessage(sync_wait_timed_out_ ? "已保存，待设备同步" : "已保存，正在更新", false, "");
+        lv_obj_clear_flag(hint_label_, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(hint_label_, "双击确认 返回");
+        return;
+    }
 
     if (snap.alert_active) {
         lv_obj_set_style_text_color(system_label_, theme::Danger(), 0);

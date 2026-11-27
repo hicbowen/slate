@@ -15,7 +15,8 @@ lv_color_t CursorColor(MenuList::Tone tone) {
 }
 }  // namespace
 
-MenuList::MenuList(lv_obj_t* parent, std::vector<Item> items, int initial_cursor) : items_(std::move(items)) {
+MenuList::MenuList(lv_obj_t* parent, std::vector<Item> items, int initial_cursor, const char* footer)
+    : items_(std::move(items)), visible_rows_(footer ? kVisibleRows - 1 : kVisibleRows) {
     if (!items_.empty()) {
         cursor_ = initial_cursor;
         if (cursor_ < 0)
@@ -61,6 +62,10 @@ MenuList::MenuList(lv_obj_t* parent, std::vector<Item> items, int initial_cursor
         auto* lbl = lv_label_create(row);
         lv_obj_set_style_text_font(lbl, &Zfull_16, 0);
         lv_obj_set_style_text_color(lbl, theme::Ink(), 0);
+        if (footer) {
+            lv_obj_set_size(lbl, LV_HOR_RES - theme::kMenuRowPadLeft - theme::kMenuRowPadRight - 48, 22);
+            lv_label_set_long_mode(lbl, LV_LABEL_LONG_MODE_DOTS);
+        }
         lv_label_set_text(lbl, items_[i].title.c_str());
         lv_obj_align(lbl, LV_ALIGN_LEFT_MID, theme::kMenuRowPadLeft, 0);
 
@@ -84,9 +89,16 @@ MenuList::MenuList(lv_obj_t* parent, std::vector<Item> items, int initial_cursor
     }
 
     // 右侧 thumb scrollbar,items <= kVisibleRows 时不创建。
-    if (static_cast<int>(items_.size()) > kVisibleRows) {
+    if (static_cast<int>(items_.size()) > visible_rows_) {
         thumb_ = lv_obj_create(root_);
         ui::StyleScrollbarThumb(thumb_);
+    }
+    if (footer) {
+        auto* hint = lv_label_create(root_);
+        lv_obj_set_style_text_font(hint, &Zfull_12, 0);
+        lv_obj_set_style_text_color(hint, theme::Ink(), 0);
+        lv_label_set_text(hint, footer);
+        lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -15);
     }
 
     EnsureCursorVisible();
@@ -121,7 +133,7 @@ void MenuList::OnEnter() {
 
 bool MenuList::EnsureCursorVisible() {
     const int total = static_cast<int>(items_.size());
-    if (total <= kVisibleRows) {
+    if (total <= visible_rows_) {
         // 不滚动场景:viewport 永远 0。
         if (viewport_top_ == 0)
             return false;
@@ -131,11 +143,11 @@ bool MenuList::EnsureCursorVisible() {
     const int prev = viewport_top_;
     if (cursor_ < viewport_top_) {
         viewport_top_ = cursor_;
-    } else if (cursor_ >= viewport_top_ + kVisibleRows) {
-        viewport_top_ = cursor_ - kVisibleRows + 1;
+    } else if (cursor_ >= viewport_top_ + visible_rows_) {
+        viewport_top_ = cursor_ - visible_rows_ + 1;
     }
     // clamp:wrap-around 时 cursor 跳到极端可能算超界,这里夹紧。
-    const int max_top = total - kVisibleRows;
+    const int max_top = total - visible_rows_;
     if (viewport_top_ < 0)
         viewport_top_ = 0;
     if (viewport_top_ > max_top)
@@ -147,7 +159,7 @@ void MenuList::Redraw() {
     const int total = static_cast<int>(items_.size());
     for (int i = 0; i < total; ++i) {
         const int  rel     = i - viewport_top_;
-        const bool visible = rel >= 0 && rel < kVisibleRows;
+        const bool visible = rel >= 0 && rel < visible_rows_;
         if (visible) {
             lv_obj_clear_flag(rows_[i], LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_pos(rows_[i], 0, theme::kScrollbarTrackPadTop + rel * theme::kMenuRowHeight);
@@ -161,8 +173,7 @@ void MenuList::Redraw() {
         // 数学上 = kVisibleRows × kRowHeight,但用 pad 表达更直接体现"上下对称"。
         ui::PositionPagedScrollbar(thumb_,
                                    {.y      = theme::kScrollbarTrackPadTop,
-                                    .height = LV_VER_RES - theme::kStatusBarHeight - theme::kScrollbarTrackPadTop -
-                                              theme::kScrollbarTrackPadBottom},
-                                   kVisibleRows, total, viewport_top_);
+                                    .height = visible_rows_ * theme::kMenuRowHeight},
+                                   visible_rows_, total, viewport_top_);
     }
 }

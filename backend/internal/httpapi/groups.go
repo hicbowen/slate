@@ -26,10 +26,21 @@ func (a *API) groupView(ctx context.Context, uid, id string) (api.Group, error) 
 	}
 	for _, g := range rows {
 		if g.ID == id {
-			return api.Group{ID: g.ID, Name: g.Name, SortOrder: g.SortOrder, ContentCount: int(g.ContentCount), TotalBytes: g.TotalBytes}, nil
+			return groupSummary(g), nil
 		}
 	}
 	return api.Group{}, notFound("内容组")
+}
+
+func groupSummary(g db.ListGroupsRow) api.Group {
+	monoBytes := int64(g.ContentCount) * api.FrameBytes
+	return api.Group{
+		ID: g.ID, Name: g.Name, SortOrder: g.SortOrder, ContentCount: int(g.ContentCount),
+		TotalBytes: monoBytes + g.AudioBytes, AudioBytes: g.AudioBytes,
+		Note4ImageBytes:  monoBytes + g.GrayCount*(api.GrayFrameBytes-api.FrameBytes),
+		Note4CImageBytes: monoBytes + g.ColorCount*(api.ColorFrameBytes-api.FrameBytes),
+		RotationMinutes:  g.RotationMinutes,
+	}
 }
 
 func groupName(req api.GroupRequest) (string, error) {
@@ -47,7 +58,7 @@ func (a *API) listGroups(w http.ResponseWriter, r *http.Request) error {
 	}
 	out := make([]api.Group, len(rows))
 	for i, g := range rows {
-		out[i] = api.Group{ID: g.ID, Name: g.Name, SortOrder: g.SortOrder, ContentCount: int(g.ContentCount), TotalBytes: g.TotalBytes}
+		out[i] = groupSummary(g)
 	}
 	return ok(w, out)
 }
@@ -99,21 +110,36 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) error {
 	return created(w, api.Group{ID: g.ID, Name: g.Name, SortOrder: g.SortOrder})
 }
 
-func (a *API) renameGroup(w http.ResponseWriter, r *http.Request) error {
-	var req api.GroupRequest
+func (a *API) updateGroup(w http.ResponseWriter, r *http.Request) error {
+	var req api.PatchGroupRequest
 	if err := decodeJSON(r, 16<<10, &req); err != nil {
 		return err
 	}
-	name, err := groupName(req)
+	if req.Name == nil && req.RotationMinutes == nil {
+		return badRequest("请选择要修改的内容组设置")
+	}
+	if req.Name != nil {
+		name, err := groupName(api.GroupRequest{Name: *req.Name})
+		if err != nil {
+			return err
+		}
+		req.Name = &name
+	}
+	if req.RotationMinutes != nil {
+		switch *req.RotationMinutes {
+		case 0, 15, 30, 60:
+		default:
+			return badRequest("轮播间隔须为 0、15、30 或 60 分钟")
+		}
+	}
+	changed, err := a.Store.Q.UpdateGroup(r.Context(), db.UpdateGroupParams{
+		ID: r.PathValue("id"), OwnerID: userID(r), Name: req.Name, RotationMinutes: req.RotationMinutes,
+	})
 	if err != nil {
 		return err
 	}
-	g, err := a.ownedGroup(r.Context(), r.PathValue("id"), userID(r))
-	if err != nil {
-		return err
-	}
-	if err := a.Store.Q.RenameGroup(r.Context(), db.RenameGroupParams{ID: g.ID, Name: name}); err != nil {
-		return err
+	if changed == 0 {
+		return notFound("内容组")
 	}
 	return a.getGroup(w, r)
 }

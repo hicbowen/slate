@@ -258,6 +258,7 @@ SleepManager::SleepDecision SleepManager::TryEnterDeepSleep() {
             ESP_LOGW(kTag, "status snapshot skipped reason=epd_pending elapsed_ms=%d", kEpdFlushTimeoutMs);
             power_state::ClearStatusBarSnapshot();
         } else {
+            power_state::ConfirmScreenVersionIfIdle(epd);
             SaveStatusBarSnapshot(epd);
         }
     }

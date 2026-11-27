@@ -3,6 +3,7 @@ import { AlertCircle, RefreshCw } from 'lucide-react';
 import type { Content } from '@/api';
 import { DragHandle } from '@/components/ui/DragHandle';
 import { useRefreshDynamicContent } from '@/features/dynamic/query/dynamic-content-queries';
+import { QuickMessageBoardDialog } from '@/features/dynamic/components/QuickMessageBoardDialog';
 import { useBlob } from '@/features/contents/query/content-image-queries';
 import { useMutationAction } from '@/hooks/useMutationAction';
 import { AudioPlayPreview } from '../audio/AudioPlayPreview';
@@ -74,16 +75,21 @@ export const ContentCard = memo(function ContentCard({ gid, content, onEdit }: C
           dragHandle={<DragHandle attributes={attributes} listeners={listeners} />}
           extraActions={
             isDynamic ? (
-              <button
-                type="button"
-                onClick={() => refreshContent(content.id)}
-                aria-label="立即刷新"
-                title="立即刷新"
-                disabled={refresh.isPending}
-                className="p-1.5 text-stone hover:text-ink hover:bg-cream transition-colors disabled:opacity-50"
-              >
-                <RefreshCw size={14} className={refresh.isPending ? 'animate-spin' : undefined} />
-              </button>
+              <>
+                {content.dynamic?.type === 'message_board' && (
+                  <QuickMessageBoardDialog gid={gid} contentId={content.id} />
+                )}
+                <button
+                  type="button"
+                  onClick={() => refreshContent(content.id)}
+                  aria-label="立即刷新"
+                  title="立即刷新"
+                  disabled={refresh.isPending}
+                  className="p-1.5 text-stone hover:text-ink hover:bg-cream transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw size={14} className={refresh.isPending ? 'animate-spin' : undefined} />
+                </button>
+              </>
             ) : null
           }
           audioPreview={content.audio?.hash ? <AudioPlayPreview hash={content.audio.hash} /> : null}

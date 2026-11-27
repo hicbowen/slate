@@ -9,6 +9,7 @@ import { useGroupContents } from '@/features/contents/query/content-read-queries
 import { useReorderContents } from '@/features/contents/query/content-mutation-queries';
 import type { Content, Group } from '@/api';
 import { Spinner } from '@/components/ui/Spinner';
+import { Select, SelectItem } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SortableGrid } from '@/components/dnd/SortableGrid';
@@ -45,6 +46,7 @@ function GroupDetailContent({
   navigate: ReturnType<typeof useNavigate>;
 }) {
   const groupQuery = useGroup(gid);
+  const rotationUpdate = useUpdateGroup(gid);
   const contents = useGroupContents(gid);
   const reorder = useReorderContents(gid);
   const toast = useToast();
@@ -60,7 +62,7 @@ function GroupDetailContent({
       })
   );
 
-  const openCreate = () => navigate(appRoutes.newContent(gid));
+  const openCreate = (type: 'image' | 'dynamic') => navigate(appRoutes.newContent(gid, type));
   const openEdit = (content: Content) => {
     if (content.kind === 'dynamic') {
       navigate(appRoutes.editDynamicContent(gid, content.id));
@@ -97,7 +99,35 @@ function GroupDetailContent({
 
   return (
     <div>
-      <GroupHeader group={group} onBack={goBack} onAdd={openCreate} />
+      <GroupHeader group={group} onBack={goBack} />
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button iconLeft={<Plus size={16} />} size="sm" onClick={() => openCreate('image')}>
+          添加图片
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => openCreate('dynamic')}>
+          添加动态帧
+        </Button>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3 text-[13px] text-stone">
+        <span>插电轮播</span>
+        <Select
+          aria-label="插电轮播间隔"
+          value={String(group.rotationMinutes)}
+          disabled={rotationUpdate.isPending}
+          className="w-36"
+          onValueChange={(value) =>
+            rotationUpdate.mutate(
+              { rotationMinutes: Number(value) },
+              { onError: (err) => toast.error('轮播设置保存失败', getApiErrorMessage(err)) }
+            )
+          }
+        >
+          <SelectItem value="0">关闭</SelectItem>
+          <SelectItem value="15">每 15 分钟</SelectItem>
+          <SelectItem value="30">每 30 分钟</SelectItem>
+          <SelectItem value="60">每 60 分钟</SelectItem>
+        </Select>
+      </div>
       <div className="mt-6 fade-up fade-up-1">
         {contents.isPending ? (
           <Spinner label="加载中" />
@@ -114,15 +144,7 @@ function GroupDetailContent({
             renderItem={(content) => <ContentCard gid={gid} content={content} onEdit={openEdit} />}
           />
         ) : (
-          <EmptyState
-            title="尚无内容"
-            hint="点击新建帧开始添加内容。"
-            action={
-              <Button onClick={openCreate} iconLeft={<Plus size={16} />}>
-                新建帧
-              </Button>
-            }
-          />
+          <EmptyState title="尚无内容" />
         )}
       </div>
     </div>
@@ -145,15 +167,7 @@ function BackHomeLink() {
 }
 
 // ───── 组标题 + inline 改名 + 新建内容 ───────────────────────────
-function GroupHeader({
-  group,
-  onBack,
-  onAdd,
-}: {
-  group: Group;
-  onBack: () => void;
-  onAdd: () => void;
-}) {
+function GroupHeader({ group, onBack }: { group: Group; onBack: () => void }) {
   const update = useUpdateGroup(group.id);
   const toast = useToast();
 
@@ -191,11 +205,13 @@ function GroupHeader({
           buttonClassName="p-2 -m-1"
         />
       }
-      subtitle={`${group.contentCount} 项 · ${formatBytes(group.totalBytes)}`}
-      action={
-        <Button iconLeft={<Plus size={16} />} size="sm" onClick={onAdd}>
-          新建帧
-        </Button>
+      subtitle={
+        <>
+          {group.contentCount} 项 · 缓存估算
+          <br />
+          Note4 图片 {formatBytes(group.note4ImageBytes)} · Note4C 图片{' '}
+          {formatBytes(group.note4cImageBytes)} · 音频 {formatBytes(group.audioBytes)}
+        </>
       }
     />
   );

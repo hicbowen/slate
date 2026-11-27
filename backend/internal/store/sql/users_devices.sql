@@ -25,7 +25,7 @@ VALUES ($1, $2, $3, $4, $5);
 -- name: ResetDevice :exec
 UPDATE devices
 SET secret_hash = $2, pair_code = $3, owner_id = NULL, group_id = NULL, sort_order = 0,
-    registered_at = $4, updated_at = now()
+    registered_at = $4, last_seen_at = NULL, sync_status = NULL, updated_at = now()
 WHERE id = $1;
 
 -- name: GetDeviceIDBySecret :one
@@ -39,7 +39,8 @@ UPDATE devices
 SET last_seen_at = now(),
     battery_pct = COALESCE(sqlc.narg(battery_pct), battery_pct),
     rssi_dbm = COALESCE(sqlc.narg(rssi_dbm), rssi_dbm),
-    fw_version = COALESCE(sqlc.narg(fw_version), fw_version)
+    fw_version = COALESCE(sqlc.narg(fw_version), fw_version),
+    sync_status = sqlc.narg(sync_status)
 WHERE id = $1;
 
 -- name: GetDevice :one
@@ -65,7 +66,7 @@ RETURNING *;
 
 -- name: UnbindDevice :execrows
 UPDATE devices
-SET owner_id = NULL, group_id = NULL, sort_order = 0, pair_code = $3, updated_at = now()
+SET owner_id = NULL, group_id = NULL, sort_order = 0, pair_code = $3, sync_status = NULL, updated_at = now()
 WHERE id = $1 AND owner_id = $2;
 
 -- name: RenameDevice :exec

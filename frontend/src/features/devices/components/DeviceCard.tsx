@@ -68,7 +68,7 @@ export const DeviceCard = memo(function DeviceCard({
               </h3>
               <span className="inline-flex items-center gap-1.5 text-[11px] text-stone flex-shrink-0">
                 <span className={cn('dot', online ? 'dot-online' : 'dot-offline')} />
-                {online ? '在线' : '离线'}
+                {online ? '近期有联系' : '等待设备联系'}
               </span>
             </div>
 
@@ -104,7 +104,7 @@ export const DeviceCard = memo(function DeviceCard({
                     <Wifi size={14} />
                     <span>{rssiLabel(device.rssiDbm)}</span>
                   </span>
-                  <span className="text-stone-light text-[11px] ml-auto">刚刚</span>
+                  <LastSeenLabel lastSeenAt={device.lastSeenAt} />
                 </>
               ) : (
                 <LastSeenLabel lastSeenAt={device.lastSeenAt} />
@@ -136,5 +136,5 @@ export const DeviceCard = memo(function DeviceCard({
 
 function LastSeenLabel({ lastSeenAt }: { lastSeenAt: string | null }) {
   const lastSeenAgo = useTimeAgo(lastSeenAt);
-  return <span className="text-stone-light text-[11px]">上次心跳 {lastSeenAgo}</span>;
+  return <span className="text-stone-light text-[11px]">最近联系 {lastSeenAgo}</span>;
 }

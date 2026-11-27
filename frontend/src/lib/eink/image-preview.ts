@@ -10,6 +10,7 @@ import { INK_RGB, PAPER_RGB } from './colors';
 export interface CropOptions {
   scale: number;
   offset: { x: number; y: number };
+  fit?: 'contain' | 'cover';
 }
 
 export interface DitherSettings {
@@ -101,23 +102,52 @@ function colorFrame({ data, width, height }: ImageData, preset: ImageRenderPrese
   return renderBwry2bpp(rgb, width, height, preset);
 }
 
+function cropPlacement(
+  canvas: { width: number; height: number },
+  img: Source,
+  { scale, fit = 'contain', offset }: CropOptions
+) {
+  const sourceWidth = img instanceof HTMLImageElement ? img.naturalWidth || img.width : img.width;
+  const sourceHeight =
+    img instanceof HTMLImageElement ? img.naturalHeight || img.height : img.height;
+  const fitRatio = fit === 'cover' ? Math.max : Math.min;
+  const ratio =
+    fitRatio(canvas.width / sourceWidth, canvas.height / sourceHeight) *
+    (fit === 'cover' ? Math.max(1, scale) : scale);
+  const width = sourceWidth * ratio;
+  const height = sourceHeight * ratio;
+  const left = (canvas.width - width) / 2;
+  const top = (canvas.height - height) / 2;
+  const limitX = Math.max(0, -left);
+  const limitY = Math.max(0, -top);
+  const position =
+    fit === 'cover'
+      ? {
+          x: Math.max(-limitX, Math.min(limitX, offset.x)),
+          y: Math.max(-limitY, Math.min(limitY, offset.y)),
+        }
+      : offset;
+  return { width, height, left, top, offset: position };
+}
+
+export function normalizeCropOffset(
+  canvas: { width: number; height: number },
+  img: Source,
+  options: CropOptions
+): CropOptions['offset'] {
+  return options.fit === 'cover' ? cropPlacement(canvas, img, options).offset : options.offset;
+}
+
 function drawCrop(
   ctx: CanvasRenderingContext2D,
   canvas: { width: number; height: number },
   img: Source,
-  { scale, offset }: CropOptions
+  options: CropOptions
 ) {
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const sourceWidth = img instanceof HTMLImageElement ? img.naturalWidth || img.width : img.width;
-  const sourceHeight =
-    img instanceof HTMLImageElement ? img.naturalHeight || img.height : img.height;
-  const finalScale = Math.min(canvas.width / sourceWidth, canvas.height / sourceHeight) * scale;
-  const drawW = sourceWidth * finalScale;
-  const drawH = sourceHeight * finalScale;
-  const drawX = (canvas.width - drawW) / 2 + offset.x;
-  const drawY = (canvas.height - drawH) / 2 + offset.y;
-  ctx.drawImage(img, drawX, drawY, drawW, drawH);
+  const { width, height, left, top, offset } = cropPlacement(canvas, img, options);
+  ctx.drawImage(img, left + offset.x, top + offset.y, width, height);
 }
 
 function prepareMonochrome(

@@ -122,6 +122,79 @@ func TestFramesMatchGolden(t *testing.T) {
 	}
 }
 
+func TestCountdownLayoutsMatchGolden(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, goal, date string
+		layout           api.CountdownLayout
+		days             int64
+	}{
+		{"editorial", "开学", "2027-09-01", api.CountdownLayoutEditorial, 28},
+		{"poster", "开学", "2027-09-01", api.CountdownLayoutPoster, 28},
+		{"split", "开学", "2027-09-01", api.CountdownLayoutSplit, 28},
+		{"editorial_due", "开学", "2027-09-01", api.CountdownLayoutEditorial, 0},
+		{"split_long", "全国青少年科学实验与项目成果展示暨创新实践活动", "9999-12-31", api.CountdownLayoutSplit, 2912357},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := api.DynamicConfig{Type: api.DynamicTypeCountdown, Goal: tc.goal, TargetDate: tc.date, CountdownLayout: tc.layout}
+			data, _ := json.Marshal(CountdownData{RemainingDays: tc.days})
+			mono, color, err := r.RenderFrames(Input{Type: cfg.Type, Config: cfg, Data: data, RenderedAt: renderedAt})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertGolden(t, "countdown_"+tc.name, framePNG(mono))
+			assertGolden(t, "countdown_"+tc.name+"_bwry", colorFramePNG(color))
+		})
+	}
+}
+
+func TestNotesAndCountUpMatchGolden(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := api.DynamicConfig{
+		Type: api.DynamicTypeMessageBoard, Message: "今晚六点回来吃饭\n给你留了番茄牛腩", MessageAuthor: "妈妈",
+		MessageExpiresAt: renderedAt.Add(time.Hour).Format(time.RFC3339), MessageFallback: "明天见",
+	}
+	for _, tc := range []struct {
+		name  string
+		input Input
+	}{
+		{"message_board", Input{Type: note.Type, Config: note, RenderedAt: renderedAt}},
+		{"message_board_expired", Input{Type: note.Type, Config: note, RenderedAt: renderedAt.Add(time.Hour)}},
+		{"message_board_long", Input{Type: note.Type, Config: api.DynamicConfig{
+			Message:       "冰箱里有昨天买的小番茄和草莓，晚上做饭可以拿出来洗一下。\n书房桌上放了周六出门要带的东西。\n记得把阳台的衣服收回来。\n我今天晚些时候到家，给我留一盏小灯就好。",
+			MessageAuthor: "妈妈",
+		}}},
+		{"countup_editorial", countUpGolden(api.CountdownLayoutEditorial, 365)},
+		{"countup_poster", countUpGolden(api.CountdownLayoutPoster, 365)},
+		{"countup_split", countUpGolden(api.CountdownLayoutSplit, 365)},
+		{"countup_pending", countUpGolden(api.CountdownLayoutEditorial, 0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mono, color, err := r.RenderFrames(tc.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertGolden(t, tc.name, framePNG(mono))
+			assertGolden(t, tc.name+"_bwry", colorFramePNG(color))
+		})
+	}
+}
+
+func countUpGolden(layout api.CountdownLayout, day int64) Input {
+	cfg := api.DynamicConfig{
+		Type: api.DynamicTypeCountdown, Goal: "搬进新家", TargetDate: "2025-10-27",
+		CountdownMode: api.CountdownModeUp, CountdownLayout: layout, Milestones: []int{365},
+	}
+	data, _ := json.Marshal(CountdownData{DayNumber: day})
+	return Input{Type: cfg.Type, Config: cfg, Data: data, RenderedAt: renderedAt}
+}
+
 func assertGolden(t *testing.T, name string, got []byte) {
 	t.Helper()
 	path := filepath.Join("testdata", "frames", name+".png")

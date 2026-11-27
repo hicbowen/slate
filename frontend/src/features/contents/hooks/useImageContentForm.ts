@@ -6,6 +6,7 @@ import { useAudioFormState } from './useAudioFormState';
 import { useCropState } from './useCropState';
 import { useImageFormSubmit } from './useImageFormSubmit';
 import { useBlob } from '@/features/contents/query/content-image-queries';
+import { canRetainOriginal, decodeImageFile } from '@/features/contents/lib/image-upload';
 
 /** Default threshold for the threshold dither mode. */
 const BW_THRESHOLD_DEFAULT = 128;
@@ -16,27 +17,36 @@ export function useImageContentForm(content?: Content) {
   const [displayMode, setDisplayMode] = useState(initialDisplayMode);
   const displayModeChanged = displayMode !== initialDisplayMode;
   const hasSavedGray = !!content?.grayImageHash;
-  const previewRef = useRef<HTMLCanvasElement>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const source = useBlob(content?.imageSourceHash);
+  const [imagePending, setImagePending] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const selection = useRef(0);
+  const initialOriginal = content?.imageOriginalHash;
+  const initialCrop = content?.imageCrop;
+  const [keepOriginal, setKeepOriginal] = useState(!!initialOriginal);
+  const source = useBlob(imageFile ? null : (initialOriginal ?? content?.imageSourceHash));
   const sourceFile = useMemo(
-    () => (source.data ? new File([source.data], 'source.png', { type: 'image/png' }) : null),
-    [source.data]
+    () =>
+      source.data ? new File([source.data], initialOriginal ? 'original' : 'source.png') : null,
+    [initialOriginal, source.data]
   );
   const audio = useAudioFormState(content);
-  const [threshold, setThreshold] = useState(BW_THRESHOLD_DEFAULT);
+  const initialThreshold = initialCrop?.threshold ?? BW_THRESHOLD_DEFAULT;
+  const initialMode = initialCrop?.dither ?? 'preset';
+  const [threshold, setThreshold] = useState(initialThreshold);
   const initialPreset = content?.imageRenderPreset ?? DEFAULT_IMAGE_RENDER_PRESET;
   const [renderPreset, setImageRenderPreset] = useState<ImageRenderPreset>(initialPreset);
-  const [mode, setMode] = useState<MonochromeMode>('preset');
+  const [mode, setMode] = useState<MonochromeMode>(initialMode);
   const [frameName, setFrameName] = useState(content?.frameName ?? '');
-  const { scale, setScale, offset, setOffset, resetCrop } = useCropState();
+  const { scale, setScale, offset, setOffset, fit, setFit, resetCrop } = useCropState(initialCrop);
   const renderChanged =
     renderPreset !== initialPreset ||
-    mode !== 'preset' ||
-    threshold !== BW_THRESHOLD_DEFAULT ||
-    scale !== 1 ||
-    offset.x !== 0 ||
-    offset.y !== 0;
+    mode !== initialMode ||
+    threshold !== initialThreshold ||
+    scale !== (initialCrop?.scale ?? 1) ||
+    fit !== (initialCrop?.fit ?? 'contain') ||
+    offset.x !== (initialCrop?.x ?? 0) ||
+    offset.y !== (initialCrop?.y ?? 0);
   const needsGray = displayModeChanged && displayMode === DisplayModeGray && !hasSavedGray;
   const renderFile = imageFile ?? (renderChanged || needsGray ? sourceFile : null);
   const frameNameChanged = isEdit && frameName !== (content.frameName ?? '');
@@ -50,31 +60,40 @@ export function useImageContentForm(content?: Content) {
       content?.audio?.status === 'failed' ||
       trimmedTtsText !== existingTtsText ||
       audio.ttsVoice !== content?.audio?.voice);
-  const hasUploadPatch = !!renderFile || !!audio.audioFile || displayModeChanged;
+  const removeImageOriginal = !!initialOriginal && !keepOriginal;
+  const hasUploadPatch =
+    !!renderFile || !!audio.audioFile || displayModeChanged || removeImageOriginal;
   const hasContentPatch = hasUploadPatch || frameNameChanged;
-  const canCreate = !!imageFile && (audio.audioMode !== 'tts' || trimmedTtsText.length > 0);
+  const canCreate =
+    !imagePending && !!imageFile && (audio.audioMode !== 'tts' || trimmedTtsText.length > 0);
   const canEdit =
-    (hasContentPatch || wantsTts) && (audio.audioMode !== 'tts' || trimmedTtsText.length > 0);
+    !imagePending &&
+    (hasContentPatch || wantsTts) &&
+    (audio.audioMode !== 'tts' || trimmedTtsText.length > 0);
+  const dirty = isEdit
+    ? hasContentPatch || wantsTts || imagePending
+    : !!imageFile || imagePending || !!frameName.trim() || !!audio.audioFile || !!trimmedTtsText;
 
   const onImagePick = useCallback(
-    (file: File | null) => {
-      setImageFile(file);
-      if (!file && !hasSavedGray) setDisplayMode(DisplayModeMono);
-      resetCrop();
+    async (file: File) => {
+      const attempt = ++selection.current;
+      setImagePending(true);
+      setImageError(null);
+      try {
+        const bitmap = await decodeImageFile(file);
+        bitmap.close();
+        if (attempt !== selection.current) return;
+        setImageFile(file);
+        if (!canRetainOriginal(file)) setKeepOriginal(false);
+        resetCrop();
+      } catch {
+        if (attempt === selection.current) setImageError('图片无法解码，请换一张图片。');
+      } finally {
+        if (attempt === selection.current) setImagePending(false);
+      }
     },
-    [hasSavedGray, resetCrop]
+    [resetCrop]
   );
-
-  const reset = useCallback(() => {
-    setImageFile(null);
-    audio.resetAudio();
-    setThreshold(BW_THRESHOLD_DEFAULT);
-    setMode('preset');
-    setImageRenderPreset(initialPreset);
-    setDisplayMode(initialDisplayMode);
-    setFrameName('');
-    resetCrop();
-  }, [audio, initialDisplayMode, initialPreset, resetCrop]);
 
   const buildFormData = useImageFormSubmit({
     imageFile: renderFile,
@@ -86,17 +105,25 @@ export function useImageContentForm(content?: Content) {
     mode,
     scale,
     offset,
+    fit,
+    keepOriginal,
+    reuseImageOriginal: keepOriginal && !imageFile ? initialOriginal : undefined,
+    removeImageOriginal,
   });
 
   return {
     image: {
-      previewRef,
       file: imageFile,
       renderFile,
       sourceFile,
       sourceError: source.isError,
-      setFile: setImageFile,
+      pending: imagePending,
+      error: imageError,
       onPick: onImagePick,
+      keepOriginal,
+      setKeepOriginal,
+      canRetainOriginal: imageFile ? canRetainOriginal(imageFile) : !!initialOriginal,
+      hadOriginal: !!initialOriginal,
     },
     audio: {
       file: audio.audioFile,
@@ -124,6 +151,8 @@ export function useImageContentForm(content?: Content) {
       offset,
       setOffset,
       reset: resetCrop,
+      fit,
+      setFit,
     },
     frameName,
     setFrameName,
@@ -134,7 +163,7 @@ export function useImageContentForm(content?: Content) {
     setDisplayMode,
     canCreate,
     canEdit,
-    reset,
+    dirty,
     buildFormData,
   };
 }

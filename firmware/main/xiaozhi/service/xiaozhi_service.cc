@@ -10,6 +10,8 @@
 #include "events/event_bus.h"
 #include "storage/nvs/volume_store.h"
 #include "xiaozhi/config/activation_client.h"
+#include "utils/time_utils.h"
+#include "xiaozhi/mcp/mcp_tools.h"
 #include "xiaozhi/config/settings.h"
 #include "xiaozhi/service/audio_service.h"
 #include "xiaozhi/service/message_handler.h"
@@ -96,6 +98,9 @@ bool XiaozhiService::Start(AudioPlayer* player, AudioService* audio) {
 }
 
 void XiaozhiService::EnterMode() {
+    tool_return_deadline_ms_.store(0);
+    tool_reply_finished_.store(false);
+    mcp::ResetCardActions();
     in_mode_.store(true, std::memory_order_relaxed);
     {
         std::lock_guard<std::mutex> lock(snapshot_mutex_);
@@ -119,6 +124,17 @@ void XiaozhiService::EnterMode() {
     } else {
         StartConfigTask();
     }
+}
+
+void XiaozhiService::ReturnToCardAfterReply() {
+    tool_reply_finished_.store(false);
+    tool_return_deadline_ms_.store(time_utils::NowMs() + 6000);
+}
+
+bool XiaozhiService::ToolReplyFinished(int64_t now_ms) {
+    const auto deadline = tool_return_deadline_ms_.load();
+    return deadline != 0 && (tool_reply_finished_.load() ||
+                            (now_ms >= deadline && CurrentState() != XiaozhiState::kSpeaking));
 }
 
 void XiaozhiService::LeaveMode() {
@@ -628,10 +644,15 @@ void XiaozhiService::ConversationTask() {
             break;
 
         if (pending_listen_after_playback_.load(std::memory_order_relaxed) && audio_->WaitForPlaybackQueueEmpty(0)) {
-            active_protocol->SendStartListening(ListeningMode::kAutoStop);
             pending_listen_after_playback_.store(false, std::memory_order_relaxed);
-            audio_->EnableVoiceProcessing(true);
-            SetState(XiaozhiState::kListening, "聆听中");
+            if (tool_return_deadline_ms_.load() != 0) {
+                tool_reply_finished_.store(true);
+                PostChanged();
+            } else {
+                active_protocol->SendStartListening(ListeningMode::kAutoStop);
+                audio_->EnableVoiceProcessing(true);
+                SetState(XiaozhiState::kListening, "聆听中");
+            }
         }
 
         bool sent = false;

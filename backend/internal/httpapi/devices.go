@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"math"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,12 +24,17 @@ const registerThrottle = time.Minute
 var (
 	macPattern      = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$`)
 	pairCodePattern = regexp.MustCompile(`^[A-Za-z0-9]{6}$`)
+	manifestPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 )
 
 func deviceView(d db.Device) api.Device {
+	var status *api.DeviceSyncStatus
+	if len(d.SyncStatus) != 0 {
+		_ = json.Unmarshal(d.SyncStatus, &status)
+	}
 	return api.Device{
 		ID: d.ID, MAC: d.Mac, Name: d.Name, GroupID: d.GroupID, SortOrder: d.SortOrder,
-		BatteryPct: d.BatteryPct, RSSIDbm: d.RssiDbm, FWVersion: d.FwVersion, LastSeenAt: utc(d.LastSeenAt),
+		BatteryPct: d.BatteryPct, RSSIDbm: d.RssiDbm, FWVersion: d.FwVersion, LastSeenAt: utc(d.LastSeenAt), SyncStatus: status,
 	}
 }
 
@@ -57,7 +64,19 @@ func (a *API) getDevice(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return ok(w, deviceView(d))
+	view := deviceView(d)
+	if view.SyncStatus != nil && d.GroupID != nil {
+		group, err := a.ownedGroup(r.Context(), *d.GroupID, userID(r))
+		if err != nil {
+			return err
+		}
+		manifest, err := a.manifest(r.Context(), group, view.SyncStatus.FrameFormat)
+		if err != nil {
+			return err
+		}
+		view.SyncStatus.ExpectedVersion = manifest.Version
+	}
+	return ok(w, view)
 }
 
 func (a *API) patchDevice(w http.ResponseWriter, r *http.Request) error {
@@ -334,6 +353,10 @@ func (a *API) syncDevice(w http.ResponseWriter, r *http.Request) error {
 	id := deviceID(r)
 	t := req.Telemetry
 	params := db.RecordTelemetryParams{ID: id, FwVersion: t.FWVersion}
+	frameFormat := deviceFrameFormat(r, req.FrameFormat)
+	if status := deviceSyncReport(r, req.ManifestVersion, frameFormat); status != nil {
+		params.SyncStatus, _ = json.Marshal(status)
+	}
 	if t.BatteryPct != nil && *t.BatteryPct >= 0 && *t.BatteryPct <= 100 {
 		v := int16(*t.BatteryPct)
 		params.BatteryPct = &v
@@ -352,11 +375,37 @@ func (a *API) syncDevice(w http.ResponseWriter, r *http.Request) error {
 	if t.WakeReason == "timer" && t.CurrentContentID != "" {
 		a.refreshCurrentFrame(r.Context(), id, t.CurrentContentID)
 	}
-	state, err := a.deviceState(r.Context(), id, req.ManifestVersion, deviceFrameFormat(r, req.FrameFormat))
+	state, err := a.deviceState(r.Context(), id, req.ManifestVersion, frameFormat)
 	if err != nil {
 		return err
 	}
 	return ok(w, state)
+}
+
+func deviceSyncReport(r *http.Request, appliedVersion, frameFormat string) *api.DeviceSyncStatus {
+	q := r.URL.Query()
+	if q.Get("diag") != "1" {
+		return nil
+	}
+	status := &api.DeviceSyncStatus{}
+	switch frameFormat {
+	case api.ColorFrameFormat, api.GrayFrameFormat:
+		status.FrameFormat = frameFormat
+	}
+	if manifestPattern.MatchString(appliedVersion) {
+		status.AppliedVersion = appliedVersion
+	}
+	if version := q.Get("screenVersion"); manifestPattern.MatchString(version) {
+		status.ScreenVersion = version
+	}
+	switch result := q.Get("syncResult"); result {
+	case "ok", "network", "cache_full", "apply_failed":
+		status.LastResult = result
+	}
+	if at, err := strconv.ParseInt(q.Get("nextRefreshAt"), 10, 64); err == nil && at > 0 && at <= 253402300799 {
+		status.NextRefreshAt = at
+	}
+	return status
 }
 
 // refreshCurrentFrame renders the frame a timer-woken device is showing when its refresh
@@ -501,7 +550,7 @@ func (a *API) deviceState(ctx context.Context, id, knownVersion, frameFormat str
 	if err != nil {
 		return state, err
 	}
-	state.Group = &api.DeviceGroup{ID: g.ID, Name: g.Name, Position: pos, ContentCount: len(m.Frames), ManifestVersion: m.Version}
+	state.Group = &api.DeviceGroup{ID: g.ID, Name: g.Name, Position: pos, ContentCount: len(m.Frames), ManifestVersion: m.Version, RotationMinutes: g.RotationMinutes}
 	if knownVersion != m.Version {
 		state.Manifest = &m
 	}

@@ -127,6 +127,8 @@ export function DynamicContentEditor({
           onSubmit={handleSubmit}
           gridClassName="lg:grid-cols-[1.3fr_1fr]"
           previewFormat={{ color: form.previewColor, onChange: form.setPreviewColor }}
+          previewError={form.previewError}
+          onRetryPreview={form.retryPreview}
           preview={
             <SavedOrLiveDynamicFramePreview
               savedData={savedPreview.data}
@@ -156,6 +158,7 @@ export function DynamicContentEditor({
                 showParams={showParams}
                 showAudio={showAudio}
                 contentId={content.id}
+                pushAuth={content.dynamic?.pushAuth}
                 dashboardData={form.dashboardData}
                 dashboardDataLabel="当前数据 JSON"
               />

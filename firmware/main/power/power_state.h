@@ -18,10 +18,21 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "storage/cache/cache.h"
 
+class EpdSsd1683;
+
 namespace power_state {
+
+enum class SyncResult : uint8_t { kUnknown, kOk, kNetwork, kCacheFull, kApplyFailed };
+SyncResult LastSyncResult();
+void RecordSyncResult(SyncResult result);
+void QueueScreenVersion(const std::string& version);
+void ConfirmScreenVersionIfIdle(EpdSsd1683* epd);
+std::string ConfirmedScreenVersion();
+void CarryConfirmedScreenVersion(const std::string& previous, const std::string& current);
 
 struct CurrentFrameSchedule {
     int64_t refresh_at = 0;  // Unix 秒；0 表示静态帧

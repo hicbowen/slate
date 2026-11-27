@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ColorFrameFormat, type DynamicConfig, type DynamicType } from '@/api';
 import { usePreviewDynamicContent } from '@/features/dynamic/query/dynamic-content-queries';
+import { getApiErrorMessage } from '@/lib/api-errors';
 
 type PreviewContentType = DynamicType | 'image';
+type Frame = { scope: string; data: ArrayBuffer };
+type RequestStatus = { scope: string; pending: boolean; error?: string };
 
 export function useDynamicPreview({
   contentId,
@@ -19,26 +22,27 @@ export function useDynamicPreview({
   color: boolean;
   debounceMs?: number;
 }) {
-  const preview = usePreviewDynamicContent(contentId);
-  const [livePreviewData, setLivePreviewData] = useState<ArrayBuffer | null>(null);
+  const { mutate: preview } = usePreviewDynamicContent(contentId);
+  const [frame, setFrame] = useState<Frame | null>(null);
+  const [status, setStatus] = useState<RequestStatus | null>(null);
+  const [retry, setRetry] = useState(0);
   const previewSeq = useRef(0);
-  const previewMutate = preview.mutate;
+  const scope = `${contentId ?? 'new'}:${type}:${color}`;
 
   const invalidatePreview = useCallback(() => {
     previewSeq.current++;
-    setLivePreviewData(null);
+    setFrame(null);
+    setStatus(null);
   }, []);
 
   useEffect(() => {
-    if (!config || type === 'image' || type === null) {
-      invalidatePreview();
-      return;
-    }
+    if (!config || type === 'image' || type === null) return;
     const seq = ++previewSeq.current;
-    setLivePreviewData(null);
+    let active = true;
     const controller = new AbortController();
+    setStatus({ scope, pending: true });
     const timer = setTimeout(() => {
-      previewMutate(
+      preview(
         {
           config,
           data: config.type === 'dashboard' ? (dashboardData ?? undefined) : undefined,
@@ -47,19 +51,34 @@ export function useDynamicPreview({
         },
         {
           onSuccess: (data) => {
-            if (seq === previewSeq.current) setLivePreviewData(data);
+            if (!active || seq !== previewSeq.current) return;
+            setFrame({ scope, data });
+            setStatus({ scope, pending: false });
           },
-          onError: () => {
-            if (seq === previewSeq.current) setLivePreviewData(null);
+          onError: (error) => {
+            if (!active || seq !== previewSeq.current) return;
+            setStatus({
+              scope,
+              pending: false,
+              error: getApiErrorMessage(error, '无法生成预览，请检查配置后重试。'),
+            });
           },
         }
       );
     }, debounceMs);
+
     return () => {
+      active = false;
       clearTimeout(timer);
       controller.abort();
     };
-  }, [color, config, dashboardData, debounceMs, invalidatePreview, previewMutate, type]);
+  }, [color, config, dashboardData, debounceMs, preview, retry, scope, type]);
 
-  return { livePreviewData, previewPending: preview.isPending, invalidatePreview };
+  return {
+    livePreviewData: config && frame?.scope === scope ? frame.data : null,
+    previewPending: !!config && status?.scope === scope && status.pending,
+    previewError: config && status?.scope === scope ? status.error : undefined,
+    retryPreview: () => setRetry((previous) => previous + 1),
+    invalidatePreview,
+  };
 }

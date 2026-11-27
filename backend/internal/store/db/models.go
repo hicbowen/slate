@@ -153,6 +153,8 @@ type Content struct {
 	DisplayMode       string
 	ImageSourceHash   *string
 	ImageRenderPreset string
+	ImageOriginalHash *string
+	ImageCrop         json.RawMessage
 }
 
 type ContentAudio struct {
@@ -170,16 +172,17 @@ type ContentAudio struct {
 }
 
 type ContentDynamic struct {
-	ContentID    string
-	Type         string
-	Config       json.RawMessage
-	Data         json.RawMessage
-	RenderedAt   *time.Time
-	NextRunAt    *time.Time
-	RefreshDueAt *time.Time
-	LeaseUntil   *time.Time
-	Attempts     int32
-	LastError    *string
+	ContentID     string
+	Type          string
+	Config        json.RawMessage
+	Data          json.RawMessage
+	RenderedAt    *time.Time
+	NextRunAt     *time.Time
+	RefreshDueAt  *time.Time
+	LeaseUntil    *time.Time
+	Attempts      int32
+	LastError     *string
+	PushTokenHash *string
 }
 
 type Device struct {
@@ -198,15 +201,17 @@ type Device struct {
 	LastSeenAt   *time.Time
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+	SyncStatus   json.RawMessage
 }
 
 type Group struct {
-	ID        string
-	OwnerID   string
-	Name      string
-	SortOrder int32
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID              string
+	OwnerID         string
+	Name            string
+	SortOrder       int32
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	RotationMinutes int16
 }
 
 type User struct {

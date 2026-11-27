@@ -50,9 +50,10 @@ void WatcherEntry(void* arg) {
     auto*                           epd        = ctx ? ctx->epd : nullptr;
     constexpr int                   kTimeoutMs = display_profile::kRefreshIdleTimeoutMs;
     // 只有确认刷新完成才清待重绘标记;超时则保留,下次唤醒继续全刷补画。
-    if (epd && epd->WaitForRefreshIdle(kTimeoutMs))
+    if (epd && epd->WaitForRefreshIdle(kTimeoutMs)) {
+        power_state::ConfirmScreenVersionIfIdle(epd);
         power_state::SetScreenRedrawPending(false);
-    else if (epd)
+    } else if (epd)
         ESP_LOGW(kTag, "refresh wait timeout timeout_ms=%d action=keep_redraw_pending", kTimeoutMs);
     auto done_posted = ctx ? ctx->done_posted : std::shared_ptr<std::atomic<bool>>();
     PostBgRefreshDoneOnce(done_posted);
@@ -283,6 +284,9 @@ bool BgRefreshScene::RenderEmptyState(SceneContext& ctx) {
 }
 
 void BgRefreshScene::StartWatcher(EpdSsd1683* epd) {
+    std::string gid, version;
+    if (cache::ReadStateMeta(gid, version))
+        power_state::QueueScreenVersion(version);
     auto* ctx = new (std::nothrow) WatcherContext{epd, done_posted_};
     if (!ctx) {
         ESP_LOGW(kTag, "watcher alloc failed action=finish");

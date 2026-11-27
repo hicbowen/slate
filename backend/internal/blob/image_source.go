@@ -3,6 +3,7 @@ package blob
 import (
 	"bytes"
 	"image/png"
+	"net/http"
 
 	"slate/internal/api"
 )
@@ -20,4 +21,18 @@ func ValidImageSource(data []byte) bool {
 	}
 	_, err = png.Decode(bytes.NewReader(data))
 	return err == nil
+}
+
+// Originals are only returned as authenticated Web blobs. Check the raster
+// signature without decoding an unbounded number of pixels on the server.
+func ValidImageOriginal(data []byte) bool {
+	if len(data) == 0 || len(data) > api.ImageOriginalMaxBytes {
+		return false
+	}
+	switch http.DetectContentType(data) {
+	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp":
+		return true
+	default:
+		return false
+	}
 }

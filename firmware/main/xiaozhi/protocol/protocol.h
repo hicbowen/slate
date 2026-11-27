@@ -71,7 +71,6 @@ class Protocol {
     void SendStartListening(ListeningMode mode);
     void SendStopListening();
     void SendAbortSpeaking(AbortReason reason);
-    void SendMcpMessage(const std::string& payload);
 
    protected:
     std::function<void(const cJSON*)>                       on_incoming_json_;
@@ -83,8 +82,7 @@ class Protocol {
     std::function<void()>                                   on_disconnected_;
 
     struct McpSendItem {
-        char*  data;
-        size_t len;
+        cJSON* request;
         bool   stop;
     };
 
@@ -92,6 +90,7 @@ class Protocol {
     TaskHandle_t                          mcp_send_task_   = nullptr;
     TaskHandle_t                          mcp_stop_waiter_ = nullptr;
     mutable std::mutex                    mcp_mutex_;
+    std::mutex                            mcp_stop_mutex_;
     std::atomic<bool>                     mcp_accepting_{true};
     int                                   server_sample_rate_    = 24000;
     int                                   server_frame_duration_ = kOpusFrameDurationMs;

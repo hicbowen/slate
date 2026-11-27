@@ -11,15 +11,16 @@ import (
 )
 
 const (
-	FrameWidth       = 400
-	FrameHeight      = 300
-	FrameBytes       = FrameWidth * FrameHeight / 8
-	ColorFrameBytes  = FrameWidth * FrameHeight / 4
-	GrayFrameBytes   = FrameWidth * FrameHeight / 2
-	ColorFrameFormat = "bwry2"
-	GrayFrameFormat  = "gray4"
-	DisplayModeMono  = "mono1"
-	DisplayModeGray  = "gray16"
+	FrameWidth            = 400
+	FrameHeight           = 300
+	FrameBytes            = FrameWidth * FrameHeight / 8
+	ColorFrameBytes       = FrameWidth * FrameHeight / 4
+	GrayFrameBytes        = FrameWidth * FrameHeight / 2
+	ImageOriginalMaxBytes = 12582912
+	ColorFrameFormat      = "bwry2"
+	GrayFrameFormat       = "gray4"
+	DisplayModeMono       = "mono1"
+	DisplayModeGray       = "gray16"
 	// StatusBarHeight is reserved at the top of every frame for the firmware status bar.
 	StatusBarHeight = 24
 	AudioSampleRate = 16000
@@ -61,15 +62,16 @@ type OrderRequest struct {
 }
 
 type Device struct {
-	ID         string     `json:"id"`
-	MAC        string     `json:"mac"`
-	Name       *string    `json:"name" tstype:"string | null,required"`
-	GroupID    *string    `json:"groupId" tstype:"string | null,required"`
-	SortOrder  int32      `json:"sortOrder"`
-	BatteryPct *int16     `json:"batteryPct" tstype:"number | null,required"`
-	RSSIDbm    *int16     `json:"rssiDbm" tstype:"number | null,required"`
-	FWVersion  *string    `json:"fwVersion" tstype:"string | null,required"`
-	LastSeenAt *time.Time `json:"lastSeenAt" tstype:"string | null,required"`
+	ID         string            `json:"id"`
+	MAC        string            `json:"mac"`
+	Name       *string           `json:"name" tstype:"string | null,required"`
+	GroupID    *string           `json:"groupId" tstype:"string | null,required"`
+	SortOrder  int32             `json:"sortOrder"`
+	BatteryPct *int16            `json:"batteryPct" tstype:"number | null,required"`
+	RSSIDbm    *int16            `json:"rssiDbm" tstype:"number | null,required"`
+	FWVersion  *string           `json:"fwVersion" tstype:"string | null,required"`
+	LastSeenAt *time.Time        `json:"lastSeenAt" tstype:"string | null,required"`
+	SyncStatus *DeviceSyncStatus `json:"syncStatus" tstype:"DeviceSyncStatus | null,required"`
 }
 
 type ClaimDeviceRequest struct {
@@ -83,15 +85,24 @@ type PatchDeviceRequest struct {
 }
 
 type Group struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	SortOrder    int32  `json:"sortOrder"`
-	ContentCount int    `json:"contentCount"`
-	TotalBytes   int64  `json:"totalBytes"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	SortOrder        int32  `json:"sortOrder"`
+	ContentCount     int    `json:"contentCount"`
+	TotalBytes       int64  `json:"totalBytes"` // Mono frames plus ready audio.
+	Note4ImageBytes  int64  `json:"note4ImageBytes"`
+	Note4CImageBytes int64  `json:"note4cImageBytes"`
+	AudioBytes       int64  `json:"audioBytes"`
+	RotationMinutes  int16  `json:"rotationMinutes"`
 }
 
 type GroupRequest struct {
 	Name string `json:"name"`
+}
+
+type PatchGroupRequest struct {
+	Name            *string `json:"name,omitempty"`
+	RotationMinutes *int16  `json:"rotationMinutes,omitempty"`
 }
 
 type ContentKind string
@@ -129,9 +140,20 @@ type Content struct {
 	DisplayMode       string          `json:"displayMode" tstype:"'mono1' | 'gray16'"`
 	ColorImageHash    *string         `json:"colorImageHash,omitempty"`
 	ImageSourceHash   *string         `json:"imageSourceHash,omitempty"`
+	ImageOriginalHash *string         `json:"imageOriginalHash,omitempty"`
+	ImageCrop         json.RawMessage `json:"imageCrop,omitempty" tstype:"ImageCrop"`
 	ImageRenderPreset string          `json:"imageRenderPreset,omitempty" tstype:"'auto' | 'photo' | 'vivid' | 'graphic'"`
 	Audio             *ContentAudio   `json:"audio" tstype:"ContentAudio | null,required"`
 	Dynamic           *ContentDynamic `json:"dynamic" tstype:"ContentDynamic | null,required"`
+}
+
+type ImageCrop struct {
+	Fit       string  `json:"fit" tstype:"'contain' | 'cover'"`
+	Scale     float64 `json:"scale"`
+	X         float64 `json:"x"`
+	Y         float64 `json:"y"`
+	Dither    string  `json:"dither" tstype:"'preset' | 'threshold' | 'bayer4' | 'bayer8' | 'floyd' | 'atkinson' | 'sierra'"`
+	Threshold int     `json:"threshold"`
 }
 
 func ValidImageRenderPreset(preset string) bool {
@@ -161,6 +183,11 @@ type ContentDynamic struct {
 	RenderedAt *time.Time      `json:"renderedAt" tstype:"string | null,required"`
 	NextRunAt  *time.Time      `json:"nextRunAt" tstype:"string | null,required"`
 	Error      *string         `json:"error" tstype:"string | null,required"`
+	PushAuth   string          `json:"pushAuth,omitempty" tstype:"'legacy' | 'unconfigured' | 'token'"`
+}
+
+type DashboardPushToken struct {
+	Token string `json:"token"`
 }
 
 // CreateDynamicContentRequest creates dynamic content; image content is created with

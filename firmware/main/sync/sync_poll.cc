@@ -2,6 +2,7 @@
 
 #include <esp_log.h>
 #include <sdkconfig.h>
+#include <ctime>
 
 #include "bsp/board.h"
 #include "events/event_bus.h"
@@ -26,6 +27,18 @@ api::Telemetry BuildTelemetry(const std::string& wake_reason) {
     tel.rssi_dbm    = Wifi::Get().GetRssi();
     tel.fw_version  = CONFIG_APP_PROJECT_VER;
     tel.wake_reason = wake_reason;
+    power_state::ConfirmScreenVersionIfIdle(Board::Get().epd());
+    tel.screen_version = power_state::ConfirmedScreenVersion();
+    switch (power_state::LastSyncResult()) {
+        case power_state::SyncResult::kOk: tel.sync_result = "ok"; break;
+        case power_state::SyncResult::kNetwork: tel.sync_result = "network"; break;
+        case power_state::SyncResult::kCacheFull: tel.sync_result = "cache_full"; break;
+        case power_state::SyncResult::kApplyFailed: tel.sync_result = "apply_failed"; break;
+        default: break;
+    }
+    const auto next = power_state::ComputeNextWakeSec();
+    if (next > 0 && sntp::TimeSynced())
+        tel.next_refresh_at = static_cast<int64_t>(time(nullptr)) + next;
     if (power_state::CurrentFrameNeedsTimerWake()) {
         std::string      gid;
         std::string      manifest_version;
@@ -94,6 +107,7 @@ void SyncService::SyncOnce(SyncMode mode) {
         if (ShouldStop())
             return;
         ESP_LOGW(kTag, "sync request failed reason=offline_or_server");
+        power_state::RecordSyncResult(power_state::SyncResult::kNetwork);
         ESP_LOGI(kTag, "sync done mode=%s ok=0 group_changed=0 elapsed_ms=%lld", SyncModeName(mode),
                  (long long)(time_utils::NowMs() - started_ms));
         evt::PostSyncFinished(false, false, evt::kNoWait);
@@ -128,8 +142,11 @@ void SyncService::SyncOnce(SyncMode mode) {
 
     const SyncReason reason =
         mode == SyncMode::kBackgroundRefresh ? SyncReason::kBackgroundRefresh : SyncReason::kUserActive;
+    power_state::RecordSyncResult(power_state::SyncResult::kApplyFailed);
     bool       group_changed = false;
     const bool sync_ok       = ApplyState(state, reason, group_changed);
+    if (sync_ok)
+        power_state::RecordSyncResult(power_state::SyncResult::kOk);
 
     ESP_LOGI(kTag, "sync done mode=%s ok=%d group_changed=%d elapsed_ms=%lld", SyncModeName(mode), sync_ok ? 1 : 0,
              group_changed ? 1 : 0, (long long)(time_utils::NowMs() - started_ms));
@@ -149,6 +166,7 @@ void SyncService::DoCycle(api::GroupAction action) {
         if (ShouldStop())
             return;
         ESP_LOGW(kTag, "cycle group failed direction=%s reason=offline_or_server", direction);
+        power_state::RecordSyncResult(power_state::SyncResult::kNetwork);
         ESP_LOGI(kTag, "cycle done direction=%s ok=0 group_changed=0 elapsed_ms=%lld", direction,
                  (long long)(time_utils::NowMs() - started_ms));
         evt::PostSyncFinished(false, false, evt::kNoWait);
@@ -161,8 +179,11 @@ void SyncService::DoCycle(api::GroupAction action) {
 
     if (state.has_group)
         evt::PostGroupSyncStatus(GroupSyncStatusMode::kCycleTarget, state.group_id, state.group_name);
+    power_state::RecordSyncResult(power_state::SyncResult::kApplyFailed);
     bool       group_changed = false;
     const bool sync_ok       = ApplyState(state, SyncReason::kCycle, group_changed);
+    if (sync_ok)
+        power_state::RecordSyncResult(power_state::SyncResult::kOk);
 
     evt::PostSyncFinished(sync_ok, group_changed, evt::kNoWait);
     if (!sync_ok)

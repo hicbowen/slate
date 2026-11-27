@@ -71,6 +71,8 @@ func (r *Renderer) draw(in Input, color bool) (*Canvas, error) {
 		if err = decode(in.Data, &data); err == nil {
 			d.countdown(in.Config, data)
 		}
+	case api.DynamicTypeMessageBoard:
+		d.messageBoard(in.Config, in.RenderedAt)
 	case api.DynamicTypeHistoryToday:
 		var data HistoryTodayData
 		if err = decode(in.Data, &data); err == nil {

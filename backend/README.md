@@ -100,9 +100,11 @@
 | --- | --- |
 | `GET` `POST /api/groups` | 列表、创建 |
 | `PUT /api/groups/order` | 排序 |
-| `GET` `PATCH` `DELETE /api/groups/{id}` | 读取、修改、删除 |
+| `GET` `PATCH` `DELETE /api/groups/{id}` | 读取、修改、删除。PATCH 支持 `name`、`rotationMinutes`（0、15、30、60） |
 | `GET` `POST /api/groups/{id}/contents` | 组内内容列表、创建内容 |
 | `PUT /api/groups/{id}/contents/order` | 组内内容排序 |
+
+`note4ImageBytes` 和 `note4cImageBytes` 按设备最终下发的帧统计，`audioBytes` 只统计就绪音频。网页估算静态占用，固件下载时还会预留暂存空间。
 
 **内容**
 
@@ -125,16 +127,21 @@
 | `colorFrame` | 可选，400×300 packed BWRY 2bpp，30000 字节，色号 00 黑、01 白、10 黄、11 红，需同时上传 `frame` |
 | `grayFrame` | 可选，400×300 packed 4bpp，60000 字节，高半字节在左，0 为黑、15 为白，需同时上传 `frame` |
 | `imageSource` | 可选，400×300 PNG 裁剪源图，最大 1 MB，需同时上传 `frame` |
+| `imageOriginal` | 可选，未裁剪的 PNG、JPEG、WebP、GIF 或 BMP，最多 12 MB。与 `imageCrop`、`imageSource` 和 `frame` 一起提交 |
+| `imageCrop` | 原图的构图、缩放、400×300 坐标偏移及黑白抖动参数，JSON 对象 |
+| `reuseImageOriginal` | 更新时用当前内容的原图哈希代替上传原图字节，同时提交新的 `imageCrop`、`imageSource` 和 `frame` |
+| `removeImageOriginal` | 更新时填 `true` 取消保留原图，可单独提交 |
 | `imageRenderPreset` | 可选，图片优化风格 `auto` / `photo` / `vivid` / `graphic`，需同时上传 `frame` |
 | `displayMode` | Note4 上屏方式，`mono1`（默认）或 `gray16`。可单独修改，启用 16 灰需要已有灰阶帧 |
 | `audio` | 任意支持格式的音频，≤ 5 MB |
 | `frameName` | 状态栏标题 |
 
 - 其他字段或重复字段直接报错，请求体总大小不超过各文件上限之和加 64 KB。
+- 批量图片导入为每张图发送包含 32 位小写十六进制的 `Idempotency-Key` 请求头。同一内容组内重试同一个键返回已创建的内容。
 - 设备帧由客户端生成，服务端保存原始帧字节。可编辑源图通过 `imageSourceHash` 和有归属校验的 Web Blob 接口读取，仅用于网页重新渲染。
 - 换图片会保留已有音频，删除音频走 `DELETE /audio`。
 
-**动态内容**用 JSON（`CreateDynamicContentRequest` / `PatchContentRequest`）。修改配置时先按新配置取数并渲染，成功后才落库。倒数日接受 `goal`、`targetDate` 和 `tz`，按当地午夜刷新。动态预览默认返回黑白帧，加 `?format=bwry2` 返回四色帧。
+**动态内容**用 JSON（`CreateDynamicContentRequest` / `PatchContentRequest`）。修改配置时先按新配置取数并渲染，成功后才落库。计日卡片接受 `goal`、`targetDate` 和 `tz`，按当地午夜刷新。`countdownMode: "up"` 以 `targetDate` 为第 1 天，并可用 `milestones` 标记指定天数。家庭留言板 `message_board` 可设置 `messageExpiresAt`（RFC 3339）和过期后显示的 `messageFallback`。动态预览默认返回黑白帧，加 `?format=bwry2` 返回四色帧。
 
 ### Dashboard 数据推送
 
@@ -143,7 +150,8 @@ POST /api/contents/{id}/data
 { "version": 1, "data": { ... } }
 ```
 
-- 不需要 JWT，内容 ID 本身就是凭证；泄漏后删除内容重建。
+- 新仪表盘通过 `Authorization: Bearer <推送令牌>` 鉴权。登录的内容所有者可调用 `POST /api/contents/{id}/data/token` 生成或轮换令牌，响应只返回一次明文。
+- 已有仪表盘保留旧推送地址。首次生成令牌后，旧地址需要附上新令牌才能继续推送。
 - 请求体 ≤ 64 KB，每个内容每分钟 30 次。
 
 内置模板「AI 限额监控」（`ai_quota_monitor`）展示一个服务的两个限额窗口，Claude Code、Codex 都适用。`data` 字段：
@@ -170,6 +178,7 @@ POST /api/contents/{id}/data
 | `POST /api/device/register` | `{ protocol, mac }`，无需鉴权 |
 | `POST /api/device/sync` | `{ protocol, manifestVersion, telemetry, frameFormat? }` |
 | `POST /api/device/group` | `{ protocol, action, groupId?, manifestVersion, frameFormat? }` |
+| `POST /api/device/message-board` | `{ protocol, groupId, contentId?, message, author? }`，在已绑定设备的当前组发布一条持续显示的新留言 |
 | `GET /api/device/blobs/{hash}` | — |
 
 **注册**返回 `deviceId`、`secret`（64 位 hex）、`pairCode` 和 `serverTime`（Unix 毫秒）。之后的请求都带 `Authorization: Bearer <secret>`。
@@ -189,6 +198,8 @@ POST /api/contents/{id}/data
 - Note4C 请求 `bwry2` 时优先下发四色帧，Note4 上屏设置独立生效。
 - `refreshAt` 是动态帧下次重新渲染的 Unix 秒，静态帧为 null。
 - 版本是组 ID、组名和帧列表的 sha256 前 32 位，帧的任何变化都会换版本。
+- `group.rotationMinutes` 单独同步，调整轮播间隔时无需重下帧。
+- 新固件通过 `diag=1` 和可选查询参数上报上次同步结果、最近确认上屏版本、预计刷新时间。网页将请求中的 `manifestVersion` 显示为设备已应用的缓存版本。
 
 **定时唤醒**时设备在 telemetry 里带上 `currentContentId`。该内容已到期就先同步重新渲染，本轮即可拿到新帧。
 

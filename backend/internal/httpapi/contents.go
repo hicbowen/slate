@@ -2,12 +2,16 @@ package httpapi
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,14 +28,18 @@ const (
 	maxTTSChars    = 500
 )
 
+var imageUploadKeyPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
 func listRow(c db.GetContentRow) db.ListContentsRow {
 	return db.ListContentsRow{
 		ID: c.ID, GroupID: c.GroupID, SortOrder: c.SortOrder, Kind: c.Kind, FrameName: c.FrameName, ImageHash: c.ImageHash, ColorImageHash: c.ColorImageHash, GrayImageHash: c.GrayImageHash, DisplayMode: c.DisplayMode,
 		ImageSourceHash: c.ImageSourceHash, ImageRenderPreset: c.ImageRenderPreset,
+		ImageOriginalHash: c.ImageOriginalHash, ImageCrop: c.ImageCrop,
 		DynamicType: c.DynamicType, DynamicConfig: c.DynamicConfig, DynamicData: c.DynamicData, RenderedAt: c.RenderedAt,
 		NextRunAt: c.NextRunAt, RefreshDueAt: c.RefreshDueAt, DynamicError: c.DynamicError, AudioSource: c.AudioSource,
 		AudioStatus: c.AudioStatus, AudioVoice: c.AudioVoice, AudioText: c.AudioText, AudioHash: c.AudioHash,
 		AudioSize: c.AudioSize, AudioError: c.AudioError, AudioUpdatedAt: c.AudioUpdatedAt,
+		PushTokenHash: c.PushTokenHash,
 	}
 }
 
@@ -46,6 +54,7 @@ func contentView(c db.ListContentsRow) api.Content {
 	}
 	if c.Kind == db.ContentKindImage {
 		out.ImageSourceHash, out.ImageRenderPreset = c.ImageSourceHash, c.ImageRenderPreset
+		out.ImageOriginalHash, out.ImageCrop = c.ImageOriginalHash, c.ImageCrop
 	}
 	if c.AudioSource != nil && c.AudioStatus != nil {
 		out.Audio = &api.ContentAudio{
@@ -64,6 +73,16 @@ func contentView(c db.ListContentsRow) api.Content {
 		out.Dynamic = &api.ContentDynamic{
 			Type: api.DynamicType(*c.DynamicType), Config: c.DynamicConfig, Data: data,
 			RenderedAt: utc(c.RenderedAt), NextRunAt: utc(c.NextRunAt), Error: c.DynamicError,
+		}
+		if out.Dynamic.Type == api.DynamicTypeDashboard {
+			switch {
+			case c.PushTokenHash == nil:
+				out.Dynamic.PushAuth = "legacy"
+			case *c.PushTokenHash == "":
+				out.Dynamic.PushAuth = "unconfigured"
+			default:
+				out.Dynamic.PushAuth = "token"
+			}
 		}
 	}
 	return out
@@ -151,10 +170,14 @@ type upload struct {
 	frame, colorFrame, grayFrame, imageSource, audio []byte
 	frameName, displayMode, imageRenderPreset        *string
 	hasFrameName                                     bool
+	imageOriginal                                    []byte
+	imageCrop                                        json.RawMessage
+	reuseImageOriginal                               *string
+	removeImageOriginal                              bool
 }
 
 // maxUploadBytes bounds all uploaded renditions, source, audio, and multipart metadata.
-const maxUploadBytes = api.FrameBytes + api.ColorFrameBytes + api.GrayFrameBytes + blob.MaxImageSourceBytes + maxAudioBytes + 64<<10
+const maxUploadBytes = api.FrameBytes + api.ColorFrameBytes + api.GrayFrameBytes + blob.MaxImageSourceBytes + api.ImageOriginalMaxBytes + maxAudioBytes + 64<<10
 
 func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 	var u upload
@@ -172,6 +195,13 @@ func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 			}
 			if (len(u.imageSource) > 0 || u.imageRenderPreset != nil) && len(u.frame) == 0 {
 				return u, badRequest("更新源图或图片风格时须同时提供黑白帧")
+			}
+			hasOriginal := len(u.imageOriginal) > 0
+			reuseOriginal := u.reuseImageOriginal != nil
+			if (hasOriginal && reuseOriginal) || (u.removeImageOriginal && (hasOriginal || reuseOriginal)) ||
+				(len(u.imageCrop) > 0) != (hasOriginal || reuseOriginal) ||
+				((hasOriginal || reuseOriginal) && (len(u.frame) == 0 || len(u.imageSource) == 0)) {
+				return u, badRequest("保留原图须同时提供裁剪参数、裁剪源图和黑白帧")
 			}
 			return u, nil
 		}
@@ -239,6 +269,41 @@ func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 				return u, badRequest("图片风格无效")
 			}
 			u.imageRenderPreset = &preset
+		case "imageOriginal":
+			if u.imageOriginal, err = readPart(part, api.ImageOriginalMaxBytes, "可保留的原图不能超过 12 MB"); err != nil {
+				return u, err
+			}
+			if !blob.ValidImageOriginal(u.imageOriginal) {
+				return u, badRequest("原图格式不受支持")
+			}
+		case "imageCrop":
+			raw, err := readPart(part, 1024, "图片裁剪参数过长")
+			if err != nil {
+				return u, err
+			}
+			u.imageCrop, err = readImageCrop(raw)
+			if err != nil {
+				return u, err
+			}
+		case "reuseImageOriginal":
+			raw, err := readPart(part, 64, "原图哈希无效")
+			if err != nil {
+				return u, err
+			}
+			hash := string(raw)
+			if !blob.ValidHash(hash) {
+				return u, badRequest("原图哈希无效")
+			}
+			u.reuseImageOriginal = &hash
+		case "removeImageOriginal":
+			raw, err := readPart(part, 4, "删除原图参数无效")
+			if err != nil {
+				return u, err
+			}
+			if string(raw) != "true" {
+				return u, badRequest("删除原图参数无效")
+			}
+			u.removeImageOriginal = true
 		case "audio":
 			// Browsers often send an empty or generic type for flac/opus/wma; ffmpeg decides.
 			if u.audio, err = readPart(part, maxAudioBytes, "音频文件不能超过 5MB"); err != nil {
@@ -256,6 +321,25 @@ func readUpload(w http.ResponseWriter, r *http.Request) (upload, error) {
 		default:
 			return u, badRequest("未知字段 %s", name)
 		}
+	}
+}
+
+func readImageCrop(raw []byte) (json.RawMessage, error) {
+	var crop *api.ImageCrop
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if !json.Valid(raw) || decoder.Decode(&crop) != nil || crop == nil ||
+		(crop.Fit != "contain" && crop.Fit != "cover") ||
+		crop.Scale < 0.5 || crop.Scale > 4 || (crop.Fit == "cover" && crop.Scale < 1) ||
+		crop.X < -100000 || crop.X > 100000 || crop.Y < -100000 || crop.Y > 100000 ||
+		crop.Threshold < 0 || crop.Threshold > 255 {
+		return nil, badRequest("图片裁剪参数无效")
+	}
+	switch crop.Dither {
+	case "preset", "threshold", "bayer4", "bayer8", "floyd", "atkinson", "sierra":
+		return json.Marshal(crop)
+	default:
+		return nil, badRequest("黑白抖动模式无效")
 	}
 }
 
@@ -286,6 +370,7 @@ type storedUpload struct {
 	imageHash, audioHash            string
 	colorHash, grayHash, sourceHash *string
 	audioSize                       int32
+	originalHash                    *string
 }
 
 // storeUpload writes the supplied assets before any database changes.
@@ -301,6 +386,10 @@ func (a *API) storeUpload(ctx context.Context, u upload) (storedUpload, error) {
 		return out, err
 	}
 	out.sourceHash, err = a.Blobs.PutOptional(u.imageSource)
+	if err != nil {
+		return out, err
+	}
+	out.originalHash, err = a.Blobs.PutOptional(u.imageOriginal)
 	if err != nil || len(u.audio) == 0 {
 		return out, err
 	}
@@ -321,12 +410,28 @@ func (a *API) createContent(w http.ResponseWriter, r *http.Request) error {
 	if !isMultipart(r) {
 		return a.createDynamic(w, r, g)
 	}
+	key := r.Header.Get("Idempotency-Key")
+	id := ""
+	if key != "" {
+		if !imageUploadKeyPattern.MatchString(key) {
+			return badRequest("图片上传幂等键格式无效")
+		}
+		id = "i" + hashSecret(g.ID + ":" + key)[:23]
+		if result, err := a.Store.Q.GetContent(r.Context(), id); err == nil && result.GroupID == g.ID {
+			return a.respondContent(w, r, id, http.StatusOK)
+		} else if err != nil && !store.Missing(err) {
+			return err
+		}
+	}
 	u, err := readUpload(w, r)
 	if err != nil {
 		return err
 	}
 	if len(u.frame) == 0 {
 		return badRequest("请上传图片")
+	}
+	if u.reuseImageOriginal != nil || u.removeImageOriginal {
+		return badRequest("新建图片时请直接上传原图")
 	}
 	if u.displayMode != nil && *u.displayMode == api.DisplayModeGray && len(u.grayFrame) == 0 {
 		return badRequest("16 灰显示需要灰阶帧")
@@ -335,16 +440,28 @@ func (a *API) createContent(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	id := newID()
+	status := http.StatusCreated
+	if id == "" {
+		id = newID()
+	}
 	err = a.Store.Tx(r.Context(), func(q *db.Queries) error {
 		seq, err := lockNextSeq(r.Context(), q, g.ID)
 		if err != nil {
 			return err
 		}
+		if key != "" {
+			if result, err := q.GetContent(r.Context(), id); err == nil && result.GroupID == g.ID {
+				status = http.StatusOK
+				return nil
+			} else if err != nil && !store.Missing(err) {
+				return err
+			}
+		}
 		if err := q.CreateContent(r.Context(), db.CreateContentParams{
 			ID: id, GroupID: g.ID, SortOrder: seq, Kind: db.ContentKindImage, FrameName: u.frameName,
 			ImageHash: assets.imageHash, ColorImageHash: assets.colorHash, GrayImageHash: assets.grayHash, DisplayMode: u.displayMode,
 			ImageSourceHash: assets.sourceHash, ImageRenderPreset: u.imageRenderPreset,
+			ImageOriginalHash: assets.originalHash, ImageCrop: u.imageCrop,
 		}); err != nil {
 			return err
 		}
@@ -356,7 +473,7 @@ func (a *API) createContent(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return a.respondContent(w, r, id, 201)
+	return a.respondContent(w, r, id, status)
 }
 
 func lockNextSeq(ctx context.Context, q *db.Queries, groupID string) (int32, error) {
@@ -404,7 +521,14 @@ func (a *API) createDynamic(w http.ResponseWriter, r *http.Request, g db.Group) 
 		if err := q.CreateContent(r.Context(), db.CreateContentParams{ID: id, GroupID: g.ID, SortOrder: seq, Kind: db.ContentKindDynamic, FrameName: frameName, ImageHash: imageHash, ColorImageHash: colorHash}); err != nil {
 			return err
 		}
-		if err := q.CreateDynamic(r.Context(), db.CreateDynamicParams{ContentID: id, Type: string(cfg.Type), Config: cfgJSON, Data: frame.Data}); err != nil {
+		var pushTokenHash *string
+		if cfg.Type == api.DynamicTypeDashboard {
+			// An empty hash requires configuration; NULL is retained for legacy dashboards.
+			pushTokenHash = new(string)
+		}
+		if err := q.CreateDynamic(r.Context(), db.CreateDynamicParams{
+			ContentID: id, Type: string(cfg.Type), Config: cfgJSON, Data: frame.Data, PushTokenHash: pushTokenHash,
+		}); err != nil {
 			return err
 		}
 		return q.SaveDynamicRender(r.Context(), frame.SaveParams(id))
@@ -519,7 +643,7 @@ func (a *API) patchImage(w http.ResponseWriter, r *http.Request, c db.GetContent
 	if err != nil {
 		return err
 	}
-	if len(u.frame) == 0 && len(u.audio) == 0 && !u.hasFrameName && u.displayMode == nil {
+	if len(u.frame) == 0 && len(u.audio) == 0 && !u.hasFrameName && u.displayMode == nil && !u.removeImageOriginal {
 		return badRequest("没有可更新的字段")
 	}
 	assets, err := a.storeUpload(r.Context(), u)
@@ -540,9 +664,22 @@ func (a *API) patchImage(w http.ResponseWriter, r *http.Request, c db.GetContent
 			if u.imageRenderPreset != nil {
 				preset = *u.imageRenderPreset
 			}
-			if err := q.SetContentImageSource(r.Context(), db.SetContentImageSourceParams{
+			originalHash := assets.originalHash
+			if u.reuseImageOriginal != nil {
+				originalHash = u.reuseImageOriginal
+			}
+			updated, err := q.SetContentImageSource(r.Context(), db.SetContentImageSourceParams{
 				ID: c.ID, ImageSourceHash: assets.sourceHash, ImageRenderPreset: preset,
-			}); err != nil {
+				ImageOriginalHash: originalHash, ImageCrop: u.imageCrop, ExpectedOriginal: u.reuseImageOriginal,
+			})
+			if err != nil {
+				return err
+			}
+			if updated == 0 {
+				return fail(http.StatusConflict, "原图已变化，请重新打开图片后再编辑")
+			}
+		} else if u.removeImageOriginal {
+			if err := q.ClearContentImageOriginal(r.Context(), c.ID); err != nil {
 				return err
 			}
 		}
@@ -735,12 +872,41 @@ func (a *API) previewDynamicContent(w http.ResponseWriter, r *http.Request) erro
 	return writeBinary(w, frame.Image, "no-store")
 }
 
-// ingest accepts dashboard data. The content ID is an unguessable capability URL, which
-// keeps scripts simple; abuse is bounded by the body limit and a per-content rate limit.
+func (a *API) rotateDashboardPushToken(w http.ResponseWriter, r *http.Request) error {
+	var secret [32]byte
+	if _, err := rand.Read(secret[:]); err != nil {
+		return err
+	}
+	token := hex.EncodeToString(secret[:])
+	hash := hashSecret(token)
+	changed, err := a.Store.Q.RotateDashboardPushToken(r.Context(), db.RotateDashboardPushTokenParams{
+		TokenHash: &hash, ContentID: r.PathValue("id"), OwnerID: userID(r),
+	})
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return notFound("dashboard 内容")
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	return ok(w, api.DashboardPushToken{Token: token})
+}
+
+// Existing dashboards keep the capability URL until their owner enables a token.
 func (a *API) ingest(w http.ResponseWriter, r *http.Request) error {
 	id := r.PathValue("id")
 	if err := a.limits.check("ingest:"+id, 30, "每分钟最多 30 次推送"); err != nil {
 		return err
+	}
+	c, err := a.Store.Q.GetContent(r.Context(), id)
+	if store.Missing(err) || (err == nil && (c.DynamicType == nil || *c.DynamicType != string(api.DynamicTypeDashboard))) {
+		return notFound("dashboard 内容")
+	}
+	if err != nil {
+		return err
+	}
+	if c.PushTokenHash != nil && subtle.ConstantTimeCompare([]byte(*c.PushTokenHash), []byte(hashSecret(bearer(r)))) != 1 {
+		return fail(http.StatusUnauthorized, "推送令牌无效")
 	}
 	var req api.IngestRequest
 	if err := decodeJSON(r, maxIngestBytes, &req); err != nil {
@@ -753,13 +919,6 @@ func (a *API) ingest(w http.ResponseWriter, r *http.Request) error {
 	if err := dynamic.ValidateDashboardData(data); err != nil {
 		return err
 	}
-	c, err := a.Store.Q.GetContent(r.Context(), id)
-	if store.Missing(err) || (err == nil && (c.DynamicType == nil || *c.DynamicType != string(api.DynamicTypeDashboard))) {
-		return notFound("dashboard 内容")
-	}
-	if err != nil {
-		return err
-	}
 	res, err := a.Dynamic.Render(r.Context(), id, data)
 	if err != nil {
 		return err
@@ -768,6 +927,8 @@ func (a *API) ingest(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (a *API) getBlob(w http.ResponseWriter, r *http.Request) error {
+	w.Header().Add("Vary", "Authorization")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	hash := r.PathValue("hash")
 	if !blob.ValidHash(hash) {
 		return notFound("文件")

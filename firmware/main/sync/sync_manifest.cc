@@ -110,7 +110,7 @@ bool SyncService::DownloadFramesToStage(cache::CacheWriter& writer, const std::s
 bool SyncService::CommitStagedFrames(cache::CacheWriter& writer, const std::string& gid, const api::Manifest& manifest,
                                      const std::string& group_name, const std::string& selected_group_id,
                                      bool current_group_update, SyncReason reason, int total_updates,
-                                     int old_content_count) {
+                                     int old_content_count, int rotation_minutes) {
     const GroupSyncStatusMode saving_mode =
         current_group_update ? GroupSyncStatusMode::kCurrentGroupSaving : GroupSyncStatusMode::kTargetGroupSaving;
     const int total = static_cast<int>(manifest.frames.size());
@@ -125,7 +125,7 @@ bool SyncService::CommitStagedFrames(cache::CacheWriter& writer, const std::stri
         }
         evt::PostGroupSyncStatus(saving_mode, gid, group_name, ClampProgressCount(idx + 1), ClampProgressCount(total));
     }
-    if (!cache::WriteManifest(gid, manifest.version, total, group_name)) {
+    if (!cache::WriteManifest(gid, manifest.version, total, group_name, rotation_minutes)) {
         ESP_LOGW(kTag, "manifest write failed action=rollback");
         writer.Rollback();
         return false;
@@ -162,10 +162,6 @@ bool SyncService::SyncManifestAndFrames(const api::DeviceState& state, SyncReaso
 
     cache::ManifestMeta cached_meta;
     bool                cached_meta_ok = cache::ReadManifestMeta(gid, cached_meta);
-    if (cached_meta_ok && !state.group_name.empty() && cached_meta.name != state.group_name) {
-        cache::WriteManifest(gid, cached_meta.manifest_version, cached_meta.content_count, state.group_name);
-        cached_meta_ok = cache::ReadManifestMeta(gid, cached_meta);
-    }
     const std::string status_name = !state.group_name.empty() ? state.group_name : cached_meta.name;
 
     // 屏幕待重绘(上次提交中断或刷新未完成)时,这一轮成功后无论缓存是否命中都要重绘。
@@ -174,9 +170,17 @@ bool SyncService::SyncManifestAndFrames(const api::DeviceState& state, SyncReaso
     const bool background     = reason == SyncReason::kBackgroundRefresh;
     const bool same_group     = selected_group_id == gid;
     if (cached_meta_ok && cached_meta.manifest_version == state.manifest_version) {
+        const bool rotation_changed = cached_meta.rotation_minutes != state.rotation_minutes;
+        if (cached_meta.name != status_name || rotation_changed) {
+            if (!cache::WriteManifest(gid, cached_meta.manifest_version, cached_meta.content_count, status_name,
+                                      state.rotation_minutes))
+                return false;
+        }
         if (!HandleCachedManifestHit(gid, state.manifest_version, status_name, state.content_count, previous_current,
                                      selected_group_id, reason, redraw_pending))
             return false;
+        if (rotation_changed && !background && same_group && previous_current == gid && !redraw_pending)
+            PostSyncedGroupReady(gid, status_name, state.content_count, /*content_changed=*/false);
         // 切到已缓存的组:屏幕还是旧组,和前台 RebindGroup 一样从第一帧开始重绘。
         if (redraw_pending || !same_group) {
             group_changed = true;
@@ -228,6 +232,7 @@ bool SyncService::SyncManifestAndFrames(const api::DeviceState& state, SyncReaso
             ESP_LOGE(kTag, "cache full gid=%s need_bytes=%u free_bytes=%u", gid.c_str(),
                      static_cast<unsigned>(need_bytes), static_cast<unsigned>(cache::FreeBytes()));
             writer.Rollback();
+            power_state::RecordSyncResult(power_state::SyncResult::kCacheFull);
             return false;
         }
     }
@@ -248,7 +253,7 @@ bool SyncService::SyncManifestAndFrames(const api::DeviceState& state, SyncReaso
         reason != SyncReason::kCycle && (previous_current == gid || selected_group_id == gid);
     power_state::SetScreenRedrawPending(true);
     if (!CommitStagedFrames(writer, gid, mf, status_name, selected_group_id, current_group_update, reason,
-                            total_updates, old_content_count)) {
+                            total_updates, old_content_count, state.rotation_minutes)) {
         return false;
     }
     if (!background)
@@ -265,8 +270,10 @@ bool SyncService::SyncManifestAndFrames(const api::DeviceState& state, SyncReaso
                 group_changed = old_current.image_hash != now_current.image_hash ||
                                 old_current.status_bar_text != now_current.status_bar_text;
                 // 当前帧没变,屏幕上的旧画面就是新缓存的内容。
-                if (!group_changed)
+                if (!group_changed) {
                     power_state::SetScreenRedrawPending(false);
+                    power_state::CarryConfirmedScreenVersion(selected_version, mf.version);
+                }
             }
         }
     }

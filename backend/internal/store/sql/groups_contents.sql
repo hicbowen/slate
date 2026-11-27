@@ -1,7 +1,9 @@
 -- name: ListGroups :many
-SELECT g.id, g.name, g.sort_order,
+SELECT g.id, g.name, g.sort_order, g.rotation_minutes,
        COUNT(c.id)::int AS content_count,
-       (COUNT(c.id) * 15000 + COALESCE(SUM(a.size), 0))::bigint AS total_bytes
+       COUNT(c.gray_image_hash) FILTER (WHERE c.display_mode = 'gray16') AS gray_count,
+       COUNT(c.color_image_hash) AS color_count,
+       COALESCE(SUM(a.size) FILTER (WHERE a.status = 'ready' AND a.hash IS NOT NULL), 0)::bigint AS audio_bytes
 FROM groups g
 LEFT JOIN contents c ON c.group_id = g.id
 LEFT JOIN content_audio a ON a.content_id = c.id
@@ -27,8 +29,10 @@ SELECT COUNT(*)::int FROM groups WHERE owner_id = $1;
 -- name: FirstGroupID :one
 SELECT id FROM groups WHERE owner_id = $1 ORDER BY sort_order, created_at LIMIT 1;
 
--- name: RenameGroup :exec
-UPDATE groups SET name = $2, updated_at = now() WHERE id = $1;
+-- name: UpdateGroup :execrows
+UPDATE groups SET name = COALESCE(sqlc.narg(name), name),
+    rotation_minutes = COALESCE(sqlc.narg(rotation_minutes), rotation_minutes), updated_at = now()
+WHERE id = $1 AND owner_id = $2;
 
 -- name: DeleteGroup :exec
 DELETE FROM groups WHERE id = $1;
@@ -43,9 +47,9 @@ SELECT id FROM groups WHERE owner_id = $1 ORDER BY sort_order, created_at;
 
 -- name: ListContents :many
 SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash, c.gray_image_hash, c.display_mode,
-       c.image_source_hash, c.image_render_preset,
+       c.image_source_hash, c.image_render_preset, c.image_original_hash, c.image_crop,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
-       d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
+       d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error, d.push_token_hash,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
        a.text AS audio_text, a.hash AS audio_hash, a.size AS audio_size,
        a.last_error AS audio_error, a.updated_at AS audio_updated_at
@@ -57,9 +61,9 @@ ORDER BY c.sort_order;
 
 -- name: GetContent :one
 SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash, c.gray_image_hash, c.display_mode,
-       c.image_source_hash, c.image_render_preset,
+       c.image_source_hash, c.image_render_preset, c.image_original_hash, c.image_crop,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
-       d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
+       d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error, d.push_token_hash,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
        a.text AS audio_text, a.hash AS audio_hash, a.size AS audio_size,
        a.last_error AS audio_error, a.updated_at AS audio_updated_at,
@@ -74,16 +78,22 @@ WHERE c.id = $1;
 SELECT COALESCE(MAX(sort_order) + 1, 0)::int FROM contents WHERE group_id = $1;
 
 -- name: CreateContent :exec
-INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, gray_image_hash, display_mode, image_source_hash, image_render_preset)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE(sqlc.narg(display_mode)::text, 'mono1'), sqlc.narg(image_source_hash), COALESCE(sqlc.narg(image_render_preset)::text, 'auto'));
+INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, gray_image_hash, display_mode, image_source_hash, image_render_preset, image_original_hash, image_crop)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE(sqlc.narg(display_mode)::text, 'mono1'), sqlc.narg(image_source_hash), COALESCE(sqlc.narg(image_render_preset)::text, 'auto'), sqlc.narg(image_original_hash), sqlc.narg(image_crop));
 
 -- name: SetContentImage :exec
 UPDATE contents SET image_hash = $2, color_image_hash = $3, gray_image_hash = $4,
     display_mode = CASE WHEN $4::char(64) IS NULL THEN 'mono1' ELSE display_mode END,
     updated_at = now() WHERE id = $1;
 
--- name: SetContentImageSource :exec
-UPDATE contents SET image_source_hash = $2, image_render_preset = $3, updated_at = now()
+-- name: SetContentImageSource :execrows
+UPDATE contents SET image_source_hash = sqlc.narg(image_source_hash), image_render_preset = sqlc.arg(image_render_preset),
+    image_original_hash = sqlc.narg(image_original_hash), image_crop = sqlc.narg(image_crop), updated_at = now()
+WHERE id = sqlc.arg(id) AND kind = 'image'
+    AND (sqlc.narg(expected_original)::text IS NULL OR image_original_hash = sqlc.narg(expected_original));
+
+-- name: ClearContentImageOriginal :exec
+UPDATE contents SET image_original_hash = NULL, image_crop = NULL, updated_at = now()
 WHERE id = $1 AND kind = 'image';
 
 -- name: SetImageDisplayMode :execrows
@@ -114,7 +124,7 @@ WHERE c.id = r.id AND c.sort_order <> r.pos - 1;
 SELECT EXISTS (
     SELECT 1 FROM contents c JOIN groups g ON g.id = c.group_id
     LEFT JOIN content_audio a ON a.content_id = c.id
-    WHERE g.owner_id = @user_id AND (c.image_hash = @hash OR c.color_image_hash = @hash OR c.gray_image_hash = @hash OR c.image_source_hash = @hash OR a.hash = @hash)
+    WHERE g.owner_id = @user_id AND (c.image_hash = @hash OR c.color_image_hash = @hash OR c.gray_image_hash = @hash OR c.image_source_hash = @hash OR c.image_original_hash = @hash OR a.hash = @hash)
 );
 
 -- name: BlobVisibleToDevice :one
@@ -133,5 +143,7 @@ UNION
 SELECT gray_image_hash::text FROM contents WHERE gray_image_hash IS NOT NULL
 UNION
 SELECT image_source_hash::text FROM contents WHERE image_source_hash IS NOT NULL
+UNION
+SELECT image_original_hash::text FROM contents WHERE image_original_hash IS NOT NULL
 UNION
 SELECT hash::text FROM content_audio WHERE hash IS NOT NULL;

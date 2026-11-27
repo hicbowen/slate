@@ -56,6 +56,7 @@ struct DeviceState {
     std::string group_name;
     std::string manifest_version;
     int         content_count    = 0;
+    int         rotation_minutes = 0;
     int         position_current = 0;
     int         position_total   = 0;
 
@@ -78,9 +79,17 @@ struct Telemetry {
     std::string wake_reason;
     // timer 唤醒时服务端会先重新渲染该内容(若已到期),本轮即可拿到新帧。
     std::string current_content_id;
+    std::string screen_version;
+    const char* sync_result = "";
+    int64_t next_refresh_at = 0;
 };
 
 enum class GroupAction { kNext, kPrev, kSelect };
+
+struct MessageBoardUpdate {
+    std::string content_id;
+    std::string image_hash;
+};
 
 using UnauthorizedCb = std::function<void()>;
 
@@ -102,6 +111,9 @@ class ApiClient {
     bool Sync(const std::string& manifest_version, const Telemetry& tel, DeviceState& out);
     bool ChangeGroup(GroupAction action, const std::string& group_id, const std::string& manifest_version,
                      DeviceState& out);
+    bool WriteMessageBoard(const std::string& group_id, const std::string& content_id,
+                           const std::string& message, const std::string& author, MessageBoardUpdate& out,
+                           std::string& error);
     // 下载并校验大小与 sha256。
     bool DownloadBlob(const Blob& blob, std::vector<uint8_t>& out);
 

@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -65,7 +66,7 @@ func newHarness(t *testing.T) *harness {
 }
 
 // call sends a request and decodes the envelope's data into out (when non-nil).
-func (h *harness) call(method, path, token string, body any, out any) int {
+func (h *harness) call(method, path, token string, body any, out any, headers ...http.Header) int {
 	h.t.Helper()
 	var r io.Reader
 	contentType := ""
@@ -83,6 +84,13 @@ func (h *harness) call(method, path, token string, body any, out any) int {
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for _, header := range headers {
+		for name, values := range header {
+			for _, value := range values {
+				req.Header.Add(name, value)
+			}
+		}
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -179,6 +187,29 @@ func TestDeviceProtocol(t *testing.T) {
 	if state.Manifest == nil || len(state.Manifest.Frames) != 1 || state.Manifest.Version != state.Group.ManifestVersion {
 		t.Fatalf("bound sync manifest: %+v", state)
 	}
+	version := state.Group.ManifestVersion
+	deviceURL := "/api/devices/" + dev.DeviceID
+	groupURL := "/api/groups/" + gid
+	h.must(400, h.call("PATCH", groupURL, token, map[string]int{"rotationMinutes": 12}, nil), "reject unsupported rotation")
+	h.must(200, h.call("PATCH", groupURL, token, map[string]int{"rotationMinutes": 30}, nil), "enable insertion rotation")
+	var view api.Device
+	h.must(200, h.call("GET", deviceURL, token, nil, &view), "legacy device view")
+	if view.SyncStatus != nil {
+		t.Fatalf("legacy client has diagnostics: %+v", view.SyncStatus)
+	}
+	report := "/api/device/sync?diag=1&syncResult=cache_full&screenVersion=" + version + "&nextRefreshAt=1900000000"
+	var cached api.DeviceState
+	h.must(200, h.call("POST", report, dev.Secret, api.DeviceSyncRequest{
+		Protocol: api.DeviceProtocol, ManifestVersion: version,
+	}, &cached), "diagnostic sync with cached frames")
+	if cached.Manifest != nil || cached.Group.RotationMinutes != 30 {
+		t.Fatalf("rotation update requires cached metadata only: %+v", cached)
+	}
+	h.must(200, h.call("GET", deviceURL, token, nil, &view), "diagnostic device view")
+	if st := view.SyncStatus; st == nil || st.AppliedVersion != version || st.ScreenVersion != version ||
+		st.ExpectedVersion != version || st.LastResult != "cache_full" || st.NextRefreshAt != 1900000000 {
+		t.Fatalf("sync diagnostics: %+v", st)
+	}
 	f := state.Manifest.Frames[0]
 	if f.Image.Hash != blob.Hash(frame) || f.Image.Size != api.FrameBytes || f.StatusBarText == "" || f.RefreshAt != nil {
 		t.Fatalf("frame: %+v", f)
@@ -197,6 +228,58 @@ func TestDeviceProtocol(t *testing.T) {
 
 	h.must(426, h.call("POST", "/api/device/sync", dev.Secret, api.DeviceSyncRequest{Protocol: api.DeviceProtocol - 1}, nil), "old protocol")
 	h.must(401, h.call("POST", "/api/device/sync", randomHex(32), api.DeviceSyncRequest{Protocol: api.DeviceProtocol}, nil), "unknown secret")
+}
+
+func TestDashboardPushToken(t *testing.T) {
+	h := newHarness(t)
+	owner := h.user("dashboard_owner")
+	other := h.user("dashboard_other")
+	gid := h.group(owner, "仪表盘")
+	var content api.Content
+	payload := map[string]any{"version": 1, "data": map[string]any{"value": 1}}
+	h.must(201, h.call("POST", "/api/groups/"+gid+"/contents", owner, api.CreateDynamicContentRequest{
+		Config:      json.RawMessage(`{"type":"dashboard","template":{"kind":"system","id":"ai_quota_monitor"}}`),
+		InitialData: json.RawMessage(`{"value":1}`),
+	}, &content), "create dashboard")
+	if content.Dynamic == nil || content.Dynamic.PushAuth != "unconfigured" {
+		t.Fatalf("new dashboard push auth: %+v", content.Dynamic)
+	}
+	path := "/api/contents/" + content.ID + "/data"
+	h.must(401, h.call("POST", path, "", payload, nil), "new dashboard requires token")
+	h.must(404, h.call("POST", path+"/token", other, nil, nil), "only owner may rotate token")
+	if _, err := h.st.Pool.Exec(context.Background(), "UPDATE content_dynamic SET push_token_hash = NULL WHERE content_id = $1", content.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.must(200, h.call("POST", path, "", payload, nil), "legacy dashboard accepts original URL")
+	var first, second api.DashboardPushToken
+	h.must(200, h.call("POST", path+"/token", owner, nil, &first), "enable token")
+	h.must(401, h.call("POST", path, "", payload, nil), "migration disables the legacy URL")
+	h.must(200, h.call("POST", path, first.Token, payload, nil), "accept enabled token")
+	h.must(200, h.call("POST", path+"/token", owner, nil, &second), "rotate token")
+	h.must(401, h.call("POST", path, first.Token, payload, nil), "previous token revoked")
+	h.must(200, h.call("POST", path, second.Token, payload, nil), "accept rotated token")
+}
+
+func TestImageUploadRetryReusesContent(t *testing.T) {
+	h := newHarness(t)
+	token := h.user("batch_upload")
+	gid := h.group(token, "照片")
+	other := h.group(token, "另一组")
+	key := http.Header{"Idempotency-Key": []string{"0123456789abcdef0123456789abcdef"}}
+	var first, retry, otherGroup api.Content
+	frame := make([]byte, api.FrameBytes)
+	path := "/api/groups/" + gid + "/contents"
+	h.must(201, h.call("POST", path, token, frameUpload(frame, "照片"), &first, key), "batch upload")
+	h.must(200, h.call("POST", path, token, frameUpload(frame, "照片"), &retry, key), "retry same upload")
+	h.must(201, h.call("POST", "/api/groups/"+other+"/contents", token, frameUpload(frame, "照片"), &otherGroup, key), "key scoped to group")
+	if first.ID != retry.ID || first.ID == otherGroup.ID {
+		t.Fatalf("wrong retry scope: first=%s retry=%s other=%s", first.ID, retry.ID, otherGroup.ID)
+	}
+	var contents []api.Content
+	h.must(200, h.call("GET", path, token, nil, &contents), "list group")
+	if len(contents) != 1 {
+		t.Fatalf("upload retry created a duplicate: %d items", len(contents))
+	}
 }
 
 func TestDeviceColorRenditions(t *testing.T) {
@@ -273,7 +356,7 @@ func TestEditableImageSource(t *testing.T) {
 	if err := png.Encode(&source, image.NewGray(image.Rect(0, 0, api.FrameWidth, api.FrameHeight))); err != nil {
 		t.Fatal(err)
 	}
-	upload := func(image []byte, preset string) multipartBody {
+	upload := func(image []byte, preset string, extras ...map[string]string) multipartBody {
 		t.Helper()
 		buf := &bytes.Buffer{}
 		writer := multipart.NewWriter(buf)
@@ -288,6 +371,13 @@ func TestEditableImageSource(t *testing.T) {
 		}
 		if err := writer.WriteField("imageRenderPreset", preset); err != nil {
 			t.Fatal(err)
+		}
+		for _, fields := range extras {
+			for field, value := range fields {
+				if err := writer.WriteField(field, value); err != nil {
+					t.Fatal(err)
+				}
+			}
 		}
 		if err := writer.Close(); err != nil {
 			t.Fatal(err)
@@ -327,6 +417,57 @@ func TestEditableImageSource(t *testing.T) {
 		t.Fatalf("stale source after replacement: %+v", updated)
 	}
 	h.must(404, h.call("GET", "/api/blobs/"+hash, owner, nil, nil), "removed source download")
+	var original bytes.Buffer
+	if err := png.Encode(&original, image.NewGray(image.Rect(0, 0, 900, 500))); err != nil {
+		t.Fatal(err)
+	}
+	originalHash := blob.Hash(original.Bytes())
+	crop := `{"fit":"cover","scale":1.5,"x":19,"y":0,"dither":"threshold","threshold":145}`
+	h.must(400, h.call("POST", uploadURL, owner, upload(source.Bytes(), "photo", map[string]string{
+		"imageOriginal": original.String(),
+	}), nil), "reject original without crop")
+	var kept api.Content
+	h.must(201, h.call("POST", uploadURL, owner, upload(source.Bytes(), "photo", map[string]string{
+		"imageOriginal": original.String(), "imageCrop": crop,
+	}), &kept), "keep original")
+	originalPath := "/api/blobs/" + originalHash
+	if kept.ImageOriginalHash == nil || *kept.ImageOriginalHash != originalHash {
+		t.Fatalf("wrong original hash: %+v", kept.ImageOriginalHash)
+	}
+	h.must(200, h.call("GET", originalPath, owner, nil, &downloaded), "owner original bytes")
+	if !bytes.Equal(downloaded, original.Bytes()) {
+		t.Fatal("original bytes changed")
+	}
+	h.must(404, h.call("GET", originalPath, h.user("originalguest"), nil, nil), "deny other user original")
+	h.must(404, h.call("GET", "/api/device/blobs/"+originalHash, device.Secret, nil, nil), "deny device original")
+	hashes, err = h.st.Q.ReferencedBlobHashes(t.Context())
+	if err != nil || !slices.Contains(hashes, originalHash) {
+		t.Fatalf("original GC reference missing: %v", err)
+	}
+	keptPath := "/api/contents/" + kept.ID
+	h.must(409, h.call("PATCH", keptPath, owner, upload(source.Bytes(), "graphic", map[string]string{
+		"reuseImageOriginal": hash, "imageCrop": crop,
+	}), nil), "do not attach stale or different original")
+	crop = strings.Replace(crop, "1.5", "2", 1)
+	kept = api.Content{}
+	h.must(200, h.call("PATCH", keptPath, owner, upload(source.Bytes(), "graphic", map[string]string{
+		"reuseImageOriginal": originalHash, "imageCrop": crop,
+	}), &kept), "recrop without reuploading original")
+	var restored api.ImageCrop
+	if err := json.Unmarshal(kept.ImageCrop, &restored); err != nil || restored.Scale != 2 || restored.Threshold != 145 {
+		t.Fatalf("saved crop: %+v, %v", restored, err)
+	}
+	buf := &bytes.Buffer{}
+	form := multipart.NewWriter(buf)
+	_ = form.WriteField("removeImageOriginal", "true")
+	_ = form.Close()
+	kept = api.Content{}
+	h.must(200, h.call("PATCH", keptPath, owner, multipartBody{buf, form.FormDataContentType()}, &kept), "remove only original")
+	if kept.ImageOriginalHash != nil || len(kept.ImageCrop) != 0 || kept.ImageSourceHash == nil {
+		t.Fatalf("unexpected fields after removal: %+v", kept)
+	}
+	h.must(404, h.call("GET", originalPath, owner, nil, nil), "removed original no longer visible")
+
 }
 
 func TestNote4GrayRendition(t *testing.T) {
@@ -361,6 +502,13 @@ func TestNote4GrayRendition(t *testing.T) {
 	grayHash := blob.Hash(gray)
 	if image.DisplayMode != api.DisplayModeGray || image.GrayImageHash == nil || *image.GrayImageHash != grayHash {
 		t.Fatalf("saved grayscale frame: %+v", image)
+	}
+	groupURL := "/api/groups/" + gid
+	var group api.Group
+	h.must(200, h.call("GET", groupURL, token, nil, &group), "group cache estimate")
+	if group.TotalBytes != 3*api.FrameBytes || group.Note4ImageBytes != 2*api.FrameBytes+api.GrayFrameBytes ||
+		group.Note4CImageBytes != api.FrameBytes+2*api.ColorFrameBytes || group.AudioBytes != 0 {
+		t.Fatalf("group cache estimate: %+v", group)
 	}
 	dev := h.device("AA:BB:CC:DD:EE:05")
 	h.must(200, h.call("POST", "/api/devices/claims", token, map[string]string{"pairCode": dev.PairCode}, nil), "claim")
@@ -405,6 +553,10 @@ func TestNote4GrayRendition(t *testing.T) {
 	if image.DisplayMode != api.DisplayModeMono || image.GrayImageHash == nil || *image.GrayImageHash != grayHash {
 		t.Fatal("mode change lost the grayscale asset")
 	}
+	h.must(200, h.call("GET", groupURL, token, nil, &group), "group cache estimate after mode change")
+	if group.Note4ImageBytes != 3*api.FrameBytes || group.Note4CImageBytes != api.FrameBytes+2*api.ColorFrameBytes {
+		t.Fatalf("group cache estimate after mode change: %+v", group)
+	}
 	req.FrameFormat = ""
 	h.must(200, h.call("POST", graySync, dev.Secret, req, &state), "mode change invalidates grayscale manifest")
 	if state.Manifest.Version == grayVersion || state.Manifest.Frames[1].Image.Hash != image.ImageHash {
@@ -413,6 +565,62 @@ func TestNote4GrayRendition(t *testing.T) {
 	h.must(200, h.call("PATCH", path, token, multipart(api.DisplayModeGray, nil), nil), "switch back to gray")
 	h.must(200, h.call("PATCH", path, token, frameUpload(mono, "旧客户端替换"), nil), "replace image without gray")
 	h.must(404, h.call("GET", "/api/device/blobs/"+grayHash, dev.Secret, nil, nil), "removed grayscale asset")
+}
+
+func TestDeviceCanOnlyWriteItsSelectedMessageBoard(t *testing.T) {
+	h := newHarness(t)
+	token := h.user("voice_owner")
+	gid := h.group(token, "当前组")
+	other := h.group(token, "其他组")
+	dev := h.device("AA:BB:CC:DD:EE:71")
+	const path = "/api/device/message-board"
+	req := api.DeviceMessageBoardRequest{Protocol: api.DeviceProtocol, GroupID: gid, Message: "今晚一起吃饭", Author: "妈妈"}
+	h.must(403, h.call("POST", path, dev.Secret, req, nil), "unbound device")
+	h.must(200, h.call("POST", "/api/devices/claims", token, map[string]string{"pairCode": dev.PairCode}, nil), "claim device")
+	h.must(200, h.call("POST", "/api/device/group", dev.Secret, api.DeviceGroupRequest{Protocol: api.DeviceProtocol, Action: "select", GroupID: gid}, nil), "select group")
+
+	create := func(groupID string) api.Content {
+		t.Helper()
+		var content api.Content
+		config := json.RawMessage(`{"type":"message_board","message":"旧留言","messageExpiresAt":"2000-01-01T00:00:00Z","messageFallback":"旧备用文案"}`)
+		h.must(201, h.call("POST", "/api/groups/"+groupID+"/contents", token, api.CreateDynamicContentRequest{Config: config}, &content), "create board")
+		return content
+	}
+	board := create(gid)
+	foreign := create(other)
+	blocked := req
+	blocked.GroupID, blocked.ContentID = other, foreign.ID
+	h.must(403, h.call("POST", path, dev.Secret, blocked, nil), "deny non-selected group")
+	blocked.GroupID = gid
+	h.must(404, h.call("POST", path, dev.Secret, blocked, nil), "deny board outside selected group")
+	create(gid)
+	h.must(409, h.call("POST", path, dev.Secret, req, nil), "ambiguous boards")
+	req.ContentID = board.ID
+	var res api.DeviceMessageBoardResponse
+	h.must(200, h.call("POST", path, dev.Secret, req, &res), "write selected board")
+	if res.ContentID != board.ID {
+		t.Fatalf("wrong board: %+v", res)
+	}
+	var refreshed api.Content
+	h.must(200, h.call("GET", "/api/contents/"+board.ID, token, nil, &refreshed), "get saved board")
+	if res.ImageHash != refreshed.ImageHash || refreshed.ColorImageHash == nil ||
+		res.ColorImageHash != *refreshed.ColorImageHash {
+		t.Fatalf("voice action received stale frame hashes: %+v", res)
+	}
+	var cfg api.DynamicConfig
+	if err := json.Unmarshal(refreshed.Dynamic.Config, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Message != req.Message || cfg.MessageAuthor != req.Author || cfg.MessageExpiresAt != "" ||
+		refreshed.Dynamic.NextRunAt != nil || refreshed.ImageHash == board.ImageHash {
+		t.Fatalf("unexpected saved board: %+v", refreshed)
+	}
+	var state api.DeviceState
+	h.must(200, h.call("POST", "/api/device/sync", dev.Secret, api.DeviceSyncRequest{Protocol: api.DeviceProtocol}, &state), "sync voice changes")
+	if state.Manifest == nil || len(state.Manifest.Frames) != 2 || state.Manifest.Frames[0].ID != board.ID ||
+		state.Manifest.Frames[0].Image.Hash != refreshed.ImageHash {
+		t.Fatalf("unexpected synced manifest: %+v", state.Manifest)
+	}
 }
 
 func TestCountdownColorPreviewAndRefresh(t *testing.T) {
@@ -435,6 +643,32 @@ func TestCountdownColorPreviewAndRefresh(t *testing.T) {
 	if content.ColorImageHash == nil || *content.ColorImageHash != blob.Hash(preview) {
 		t.Fatal("refresh lost the color rendition")
 	}
+
+	hashes := map[string]bool{blob.Hash(preview): true}
+	for _, layout := range []api.CountdownLayout{api.CountdownLayoutEditorial, api.CountdownLayoutPoster, api.CountdownLayoutSplit} {
+		changed, _ := json.Marshal(api.DynamicConfig{
+			Type: api.DynamicTypeCountdown, TZ: "Asia/Shanghai", Goal: "开学", TargetDate: "2000-09-01", CountdownLayout: layout,
+		})
+		h.must(200, h.call("POST", "/api/contents/preview?format=bwry2", token, api.PreviewDynamicRequest{Config: changed}, &preview), "layout preview")
+		hash := blob.Hash(preview)
+		if hashes[hash] {
+			t.Fatalf("layout %q reused another layout's image", layout)
+		}
+		hashes[hash] = true
+
+		h.must(200, h.call("PATCH", "/api/contents/"+content.ID, token, map[string]json.RawMessage{"config": changed}, &content), "update layout")
+		h.must(200, h.call("POST", "/api/contents/"+content.ID+"/refresh", token, nil, &content), "refresh layout")
+		var saved api.DynamicConfig
+		if err := json.Unmarshal(content.Dynamic.Config, &saved); err != nil {
+			t.Fatal(err)
+		}
+		if saved.CountdownLayout != layout || content.ColorImageHash == nil || *content.ColorImageHash != hash {
+			t.Fatalf("layout %q did not persist through refresh: %+v", layout, content)
+		}
+	}
+
+	invalid := json.RawMessage(`{"type":"countdown","goal":"开学","targetDate":"2000-09-01","countdownLayout":"unknown"}`)
+	h.must(400, h.call("PATCH", "/api/contents/"+content.ID, token, map[string]json.RawMessage{"config": invalid}, nil), "reject unknown layout")
 }
 
 // Concurrent group switches must each step from the previous result, not from a stale read.
@@ -603,6 +837,7 @@ func TestUploadRejectsExtraFields(t *testing.T) {
 	h.must(400, h.call("POST", path, token, form(map[string][]byte{"frame": frame, "frameName": []byte("a")}, "frameName"), nil), "duplicate field")
 	// The total limit holds even for bytes no field reads, such as a preamble.
 	big := form(map[string][]byte{"frame": frame}, "")
-	big.buf = bytes.NewBuffer(append(bytes.Repeat([]byte("preamble\r\n"), 800<<10), append([]byte("\r\n"), big.buf.Bytes()...)...))
+	preamble := []byte("preamble\r\n")
+	big.buf = bytes.NewBuffer(append(bytes.Repeat(preamble, maxUploadBytes/len(preamble)+1), append([]byte("\r\n"), big.buf.Bytes()...)...))
 	h.must(413, h.call("POST", path, token, big, nil), "oversized body")
 }

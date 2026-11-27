@@ -1,4 +1,5 @@
 import {
+  CountdownModeUp,
   fontInfo,
   hotListSource,
   normalizeWeatherAlertProvince,
@@ -15,7 +16,9 @@ export function defaultDynamicFrameName(type: DynamicType, config: DynamicConfig
     case 'month_calendar':
       return '月历';
     case 'countdown':
-      return '倒数日';
+      return config.countdownMode === CountdownModeUp ? '正数日' : '倒数日';
+    case 'message_board':
+      return '家庭留言板';
     case 'weather':
       return config.locationLabel ? `${config.locationLabel}天气` : '天气';
     case 'history_today':
@@ -87,7 +90,8 @@ export function dynamicStatusTitle(config: DynamicConfig | null | undefined): st
       return `${date.year}年${date.month}月`;
     }
     case 'countdown':
-      return '倒数日';
+    case 'message_board':
+      return defaultDynamicFrameName(config.type, config);
     case 'weather':
       return config.locationLabel ? `${config.locationLabel}天气` : '天气';
     case 'history_today': {

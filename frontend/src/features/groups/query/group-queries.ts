@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Group, GroupRequest, OrderRequest } from '@/api';
+import type { Group, GroupRequest, PatchGroupRequest, OrderRequest } from '@/api';
 import { http } from '@/lib/http';
 import { deviceKeys } from '@/features/devices/query/keys';
 import { groupKeys } from './keys';
@@ -38,7 +38,7 @@ export function useCreateGroup() {
 export function useUpdateGroup(gid: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body: GroupRequest) => {
+    mutationFn: async (body: PatchGroupRequest) => {
       return http.patch<Group>(`/groups/${gid}`, body);
     },
     onSuccess: (updated) => {

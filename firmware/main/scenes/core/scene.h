@@ -39,6 +39,7 @@ struct SceneContext {
     std::function<int()>                    wifi_rssi;
     std::function<bool()>                   wifi_enabled;
     std::function<size_t()>                 wifi_profile_count;
+    std::function<bool()>                   sync_busy;
     std::function<void(bool)>               set_wifi_enabled;
     std::function<void()>                   open_wifi_portal;
 
@@ -59,6 +60,8 @@ class Scene {
     virtual void OnExit(SceneContext& ctx) {
     }
     virtual void OnEvent(SceneContext& ctx, const UiEvent& e) {
+    }
+    virtual void OnTick(SceneContext& ctx, int64_t now_ms) {
     }
 
     virtual bool IsSettings() const {

@@ -1,12 +1,12 @@
-import type { ImageFrameFormat, MonochromeMode } from '@/lib/eink/image-preview';
+import type { CropOptions, ImageFrameFormat, MonochromeMode } from '@/lib/eink/image-preview';
 import { FrameWidth, FrameHeight } from '@/api';
 import type { ImageRenderPreset } from '@/lib/eink/render-preset';
-import type { RefObject } from 'react';
+import { useRef } from 'react';
 import { cn } from '@/lib/cn';
 import { StatusBarOverlay } from '@/components/eink/StatusBarOverlay';
 import { usePreviewCanvasRenderer } from './usePreviewCanvasRenderer';
 
-interface PreviewCanvasProps {
+export interface PreviewCanvasProps {
   imageFile: File | null;
   existingImage: ArrayBuffer | undefined;
   preferExistingImage?: boolean;
@@ -16,9 +16,10 @@ interface PreviewCanvasProps {
   threshold: number;
   mode: MonochromeMode;
   scale: number;
+  fit?: CropOptions['fit'];
   offset: { x: number; y: number };
   onOffsetChange: (o: { x: number; y: number }) => void;
-  canvasRef: RefObject<HTMLCanvasElement | null>;
+  interactive?: boolean;
   statusCaption?: string | null;
   showStatusBar?: boolean;
 }
@@ -33,12 +34,15 @@ export function PreviewCanvas({
   threshold,
   mode,
   scale,
+  fit,
   offset,
   onOffsetChange,
-  canvasRef,
+  interactive = true,
   statusCaption,
   showStatusBar = true,
 }: PreviewCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canPan = interactive && !!imageFile;
   const pan = usePreviewCanvasRenderer({
     imageFile,
     existingImage,
@@ -48,9 +52,11 @@ export function PreviewCanvas({
     threshold,
     mode,
     scale,
+    fit,
     offset,
     onOffsetChange,
     canvasRef,
+    interactive,
   });
 
   return (
@@ -65,22 +71,15 @@ export function PreviewCanvas({
           <span className="font-serif italic text-[13px] text-stone-light">选图后显示预览</span>
         </div>
       )}
-      {imageFile && (
-        <div className="absolute inset-0 flex items-end justify-center pb-3 pointer-events-none">
-          <span className="font-serif italic text-[13px] text-stone-light">
-            拖拽定位 · 滑块缩放
-          </span>
-        </div>
-      )}
       <canvas
         ref={canvasRef}
         width={FrameWidth}
         height={FrameHeight}
-        className={cn('block w-full h-full', pan.isDragging && 'cursor-grabbing')}
-        style={{
-          imageRendering: 'auto',
-          cursor: imageFile ? 'grab' : 'default',
-        }}
+        className={cn(
+          'block w-full h-full',
+          canPan && 'touch-none cursor-grab',
+          pan.isDragging && 'cursor-grabbing'
+        )}
         onPointerDown={pan.onPointerDown}
         onPointerMove={pan.onPointerMove}
         onPointerUp={pan.onPointerUp}

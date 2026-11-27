@@ -79,6 +79,8 @@ class XiaozhiService {
     bool BlocksSleep() const;
     void SuspendForSleep();
     void NotifyNetworkClosed(uint32_t conversation_token);
+    void ReturnToCardAfterReply();
+    bool ToolReplyFinished(int64_t now_ms);
 
     XiaozhiSnapshot Snapshot();
 
@@ -135,6 +137,8 @@ class XiaozhiService {
     std::atomic<bool>         config_stop_requested_{false};
     std::atomic<XiaozhiPhase> xiaozhi_phase_{XiaozhiPhase::kIdle};
     std::atomic<bool>         pending_listen_after_playback_{false};
+    std::atomic<int64_t>      tool_return_deadline_ms_{0};
+    std::atomic<bool>         tool_reply_finished_{false};
     std::atomic<bool>         control_running_{false};
     std::atomic<bool>         control_close_requested_{false};
     std::atomic<bool>         control_conversation_stopped_{false};

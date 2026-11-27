@@ -15,6 +15,7 @@ export const FrameHeight = 300;
 export const FrameBytes = FrameWidth * FrameHeight / 8;
 export const ColorFrameBytes = FrameWidth * FrameHeight / 4;
 export const GrayFrameBytes = FrameWidth * FrameHeight / 2;
+export const ImageOriginalMaxBytes = 12582912;
 export const ColorFrameFormat = "bwry2";
 export const GrayFrameFormat = "gray4";
 export const DisplayModeMono = "mono1";
@@ -67,6 +68,7 @@ export interface Device {
   rssiDbm: number | null;
   fwVersion: string | null;
   lastSeenAt: string | null;
+  syncStatus: DeviceSyncStatus | null;
 }
 export interface ClaimDeviceRequest {
   pairCode: string;
@@ -83,10 +85,18 @@ export interface Group {
   name: string;
   sortOrder: number /* int32 */;
   contentCount: number /* int */;
-  totalBytes: number /* int64 */;
+  totalBytes: number /* int64 */; // Mono frames plus ready audio.
+  note4ImageBytes: number /* int64 */;
+  note4cImageBytes: number /* int64 */;
+  audioBytes: number /* int64 */;
+  rotationMinutes: number /* int16 */;
 }
 export interface GroupRequest {
   name: string;
+}
+export interface PatchGroupRequest {
+  name?: string;
+  rotationMinutes?: number /* int16 */;
 }
 export const ContentKindImage = "image";
 export const ContentKindDynamic = "dynamic";
@@ -111,9 +121,19 @@ export interface Content {
   displayMode: 'mono1' | 'gray16';
   colorImageHash?: string;
   imageSourceHash?: string;
+  imageOriginalHash?: string;
+  imageCrop?: ImageCrop;
   imageRenderPreset?: 'auto' | 'photo' | 'vivid' | 'graphic';
   audio: ContentAudio | null;
   dynamic: ContentDynamic | null;
+}
+export interface ImageCrop {
+  fit: 'contain' | 'cover';
+  scale: number /* float64 */;
+  x: number /* float64 */;
+  y: number /* float64 */;
+  dither: 'preset' | 'threshold' | 'bayer4' | 'bayer8' | 'floyd' | 'atkinson' | 'sierra';
+  threshold: number /* int */;
 }
 export interface ContentAudio {
   source: AudioSource;
@@ -132,6 +152,10 @@ export interface ContentDynamic {
   renderedAt: string | null;
   nextRunAt: string | null;
   error: string | null;
+  pushAuth?: 'legacy' | 'unconfigured' | 'token';
+}
+export interface DashboardPushToken {
+  token: string;
 }
 /**
  * CreateDynamicContentRequest creates dynamic content; image content is created with
@@ -204,6 +228,18 @@ export interface DeviceSyncRequest {
   frameFormat?: string;
   telemetry: DeviceTelemetry;
 }
+export interface DeviceMessageBoardRequest {
+  protocol: number /* int */;
+  groupId: string;
+  contentId?: string;
+  message: string;
+  author?: string;
+}
+export interface DeviceMessageBoardResponse {
+  contentId: string;
+  imageHash: string;
+  colorImageHash: string;
+}
 export interface DeviceTelemetry {
   batteryPct?: number /* int */;
   rssiDbm?: number /* int */;
@@ -214,6 +250,19 @@ export interface DeviceTelemetry {
    */
   wakeReason?: string;
   currentContentId?: string;
+}
+/**
+ * DeviceSyncStatus is stored from sync reports. The optional diagnostic query
+ * parameters (diag, syncResult, screenVersion, nextRefreshAt) keep protocol v2
+ * compatible with servers that strictly decode the original JSON body.
+ */
+export interface DeviceSyncStatus {
+  frameFormat: string;
+  appliedVersion: string;
+  screenVersion: string;
+  expectedVersion: string;
+  lastResult: string;
+  nextRefreshAt: number /* int64 */; // Unix seconds; zero when there is no scheduled refresh.
 }
 /**
  * DeviceGroupRequest uses the same frame format negotiation as DeviceSyncRequest.
@@ -243,6 +292,7 @@ export interface DeviceGroup {
   position: GroupPosition;
   contentCount: number /* int */;
   manifestVersion: string;
+  rotationMinutes?: number /* int16 */;
 }
 export interface GroupPosition {
   current: number /* int */;
@@ -274,6 +324,7 @@ export interface Blob {
 export const DynamicTypeDailyCalendar = "daily_calendar";
 export const DynamicTypeMonthCalendar = "month_calendar";
 export const DynamicTypeCountdown = "countdown";
+export const DynamicTypeMessageBoard = "message_board";
 export const DynamicTypeWeather = "weather";
 export const DynamicTypeHistoryToday = "history_today";
 export const DynamicTypeWeatherAlert = "weather_alert";
@@ -281,12 +332,20 @@ export const DynamicTypeEarthquakeReport = "earthquake_report";
 export const DynamicTypeDashboard = "dashboard";
 export const DynamicTypeFontTest = "font_test";
 export const DynamicTypeHotList = "hot_list";
-export type DynamicType = typeof DynamicTypeDailyCalendar | typeof DynamicTypeMonthCalendar | typeof DynamicTypeCountdown | typeof DynamicTypeWeather | typeof DynamicTypeHistoryToday | typeof DynamicTypeWeatherAlert | typeof DynamicTypeEarthquakeReport | typeof DynamicTypeDashboard | typeof DynamicTypeFontTest | typeof DynamicTypeHotList;
+export type DynamicType = typeof DynamicTypeDailyCalendar | typeof DynamicTypeMonthCalendar | typeof DynamicTypeCountdown | typeof DynamicTypeMessageBoard | typeof DynamicTypeWeather | typeof DynamicTypeHistoryToday | typeof DynamicTypeWeatherAlert | typeof DynamicTypeEarthquakeReport | typeof DynamicTypeDashboard | typeof DynamicTypeFontTest | typeof DynamicTypeHotList;
+export const CountdownModeDown = "down";
+export const CountdownModeUp = "up";
+export type CountdownMode = typeof CountdownModeDown | typeof CountdownModeUp;
+export const CountdownLayoutEditorial = "editorial";
+export const CountdownLayoutPoster = "poster";
+export const CountdownLayoutSplit = "split";
+export type CountdownLayout = typeof CountdownLayoutEditorial | typeof CountdownLayoutPoster | typeof CountdownLayoutSplit;
 /**
  * DynamicConfig is one flat shape for every dynamic type; fields that do not apply to
  * Type are dropped by normalization. Field use per type:
  *   - daily_calendar, month_calendar: tz, audio*, refreshIntervalSec
- *   - countdown: tz, goal, targetDate
+ *   - countdown: tz, goal, targetDate, countdownMode, countdownLayout, milestones
+ *   - message_board: message, messageAuthor, messageExpiresAt, messageFallback
  *   - weather: tz, locationId, locationLabel, audio*, refreshIntervalSec
  *   - history_today: tz, source (wikipedia | baidu_baike), audio*, refreshIntervalSec
  *   - weather_alert: province, audio*, refreshIntervalSec
@@ -300,6 +359,13 @@ export interface DynamicConfig {
   tz?: string;
   goal?: string;
   targetDate?: string;
+  countdownLayout?: CountdownLayout;
+  countdownMode?: CountdownMode;
+  milestones?: number /* int */[];
+  message?: string;
+  messageAuthor?: string;
+  messageExpiresAt?: string;
+  messageFallback?: string;
   audioEnabled?: boolean;
   audioVoice?: string;
   refreshIntervalSec?: number /* int */;

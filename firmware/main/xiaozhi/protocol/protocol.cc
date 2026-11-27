@@ -145,31 +145,6 @@ void Protocol::SendAbortSpeaking(AbortReason reason) {
     SendText(message);
 }
 
-void Protocol::SendMcpMessage(const std::string& payload) {
-    McpSendItem item{};
-    item.data = static_cast<char*>(std::malloc(payload.size() + 1));
-    if (!item.data) {
-        ESP_LOGW(kTag, "mcp tx dropped reason=alloc_failed bytes=%u", static_cast<unsigned>(payload.size()));
-        return;
-    }
-    std::memcpy(item.data, payload.data(), payload.size());
-    item.data[payload.size()] = '\0';
-    item.len                  = payload.size();
-
-    std::lock_guard<std::mutex> lock(mcp_mutex_);
-    if (!mcp_accepting_.load(std::memory_order_relaxed)) {
-        std::free(item.data);
-        return;
-    }
-    if (!StartMcpSendTaskLocked() || !mcp_send_queue_ ||
-        xQueueSendToBack(mcp_send_queue_, &item, pdMS_TO_TICKS(100)) != pdTRUE) {
-        ESP_LOGW(kTag, "mcp tx dropped reason=queue_unavailable_or_full bytes=%u",
-                 static_cast<unsigned>(payload.size()));
-        std::free(item.data);
-        return;
-    }
-}
-
 bool Protocol::StartMcpSendTaskLocked() {
     if (mcp_send_queue_ && mcp_send_task_)
         return true;
@@ -182,7 +157,7 @@ bool Protocol::StartMcpSendTaskLocked() {
     }
     if (!mcp_send_task_) {
         const BaseType_t ok =
-            xTaskCreatePinnedToCore(&Protocol::McpSendTaskEntry, "xiaozhi_mcp_tx", 4096, this, 3, &mcp_send_task_, 0);
+            xTaskCreatePinnedToCore(&Protocol::McpSendTaskEntry, "xiaozhi_mcp", 8192, this, 3, &mcp_send_task_, 0);
         if (ok != pdPASS) {
             ESP_LOGW(kTag, "mcp send task create failed");
             vQueueDelete(mcp_send_queue_);
@@ -194,6 +169,7 @@ bool Protocol::StartMcpSendTaskLocked() {
 }
 
 void Protocol::StopMcpSendTask() {
+    std::lock_guard<std::mutex> stopping(mcp_stop_mutex_);
     TaskHandle_t  task  = nullptr;
     QueueHandle_t queue = nullptr;
     {
@@ -205,36 +181,27 @@ void Protocol::StopMcpSendTask() {
             mcp_stop_waiter_ = xTaskGetCurrentTaskHandle();
     }
 
-    if (task) {
-        McpSendItem sentinel{};
-        sentinel.stop      = true;
-        bool sentinel_sent = false;
-        if (queue) {
-            for (int attempt = 0; attempt < 2 && !sentinel_sent; ++attempt) {
-                sentinel_sent = xQueueSendToBack(queue, &sentinel, pdMS_TO_TICKS(100)) == pdTRUE;
-                if (!sentinel_sent) {
-                    McpSendItem dropped{};
-                    if (xQueueReceive(queue, &dropped, 0) == pdTRUE)
-                        std::free(dropped.data);
-                }
-            }
+    if (task && queue) {
+        const McpSendItem sentinel{nullptr, true};
+        while (xQueueSendToFront(queue, &sentinel, 0) != pdTRUE) {
+            McpSendItem dropped{};
+            if (xQueueReceive(queue, &dropped, 0) == pdTRUE)
+                cJSON_Delete(dropped.request);
         }
-        if (sentinel_sent) {
-            if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000)) == 0) {
-                ESP_LOGW(kTag, "mcp send task stop timeout");
+        // The worker may be waiting for a Slate HTTP result. Join before the protocol is destroyed.
+        for (;;) {
+            {
+                std::lock_guard<std::mutex> lock(mcp_mutex_);
+                if (!mcp_send_task_)
+                    break;
             }
-        } else {
-            ESP_LOGW(kTag, "mcp send task stop failed reason=sentinel_queue_failed");
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         }
     }
 
     {
         std::lock_guard<std::mutex> lock(mcp_mutex_);
         mcp_stop_waiter_ = nullptr;
-        if (mcp_send_task_) {
-            ESP_LOGW(kTag, "mcp send task stop incomplete action=keep_queue_alive");
-            return;
-        }
         queue           = mcp_send_queue_;
         mcp_send_queue_ = nullptr;
     }
@@ -242,7 +209,7 @@ void Protocol::StopMcpSendTask() {
     if (queue) {
         McpSendItem queued{};
         while (xQueueReceive(queue, &queued, 0) == pdTRUE) {
-            std::free(queued.data);
+            cJSON_Delete(queued.request);
         }
         vQueueDelete(queue);
     }
@@ -268,15 +235,13 @@ void Protocol::McpSendTask() {
         if (xQueueReceive(queue, &item, portMAX_DELAY) != pdTRUE)
             continue;
         if (item.stop) {
-            TaskHandle_t waiter = nullptr;
             {
                 std::lock_guard<std::mutex> lock(mcp_mutex_);
-                waiter = mcp_stop_waiter_;
                 if (mcp_send_task_ == xTaskGetCurrentTaskHandle())
                     mcp_send_task_ = nullptr;
+                if (mcp_stop_waiter_)
+                    xTaskNotifyGive(mcp_stop_waiter_);
             }
-            if (waiter)
-                xTaskNotifyGive(waiter);
             vTaskDelete(nullptr);
             return;
         }
@@ -295,29 +260,39 @@ void Protocol::McpSendTask() {
                 !audio_channel_ready_.load(std::memory_order_acquire)) {
                 ESP_LOGW(kTag, "mcp tx dropped reason=audio_channel_not_ready elapsed_ms=%d", waited_ms);
             }
-            std::free(item.data);
+            cJSON_Delete(item.request);
             continue;
         }
 
-        std::string payload(item.data ? item.data : "", item.len);
-        std::string message =
-            "{\"session_id\":" + JsonStringLiteral(session_id) + ",\"type\":\"mcp\",\"payload\":" + payload + "}";
-        SendText(message);
-        std::free(item.data);
+        const auto request_session = json_utils::JsonString(item.request, "session_id");
+        if (request_session.empty() || request_session == session_id) {
+            mcp::Dispatcher dispatcher{
+                [this, &session_id](const std::string& payload) {
+                    if (!mcp_accepting_.load(std::memory_order_acquire) ||
+                        !audio_channel_ready_.load(std::memory_order_acquire) || SessionIdCopy() != session_id)
+                        return;
+                    SendText("{\"session_id\":" + JsonStringLiteral(session_id) +
+                             ",\"type\":\"mcp\",\"payload\":" + payload + "}");
+                },
+                [] { return mcp::BuildDeviceStatusJson(); },
+                [](int level) { XiaozhiService::Get().SetVolume(level); },
+            };
+            mcp::DispatchMessage(item.request, dispatcher);
+        }
+        cJSON_Delete(item.request);
     }
 }
 
 bool Protocol::HandleMcpMessage(const cJSON* root) {
-    if (!mcp_accepting_.load(std::memory_order_relaxed)) {
+    std::lock_guard<std::mutex> lock(mcp_mutex_);
+    if (!mcp_accepting_.load(std::memory_order_relaxed))
         return true;
+    McpSendItem item{cJSON_Duplicate(root, true), false};
+    if (!item.request || !StartMcpSendTaskLocked() || xQueueSendToBack(mcp_send_queue_, &item, 0) != pdTRUE) {
+        ESP_LOGW(kTag, "mcp request dropped reason=queue_unavailable_or_full");
+        cJSON_Delete(item.request);
     }
-
-    mcp::Dispatcher dispatcher{
-        [this](const std::string& payload) { SendMcpMessage(payload); },
-        [] { return mcp::BuildDeviceStatusJson(); },
-        [](int level) { XiaozhiService::Get().SetVolume(level); },
-    };
-    return mcp::DispatchMessage(root, dispatcher);
+    return true;
 }
 
 bool Protocol::IsTimeout() const {

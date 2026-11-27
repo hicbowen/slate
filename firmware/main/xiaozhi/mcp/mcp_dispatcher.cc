@@ -91,6 +91,27 @@ bool DispatchMessage(const cJSON* root, const Dispatcher& dispatcher) {
             Send(dispatcher, JsonRpcResult(id, TextResultJson("true")));
             return true;
         }
+        if (tool_name == "self.slate.open_card" || tool_name == "self.slate.write_message_board") {
+            cJSON* args = cJSON_GetObjectItem(params, "arguments");
+            cJSON* index = cJSON_GetObjectItem(args, "position");
+            if (index && (!cJSON_IsNumber(index) || index->valuedouble != index->valueint || index->valueint < 1)) {
+                Send(dispatcher, JsonRpcError(id, -32602, "position 必须为从 1 开始的整数"));
+                return true;
+            }
+            const int position = index ? index->valueint : 0;
+            const bool open_card = tool_name == "self.slate.open_card";
+            const auto text = JsonString(args, open_card ? "title" : "message");
+            cJSON* author = cJSON_GetObjectItem(args, "author");
+            cJSON* show = cJSON_GetObjectItem(args, "open_after_save");
+            if (text.empty() || text.size() > (open_card ? 256 : 400) ||
+                (!open_card && ((author && !cJSON_IsString(author)) || (show && !cJSON_IsBool(show))))) {
+                Send(dispatcher, JsonRpcError(id, -32602, open_card ? "请提供卡片标题" : "请提供有效的正文和落款"));
+                return true;
+            }
+            Send(dispatcher, JsonRpcResult(id, open_card ? OpenCardResult(text, position) :
+                 WriteMessageBoardResult(text, JsonString(args, "author"), position, cJSON_IsTrue(show))));
+            return true;
+        }
         Send(dispatcher, JsonRpcError(id, -32601, "Unknown tool: " + tool_name));
         return true;
     }

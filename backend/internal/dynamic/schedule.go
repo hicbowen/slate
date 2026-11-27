@@ -11,10 +11,10 @@ import (
 
 const (
 	minDueDelay = 10 * time.Second
-	// calendarWakeLag wakes devices a minute after local midnight so the new day is ready.
-	calendarWakeLag = time.Minute
-	backoffBase     = time.Minute
-	backoffMax      = time.Hour
+	// scheduledWakeLag lets the server render before devices wake for the new frame.
+	scheduledWakeLag = time.Minute
+	backoffBase      = time.Minute
+	backoffMax       = time.Hour
 )
 
 var calendarTypes = map[api.DynamicType]bool{
@@ -27,11 +27,17 @@ var calendarTypes = map[api.DynamicType]bool{
 func schedule(cfg api.DynamicConfig, now time.Time) (nextRunAt, refreshDueAt *time.Time) {
 	var next time.Time
 	switch {
+	case cfg.Type == api.DynamicTypeMessageBoard:
+		if expires, err := time.Parse(time.RFC3339, cfg.MessageExpiresAt); err == nil && expires.After(now) {
+			next = expires.Add(scheduledWakeLag)
+			return &next, &expires
+		}
+		return nil, nil
 	case calendarTypes[cfg.Type]:
 		loc := render.Location(cfg.TZ)
 		local := now.In(loc)
 		midnight := time.Date(local.Year(), local.Month(), local.Day()+1, 0, 0, 0, 0, loc)
-		next = midnight.Add(calendarWakeLag)
+		next = midnight.Add(scheduledWakeLag)
 		due := midnight
 		if !due.After(now) {
 			due = now.Add(minDueDelay)

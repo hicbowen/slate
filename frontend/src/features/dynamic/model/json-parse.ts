@@ -11,6 +11,10 @@ export function parseDashboardTemplate(
   if (!Array.isArray(blocks) || blocks.length === 0 || blocks.length > 32) {
     return { ok: false, error: '模板须包含 1-32 个区块（blocks）' };
   }
+  const blockTypes = new Set(['text', 'metric', 'progress', 'sparkline', 'rect', 'line']);
+  if (blocks.some((block) => !block || typeof block !== 'object' || !blockTypes.has(block.type))) {
+    return { ok: false, error: '每个区块须指定有效的 type' };
+  }
   return { ok: true, template: { version: 1, ...parsed.data } as DashboardTemplate };
 }
 

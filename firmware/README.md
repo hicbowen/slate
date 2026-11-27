@@ -203,7 +203,7 @@ Flash 为 QIO、PSRAM 为 Octal，所以 `CONFIG_ESPTOOLPY_OCT_FLASH=n` 配合 `
 | --- | --- |
 | `/littlefs/layout` | 缓存布局版本，不一致时启动时整体格式化 |
 | `/littlefs/state.json` | 所选组、manifest 版本、当前帧位置、访问计数 |
-| `/littlefs/groups/{gid}/manifest.json` | 组名、manifest 版本、帧数、最近访问序号 |
+| `/littlefs/groups/{gid}/manifest.json` | 组名、manifest 版本、帧数、轮播间隔、最近访问序号 |
 | `/littlefs/groups/{gid}/frames/{idx}.img` / `.pcm` / `.meta` | 帧的图片、音频和元数据，idx 为帧在 manifest 中的位置 |
 
 ---
@@ -214,12 +214,16 @@ Flash 为 QIO、PSRAM 为 Octal，所以 `CONFIG_ESPTOOLPY_OCT_FLASH=n` 配合 `
 | --- | --- |
 | 上 / 下 短按 | 上一帧 / 下一帧 |
 | 上 / 下 长按 | 上一个 / 下一个内容组 |
-| 确认 短按 | 下一帧 |
+| 确认 短按 | 当前组卡片目录。上下选择，短按确认打开，长按确认返回 |
 | 确认 长按 | 设置：音量调节、设备信息、重启设备、恢复出厂 |
-| 确认 双击 | 小智语音对话 |
+| 确认 双击 | 进入小智并直接开始聆听 |
 | 上 + 下 同时按 | 全屏刷新，清除残影 |
 
 所有界面操作都在 `ui_loop` task 中执行，其他 task 通过 FreeRTOS 队列投递事件。`UiEvent` 必须可以按值拷贝，不能包含 `std::string` 或其他持有内存的容器。
+
+内容组可在 Web 端设置插电轮播间隔。设备在帧场景读取已下载的组配置，使用单调时钟计时，即使断网也能轮播。自动翻页静音，手动翻页会重新计时。
+
+小智会话可通过 MCP 的 `self.slate.open_card` 按当前组内的状态栏标题选卡，播报结束后自动显示目标卡片。`self.slate.write_message_board` 用已绑定设备的凭据更新当前组的家庭留言板。只写留言时，播报后返回原卡片。要求打开新留言时，设备等到新画面同步后再切卡。多张同名卡片用从 1 开始的位置区分。
 
 ## 显示
 

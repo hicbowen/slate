@@ -8,6 +8,7 @@
 #include <cstring>
 #include <ctime>
 
+#include "drivers/display/epd_ssd1683.h"
 #include "drivers/display/framebuffer_ops.h"
 #include "network/sntp.h"
 #include "utils/scoped_mutex_lock.h"
@@ -31,6 +32,9 @@ RTC_DATA_ATTR uint32_t s_timer_wake_fail_count = 0;
 
 RTC_DATA_ATTR bool     s_screen_redraw_pending = false;
 RTC_DATA_ATTR uint32_t s_redraw_retry_count    = 0;
+RTC_DATA_ATTR SyncResult s_last_sync_result   = SyncResult::kUnknown;
+RTC_DATA_ATTR char s_confirmed_screen_version[33] = {};
+std::string s_queued_screen_version;
 
 // 退避位移上限:60s << 6 ≈ 64min,与下方 kMaxBackoffWakeSec 共同封顶。
 constexpr uint32_t kMaxBackoffShift   = 6;
@@ -70,9 +74,46 @@ void Init(bool cold_boot) {
     s_timer_wake_fail_count = 0;
     s_screen_redraw_pending = false;
     s_redraw_retry_count    = 0;
+    s_last_sync_result      = SyncResult::kUnknown;
+    std::memset(s_confirmed_screen_version, 0, sizeof(s_confirmed_screen_version));
     s_status_bar_magic      = 0;
     s_status_bar_hash       = 0;
     std::memset(s_status_bar_snapshot, 0, sizeof(s_status_bar_snapshot));
+}
+
+SyncResult LastSyncResult() {
+    ScopedMutexLock lock(StateMutex());
+    return s_last_sync_result;
+}
+
+void RecordSyncResult(SyncResult result) {
+    ScopedMutexLock lock(StateMutex());
+    s_last_sync_result = result;
+}
+
+void QueueScreenVersion(const std::string& version) {
+    ScopedMutexLock lock(StateMutex());
+    s_queued_screen_version = version.size() == 32 ? version : "";
+}
+
+void ConfirmScreenVersionIfIdle(EpdSsd1683* epd) {
+    ScopedMutexLock lock(StateMutex());
+    if (!s_queued_screen_version.empty() && epd && !epd->IsRefreshPending()) {
+        std::memcpy(s_confirmed_screen_version, s_queued_screen_version.c_str(), sizeof(s_confirmed_screen_version));
+        s_queued_screen_version.clear();
+    }
+}
+
+std::string ConfirmedScreenVersion() {
+    ScopedMutexLock lock(StateMutex());
+    return s_confirmed_screen_version;
+}
+
+void CarryConfirmedScreenVersion(const std::string& previous, const std::string& current) {
+    ScopedMutexLock lock(StateMutex());
+    if (previous == s_confirmed_screen_version && current.size() == 32) {
+        std::memcpy(s_confirmed_screen_version, current.c_str(), sizeof(s_confirmed_screen_version));
+    }
 }
 
 CurrentFrameSchedule GetCurrentFrameSchedule() {

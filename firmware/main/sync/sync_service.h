@@ -73,7 +73,8 @@ class SyncService {
                                const std::string& selected_group_id, SyncReason reason, int& total_updates);
     bool CommitStagedFrames(cache::CacheWriter& writer, const std::string& gid, const api::Manifest& manifest,
                             const std::string& group_name, const std::string& selected_group_id,
-                            bool current_group_update, SyncReason reason, int total_updates, int old_content_count);
+                            bool current_group_update, SyncReason reason, int total_updates, int old_content_count,
+                            int rotation_minutes);
     void PostSyncedGroupReady(const std::string& gid, const std::string& name, int content_count, bool content_changed);
     std::string CurrentGroupSnapshot() const;
     void        SetCurrentGroup(const std::string& gid);

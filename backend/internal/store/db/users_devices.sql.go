@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -31,7 +32,7 @@ const claimDevice = `-- name: ClaimDevice :one
 UPDATE devices
 SET owner_id = $2, sort_order = $3, pair_code = $4, group_id = $5, updated_at = now()
 WHERE id = $1 AND owner_id IS NULL
-RETURNING id, mac, secret_hash, pair_code, name, owner_id, sort_order, group_id, battery_pct, rssi_dbm, fw_version, registered_at, last_seen_at, created_at, updated_at
+RETURNING id, mac, secret_hash, pair_code, name, owner_id, sort_order, group_id, battery_pct, rssi_dbm, fw_version, registered_at, last_seen_at, created_at, updated_at, sync_status
 `
 
 type ClaimDeviceParams struct {
@@ -67,6 +68,7 @@ func (q *Queries) ClaimDevice(ctx context.Context, arg ClaimDeviceParams) (Devic
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncStatus,
 	)
 	return i, err
 }
@@ -127,7 +129,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 }
 
 const getDevice = `-- name: GetDevice :one
-SELECT id, mac, secret_hash, pair_code, name, owner_id, sort_order, group_id, battery_pct, rssi_dbm, fw_version, registered_at, last_seen_at, created_at, updated_at FROM devices WHERE id = $1
+SELECT id, mac, secret_hash, pair_code, name, owner_id, sort_order, group_id, battery_pct, rssi_dbm, fw_version, registered_at, last_seen_at, created_at, updated_at, sync_status FROM devices WHERE id = $1
 `
 
 func (q *Queries) GetDevice(ctx context.Context, id string) (Device, error) {
@@ -149,12 +151,13 @@ func (q *Queries) GetDevice(ctx context.Context, id string) (Device, error) {
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncStatus,
 	)
 	return i, err
 }
 
 const getDeviceByPairCode = `-- name: GetDeviceByPairCode :one
-SELECT id, mac, secret_hash, pair_code, name, owner_id, sort_order, group_id, battery_pct, rssi_dbm, fw_version, registered_at, last_seen_at, created_at, updated_at FROM devices WHERE pair_code = $1 FOR UPDATE
+SELECT id, mac, secret_hash, pair_code, name, owner_id, sort_order, group_id, battery_pct, rssi_dbm, fw_version, registered_at, last_seen_at, created_at, updated_at, sync_status FROM devices WHERE pair_code = $1 FOR UPDATE
 `
 
 func (q *Queries) GetDeviceByPairCode(ctx context.Context, pairCode string) (Device, error) {
@@ -176,6 +179,7 @@ func (q *Queries) GetDeviceByPairCode(ctx context.Context, pairCode string) (Dev
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncStatus,
 	)
 	return i, err
 }
@@ -278,7 +282,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username *string) (GetU
 }
 
 const listDevices = `-- name: ListDevices :many
-SELECT id, mac, secret_hash, pair_code, name, owner_id, sort_order, group_id, battery_pct, rssi_dbm, fw_version, registered_at, last_seen_at, created_at, updated_at FROM devices WHERE owner_id = $1 ORDER BY sort_order, created_at
+SELECT id, mac, secret_hash, pair_code, name, owner_id, sort_order, group_id, battery_pct, rssi_dbm, fw_version, registered_at, last_seen_at, created_at, updated_at, sync_status FROM devices WHERE owner_id = $1 ORDER BY sort_order, created_at
 `
 
 func (q *Queries) ListDevices(ctx context.Context, ownerID *string) ([]Device, error) {
@@ -306,6 +310,7 @@ func (q *Queries) ListDevices(ctx context.Context, ownerID *string) ([]Device, e
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SyncStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -318,7 +323,7 @@ func (q *Queries) ListDevices(ctx context.Context, ownerID *string) ([]Device, e
 }
 
 const lockOwnedDevice = `-- name: LockOwnedDevice :one
-SELECT id, mac, secret_hash, pair_code, name, owner_id, sort_order, group_id, battery_pct, rssi_dbm, fw_version, registered_at, last_seen_at, created_at, updated_at FROM devices WHERE id = $1 AND owner_id = $2 FOR UPDATE
+SELECT id, mac, secret_hash, pair_code, name, owner_id, sort_order, group_id, battery_pct, rssi_dbm, fw_version, registered_at, last_seen_at, created_at, updated_at, sync_status FROM devices WHERE id = $1 AND owner_id = $2 FOR UPDATE
 `
 
 type LockOwnedDeviceParams struct {
@@ -345,6 +350,7 @@ func (q *Queries) LockOwnedDevice(ctx context.Context, arg LockOwnedDeviceParams
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SyncStatus,
 	)
 	return i, err
 }
@@ -400,7 +406,8 @@ UPDATE devices
 SET last_seen_at = now(),
     battery_pct = COALESCE($2, battery_pct),
     rssi_dbm = COALESCE($3, rssi_dbm),
-    fw_version = COALESCE($4, fw_version)
+    fw_version = COALESCE($4, fw_version),
+    sync_status = $5
 WHERE id = $1
 `
 
@@ -409,6 +416,7 @@ type RecordTelemetryParams struct {
 	BatteryPct *int16
 	RssiDbm    *int16
 	FwVersion  *string
+	SyncStatus json.RawMessage
 }
 
 func (q *Queries) RecordTelemetry(ctx context.Context, arg RecordTelemetryParams) error {
@@ -417,6 +425,7 @@ func (q *Queries) RecordTelemetry(ctx context.Context, arg RecordTelemetryParams
 		arg.BatteryPct,
 		arg.RssiDbm,
 		arg.FwVersion,
+		arg.SyncStatus,
 	)
 	return err
 }
@@ -438,7 +447,7 @@ func (q *Queries) RenameDevice(ctx context.Context, arg RenameDeviceParams) erro
 const resetDevice = `-- name: ResetDevice :exec
 UPDATE devices
 SET secret_hash = $2, pair_code = $3, owner_id = NULL, group_id = NULL, sort_order = 0,
-    registered_at = $4, updated_at = now()
+    registered_at = $4, last_seen_at = NULL, sync_status = NULL, updated_at = now()
 WHERE id = $1
 `
 
@@ -491,7 +500,7 @@ func (q *Queries) SetDeviceSortOrders(ctx context.Context, arg SetDeviceSortOrde
 
 const unbindDevice = `-- name: UnbindDevice :execrows
 UPDATE devices
-SET owner_id = NULL, group_id = NULL, sort_order = 0, pair_code = $3, updated_at = now()
+SET owner_id = NULL, group_id = NULL, sort_order = 0, pair_code = $3, sync_status = NULL, updated_at = now()
 WHERE id = $1 AND owner_id = $2
 `
 

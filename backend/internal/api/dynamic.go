@@ -8,6 +8,7 @@ const (
 	DynamicTypeDailyCalendar    DynamicType = "daily_calendar"
 	DynamicTypeMonthCalendar    DynamicType = "month_calendar"
 	DynamicTypeCountdown        DynamicType = "countdown"
+	DynamicTypeMessageBoard     DynamicType = "message_board"
 	DynamicTypeWeather          DynamicType = "weather"
 	DynamicTypeHistoryToday     DynamicType = "history_today"
 	DynamicTypeWeatherAlert     DynamicType = "weather_alert"
@@ -18,14 +19,30 @@ const (
 )
 
 var DynamicTypes = []DynamicType{
-	DynamicTypeDailyCalendar, DynamicTypeMonthCalendar, DynamicTypeCountdown, DynamicTypeWeather, DynamicTypeHistoryToday, DynamicTypeWeatherAlert,
+	DynamicTypeDailyCalendar, DynamicTypeMonthCalendar, DynamicTypeCountdown, DynamicTypeMessageBoard, DynamicTypeWeather, DynamicTypeHistoryToday, DynamicTypeWeatherAlert,
 	DynamicTypeEarthquakeReport, DynamicTypeDashboard, DynamicTypeFontTest, DynamicTypeHotList,
 }
+
+type CountdownLayout string
+
+type CountdownMode string
+
+const (
+	CountdownModeDown CountdownMode = "down"
+	CountdownModeUp   CountdownMode = "up"
+)
+
+const (
+	CountdownLayoutEditorial CountdownLayout = "editorial"
+	CountdownLayoutPoster    CountdownLayout = "poster"
+	CountdownLayoutSplit     CountdownLayout = "split"
+)
 
 // DynamicConfig is one flat shape for every dynamic type; fields that do not apply to
 // Type are dropped by normalization. Field use per type:
 //   - daily_calendar, month_calendar: tz, audio*, refreshIntervalSec
-//   - countdown: tz, goal, targetDate
+//   - countdown: tz, goal, targetDate, countdownMode, countdownLayout, milestones
+//   - message_board: message, messageAuthor, messageExpiresAt, messageFallback
 //   - weather: tz, locationId, locationLabel, audio*, refreshIntervalSec
 //   - history_today: tz, source (wikipedia | baidu_baike), audio*, refreshIntervalSec
 //   - weather_alert: province, audio*, refreshIntervalSec
@@ -38,6 +55,13 @@ type DynamicConfig struct {
 	TZ                 string                `json:"tz,omitempty"`
 	Goal               string                `json:"goal,omitempty"`
 	TargetDate         string                `json:"targetDate,omitempty"`
+	CountdownLayout    CountdownLayout       `json:"countdownLayout,omitempty"`
+	CountdownMode      CountdownMode         `json:"countdownMode,omitempty"`
+	Milestones         []int                 `json:"milestones,omitempty"`
+	Message            string                `json:"message,omitempty"`
+	MessageAuthor      string                `json:"messageAuthor,omitempty"`
+	MessageExpiresAt   string                `json:"messageExpiresAt,omitempty"`
+	MessageFallback    string                `json:"messageFallback,omitempty"`
 	AudioEnabled       bool                  `json:"audioEnabled,omitempty"`
 	AudioVoice         string                `json:"audioVoice,omitempty"`
 	RefreshIntervalSec int                   `json:"refreshIntervalSec,omitempty"`

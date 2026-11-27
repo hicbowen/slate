@@ -15,6 +15,15 @@ export function useDevices() {
   });
 }
 
+export function useDeviceDetail(deviceId: string, open: boolean) {
+  return useQuery({
+    queryKey: deviceKeys.detail(deviceId),
+    queryFn: () => http.get<Device>(`/devices/${deviceId}`),
+    enabled: open,
+    refetchInterval: 15_000,
+  });
+}
+
 export function useClaimByPairCode() {
   const qc = useQueryClient();
   return useMutation({
@@ -53,6 +62,7 @@ export function usePatchDevice(deviceId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: deviceKeys.list });
+      qc.invalidateQueries({ queryKey: deviceKeys.detail(deviceId) });
       qc.invalidateQueries({ queryKey: groupKeys.list });
     },
   });

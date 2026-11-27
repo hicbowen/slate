@@ -1,12 +1,14 @@
 package dynamic
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"slate/internal/api"
+	"slate/internal/render"
 )
 
 func TestNormalizeConfigDefaults(t *testing.T) {
@@ -37,6 +39,10 @@ func TestNormalizeConfigRejects(t *testing.T) {
 		`{"type":"hot_list","source":"unknown"}`,
 		`{"type":"hot_list","refreshIntervalSec":30}`,
 		`{"type":"hot_list","extra":1}`,
+		`{"type":"message_board","message":"   "}`,
+		`{"type":"message_board","message":"一\n二\n三\n四\n五"}`,
+		`{"type":"message_board","message":"留言","messageExpiresAt":"2026-10-26T21:30"}`,
+		`{"type":"countdown","tz":"UTC","targetDate":"2026-10-26","goal":"开学","countdownMode":"up","milestones":[0]}`,
 		`{"type":"dashboard","template":{"kind":"custom","template":{"blocks":[{"type":"text","x":390,"y":30,"w":20,"h":10,"value":"x"}]}}}`,
 	} {
 		if _, err := NormalizeConfig(json.RawMessage(in)); err == nil {
@@ -113,6 +119,53 @@ func TestScheduleCalendarWakesAfterLocalMidnight(t *testing.T) {
 	}
 	if next, _ := schedule(api.DynamicConfig{Type: api.DynamicTypeFontTest}, now); next != nil {
 		t.Fatalf("font test should never refresh")
+	}
+}
+
+func TestMessageBoardSchedulesOnlyItsExpiry(t *testing.T) {
+	cfg, err := NormalizeConfig(json.RawMessage(`{"type":"message_board","message":" 今晚回来吃饭 ","messageExpiresAt":"2026-10-26T21:30:00+08:00","messageFallback":"明天见"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiry := time.Date(2026, 10, 26, 13, 30, 0, 0, time.UTC)
+	if cfg.Message != "今晚回来吃饭" || cfg.MessageExpiresAt != expiry.Format(time.RFC3339) {
+		t.Fatalf("unexpected normalized config: %+v", cfg)
+	}
+	next, due := schedule(cfg, expiry.Add(-time.Second))
+	if next == nil || due == nil || !next.Equal(expiry.Add(time.Minute)) || !due.Equal(expiry) {
+		t.Fatalf("next %v, due %v", next, due)
+	}
+	if next, due := schedule(cfg, expiry); next != nil || due != nil {
+		t.Fatalf("expired message still scheduled: next %v, due %v", next, due)
+	}
+	cfg.MessageExpiresAt = ""
+	if next, due := schedule(cfg, expiry); next != nil || due != nil {
+		t.Fatalf("message without expiry scheduled: next %v, due %v", next, due)
+	}
+}
+
+func TestCountUpFollowsLocalCalendarDays(t *testing.T) {
+	cfg, err := NormalizeConfig(json.RawMessage(`{"type":"countdown","tz":"America/New_York","targetDate":"2026-03-08","goal":"开学","countdownMode":"up","milestones":[100,30,100]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CountdownLayout != api.CountdownLayoutEditorial || len(cfg.Milestones) != 2 || cfg.Milestones[0] != 30 || cfg.Milestones[1] != 100 {
+		t.Fatalf("unexpected normalized config: %+v", cfg)
+	}
+	e := &Engine{}
+	start := time.Date(2026, 3, 8, 5, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		now  time.Time
+		want int64
+	}{
+		{start.Add(-time.Second), 0},
+		{start, 1},
+		{start.Add(23 * time.Hour), 2}, // The spring-forward day is 23 hours.
+	} {
+		data, err := e.fetchData(context.Background(), cfg, nil, tc.now)
+		if err != nil || data != (render.CountdownData{DayNumber: tc.want}) {
+			t.Fatalf("%v: got %+v, err %v, want day %d", tc.now, data, err, tc.want)
+		}
 	}
 }
 

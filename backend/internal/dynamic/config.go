@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,6 +22,30 @@ func (e *ValidationError) HTTPStatus() int { return 400 }
 
 func invalid(format string, args ...any) error {
 	return &ValidationError{fmt.Sprintf(format, args...)}
+}
+
+func normalizeMessageBoard(out *api.DynamicConfig, in api.DynamicConfig) error {
+	out.Message = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(in.Message, "\r\n", "\n"), "\r", "\n"))
+	if out.Message == "" || len([]rune(out.Message)) > 100 || strings.Count(out.Message, "\n") > 3 {
+		return invalid("留言正文须为 1–100 个字符，最多手动换行为 4 行")
+	}
+	out.MessageAuthor = strings.TrimSpace(in.MessageAuthor)
+	if len([]rune(out.MessageAuthor)) > 20 || strings.ContainsAny(out.MessageAuthor, "\r\n") {
+		return invalid("落款须为单行，最多 20 个字符")
+	}
+	if in.MessageExpiresAt == "" {
+		return nil
+	}
+	expiry, err := time.Parse(time.RFC3339, in.MessageExpiresAt)
+	if err != nil || expiry.UTC().Year() < 1 || expiry.UTC().Year() > 9999 {
+		return invalid("请选择有效的留言过期时间")
+	}
+	out.MessageExpiresAt = expiry.UTC().Format(time.RFC3339Nano)
+	out.MessageFallback = strings.TrimSpace(in.MessageFallback)
+	if len([]rune(out.MessageFallback)) > 48 || strings.ContainsAny(out.MessageFallback, "\r\n") {
+		return invalid("过期后显示的内容须为单行，最多 48 个字符")
+	}
+	return nil
 }
 
 var WeatherAlertProvinces = []string{
@@ -65,15 +90,49 @@ func NormalizeConfig(raw json.RawMessage) (api.DynamicConfig, error) {
 	switch in.Type {
 	case api.DynamicTypeDailyCalendar, api.DynamicTypeMonthCalendar, api.DynamicTypeEarthquakeReport:
 	case api.DynamicTypeCountdown:
+		switch in.CountdownMode {
+		case "", api.CountdownModeDown, api.CountdownModeUp:
+			out.CountdownMode = in.CountdownMode
+		default:
+			return out, invalid("请选择有效的计日模式")
+		}
 		out.Goal = strings.TrimSpace(in.Goal)
 		if out.Goal == "" || len([]rune(out.Goal)) > 32 {
 			return out, invalid("目标须为 1–32 个字符")
 		}
 		target, err := time.Parse(time.DateOnly, in.TargetDate)
 		if err != nil || target.Year() < 1 {
+			if out.CountdownMode == api.CountdownModeUp {
+				return out, invalid("请选择有效的起始日期")
+			}
 			return out, invalid("请选择有效的目标日期")
 		}
 		out.TargetDate = in.TargetDate
+		switch in.CountdownLayout {
+		case "", api.CountdownLayoutEditorial, api.CountdownLayoutPoster, api.CountdownLayoutSplit:
+			out.CountdownLayout = in.CountdownLayout
+		default:
+			return out, invalid("请选择有效的计日版式")
+		}
+		if out.CountdownMode == api.CountdownModeUp {
+			if out.CountdownLayout == "" {
+				out.CountdownLayout = api.CountdownLayoutEditorial
+			}
+			if len(in.Milestones) > 10 {
+				return out, invalid("最多设置 10 个里程碑")
+			}
+			for _, day := range in.Milestones {
+				if day < 1 || day > 3652059 {
+					return out, invalid("里程碑天数须为 1–3652059 之间的整数")
+				}
+			}
+			slices.Sort(in.Milestones)
+			out.Milestones = slices.Compact(in.Milestones)
+		}
+	case api.DynamicTypeMessageBoard:
+		if err := normalizeMessageBoard(&out, in); err != nil {
+			return out, err
+		}
 	case api.DynamicTypeWeather:
 		out.LocationID = strings.TrimSpace(in.LocationID)
 		out.LocationLabel = strings.TrimSpace(in.LocationLabel)
@@ -398,10 +457,10 @@ func ValidateDashboardData(raw json.RawMessage) error {
 func DefaultFrameName(cfg api.DynamicConfig) *string {
 	name := map[api.DynamicType]string{
 		api.DynamicTypeDailyCalendar: "日历", api.DynamicTypeMonthCalendar: "月历", api.DynamicTypeHistoryToday: "历史上的今天",
-		api.DynamicTypeEarthquakeReport: "地震速报", api.DynamicTypeCountdown: "倒数日",
+		api.DynamicTypeEarthquakeReport: "地震速报", api.DynamicTypeMessageBoard: "家庭留言板",
 	}[cfg.Type]
 	switch cfg.Type {
-	case api.DynamicTypeWeatherAlert, api.DynamicTypeWeather, api.DynamicTypeDashboard, api.DynamicTypeFontTest, api.DynamicTypeHotList:
+	case api.DynamicTypeWeatherAlert, api.DynamicTypeWeather, api.DynamicTypeDashboard, api.DynamicTypeFontTest, api.DynamicTypeHotList, api.DynamicTypeCountdown:
 		name = configLabel(cfg)
 	}
 	if name == "" {
@@ -413,6 +472,11 @@ func DefaultFrameName(cfg api.DynamicConfig) *string {
 // configLabel is the status bar text that depends only on configuration.
 func configLabel(cfg api.DynamicConfig) string {
 	switch cfg.Type {
+	case api.DynamicTypeCountdown:
+		if cfg.CountdownMode == api.CountdownModeUp {
+			return "正数日"
+		}
+		return "倒数日"
 	case api.DynamicTypeWeather:
 		if cfg.LocationLabel == "" || cfg.LocationLabel == "天气" {
 			return "天气"
@@ -461,7 +525,9 @@ func StatusBarText(frameName, dynamicType *string, config, data json.RawMessage,
 	_ = json.Unmarshal(config, &cfg)
 	switch api.DynamicType(*dynamicType) {
 	case api.DynamicTypeCountdown:
-		return "倒数日"
+		return configLabel(cfg)
+	case api.DynamicTypeMessageBoard:
+		return "家庭留言板"
 	case api.DynamicTypeDailyCalendar, api.DynamicTypeMonthCalendar, api.DynamicTypeHistoryToday:
 		if renderedAt == nil {
 			return name

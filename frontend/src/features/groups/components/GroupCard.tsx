@@ -44,8 +44,9 @@ export const GroupCardSortable = memo(function GroupCardSortable({
               <h3 className="font-serif text-[20px] font-bold leading-tight truncate tracking-tight">
                 {group.name}
               </h3>
-              <p className="font-mono text-[11px] text-stone-light mt-1.5 truncate">
-                {formatBytes(group.totalBytes)}
+              <p className="font-mono text-[11px] text-stone-light mt-1.5 flex flex-wrap gap-x-2">
+                <span>Note4 {formatBytes(group.note4ImageBytes + group.audioBytes)}</span>
+                <span>Note4C {formatBytes(group.note4cImageBytes + group.audioBytes)}</span>
               </p>
             </div>
             <div className="flex items-baseline gap-1 flex-shrink-0">

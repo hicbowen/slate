@@ -157,6 +157,7 @@ void App::InitSceneStack() {
         else
             SyncService::Get().CyclePrev();
     };
+    ctx.sync_busy = []() { return SyncService::Get().IsBusy(); };
     ctx.xiaozhi_service = []() -> xiaozhi::XiaozhiService* { return &xiaozhi::XiaozhiService::Get(); };
 
     scene_stack_.SetContext(ctx);
@@ -283,7 +284,10 @@ bool App::HandleEnterDoubleClick(const UiEvent& e) {
         return true;
     }
     if (!top || std::strcmp(top->Name(), "xiaozhi") != 0) {
-        scene_stack_.Push(std::make_unique<XiaozhiScene>());
+        if (top && std::strcmp(top->Name(), "card_directory") == 0)
+            scene_stack_.Replace(std::make_unique<XiaozhiScene>());
+        else
+            scene_stack_.Push(std::make_unique<XiaozhiScene>());
         scene_stack_.ApplyPending();
         sleep_mgr_.OnEvent(e);
         return true;
@@ -467,6 +471,9 @@ void App::UiLoopTask() {
     }
 
     while (ui_loop_running_.load(std::memory_order_acquire)) {
+        if (auto* scene = scene_stack_.Top())
+            scene->OnTick(scene_stack_.Context(), time_utils::NowMs());
+        scene_stack_.ApplyPending();
         UiEvent e;
         if (!evt::Wait(&e, pdMS_TO_TICKS(1000))) {
             // 1s 超时只是为了让 SleepManager 有机会做 Tick；不强制每秒做事。

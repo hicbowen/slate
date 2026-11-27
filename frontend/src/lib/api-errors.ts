@@ -9,7 +9,14 @@ export type ApiError = AxiosError<ApiErrorResponse>;
 
 export function getApiErrorMessage(err: unknown, fallback = '操作失败'): string {
   if (err instanceof AxiosError) {
-    const data = err.response?.data as ApiErrorResponse | undefined;
+    let data: ApiErrorResponse | undefined = err.response?.data;
+    if (data instanceof ArrayBuffer) {
+      try {
+        data = JSON.parse(new TextDecoder().decode(data)) as ApiErrorResponse;
+      } catch {
+        data = undefined;
+      }
+    }
     return data?.message ?? data?.error ?? fallback;
   }
   if (err instanceof Error) return err.message;

@@ -15,7 +15,7 @@ namespace {
 
 // 缓存布局版本。帧元数据、manifest 或 state.json 的格式变化时递增：Init 发现不一致会
 // 整体格式化，固件不需要读旧格式。
-constexpr const char* kLayoutVersion = display_profile::kFourColor ? "2-note4c" : "3";
+constexpr const char* kLayoutVersion = display_profile::kFourColor ? "3-note4c" : "4";
 
 std::string LayoutPath() {
     return std::string(internal::kRoot) + "/layout";

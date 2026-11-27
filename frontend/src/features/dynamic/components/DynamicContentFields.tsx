@@ -1,8 +1,15 @@
-import { isAudioDynamicConfig, type DynamicConfig, type DynamicType } from '@/api';
+import {
+  isAudioDynamicConfig,
+  type ContentDynamic,
+  type DynamicConfig,
+  type DynamicType,
+} from '@/api';
 import { ErrorBoundary } from '@/components/feedback/ErrorBoundary';
 import { FormSection } from '@/components/ui/FormSection';
 import { Input } from '@/components/ui/Input';
 import { DashboardConfigPanel } from '@/features/dynamic/components/config/DashboardConfig';
+import { CountdownConfigPanel } from './config/CountdownConfig';
+import { MessageBoardConfigPanel } from './config/MessageBoardConfig';
 import { DynamicAudioSection } from './config/DynamicAudioSection';
 import { DynamicRefreshSettings } from './config/RefreshSettings';
 import { FontTestConfigPanel } from './config/FontTestConfig';
@@ -20,6 +27,7 @@ export function DynamicContentFields({
   showParams,
   showAudio,
   contentId,
+  pushAuth,
   dashboardData,
   onDashboardDataChange,
   dashboardDataLabel,
@@ -32,6 +40,7 @@ export function DynamicContentFields({
   showParams: boolean;
   showAudio: boolean;
   contentId?: string;
+  pushAuth?: ContentDynamic['pushAuth'];
   dashboardData?: Record<string, unknown> | null;
   onDashboardDataChange?: (data: Record<string, unknown>) => void;
   dashboardDataLabel?: string;
@@ -64,6 +73,7 @@ export function DynamicContentFields({
               config={config}
               onChange={onConfigChange}
               contentId={contentId}
+              pushAuth={pushAuth}
               dashboardData={dashboardData ?? undefined}
               onDashboardDataChange={type === 'dashboard' ? onDashboardDataChange : undefined}
               dashboardDataLabel={dashboardDataLabel}
@@ -85,6 +95,7 @@ function DynamicConfigFields({
   config,
   onChange,
   contentId,
+  pushAuth,
   dashboardData,
   onDashboardDataChange,
   dashboardDataLabel,
@@ -92,6 +103,7 @@ function DynamicConfigFields({
   config: DynamicConfig;
   onChange: (config: DynamicConfig) => void;
   contentId?: string;
+  pushAuth?: ContentDynamic['pushAuth'];
   dashboardData?: Record<string, unknown>;
   onDashboardDataChange?: (data: Record<string, unknown>) => void;
   dashboardDataLabel?: string;
@@ -101,27 +113,9 @@ function DynamicConfigFields({
     case 'month_calendar':
       return null;
     case 'countdown':
-      return (
-        <div className="space-y-5">
-          <Input
-            type="text"
-            label="目标"
-            value={config.goal ?? ''}
-            maxLength={32}
-            onChange={(event) => onChange({ ...config, goal: event.target.value })}
-            placeholder="如：期末考试周"
-            required
-          />
-          <Input
-            type="date"
-            label="目标日期"
-            value={config.targetDate ?? ''}
-            onChange={(event) => onChange({ ...config, targetDate: event.target.value })}
-            hint="按当地日期计算，到期当天及之后显示 0 天。"
-            required
-          />
-        </div>
-      );
+      return <CountdownConfigPanel config={config} onChange={onChange} />;
+    case 'message_board':
+      return <MessageBoardConfigPanel config={config} onChange={onChange} />;
     case 'weather':
       return <WeatherConfigPanel config={config} onChange={onChange} />;
     case 'history_today':
@@ -136,6 +130,7 @@ function DynamicConfigFields({
           config={config}
           onChange={onChange}
           contentId={contentId}
+          pushAuth={pushAuth}
           dashboardData={dashboardData ?? {}}
           onDashboardDataChange={onDashboardDataChange}
           dataLabel={dashboardDataLabel}

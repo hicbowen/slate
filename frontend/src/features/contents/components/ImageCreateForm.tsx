@@ -1,28 +1,38 @@
-import type { FormEvent, ReactNode } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useToast } from '@/components/feedback/toast-context';
 import { FormActions } from '@/components/ui/FormActions';
 import { ImageFormBody } from '@/features/contents/components/image-form/ImageFormBody';
 import { useGenerateContentTts } from '@/features/contents/query/content-audio-queries';
 import { useCreateImageContent } from '@/features/contents/query/content-mutation-queries';
-import { useImageContentForm } from '@/features/contents/hooks/useImageContentForm';
+import type { useImageContentForm } from '@/features/contents/hooks/useImageContentForm';
 import { getApiErrorMessage } from '@/lib/api-errors';
 
 interface ImageCreateFormProps {
   gid: string;
-  header?: ReactNode;
+  form: ReturnType<typeof useImageContentForm>;
+  onCancel: () => void;
   onDone: () => void;
-  onEditCreatedImage?: (contentId: string) => void;
+  onEditCreatedImage: (contentId: string) => void;
 }
 
-export function ImageCreateForm({ gid, header, onDone, onEditCreatedImage }: ImageCreateFormProps) {
+export function ImageCreateForm({
+  gid,
+  form,
+  onCancel,
+  onDone,
+  onEditCreatedImage,
+}: ImageCreateFormProps) {
   const createImage = useCreateImageContent(gid);
   const generateTts = useGenerateContentTts(gid);
   const toast = useToast();
-  const form = useImageContentForm();
-  const submitting = createImage.isPending || generateTts.isPending;
+  const [submitting, setSubmitting] = useState(false);
+  const inFlight = useRef(false);
 
-  async function submitContent() {
-    if (!form.image.file) return;
+  async function submitContent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (inFlight.current || !form.canCreate) return;
+    inFlight.current = true;
+    setSubmitting(true);
     try {
       const fd = await form.buildFormData();
       const created = await createImage.mutateAsync(fd);
@@ -34,8 +44,7 @@ export function ImageCreateForm({ gid, header, onDone, onEditCreatedImage }: Ima
           });
         } catch (err) {
           toast.error('内容已新建，TTS 生成失败', getApiErrorMessage(err));
-          if (onEditCreatedImage) onEditCreatedImage(created.id);
-          else onDone();
+          onEditCreatedImage(created.id);
           return;
         }
       }
@@ -43,25 +52,22 @@ export function ImageCreateForm({ gid, header, onDone, onEditCreatedImage }: Ima
       onDone();
     } catch (err) {
       toast.error('创建失败', getApiErrorMessage(err));
+    } finally {
+      inFlight.current = false;
+      setSubmitting(false);
     }
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    void submitContent();
-  }
-
   return (
-    <form onSubmit={onSubmit}>
+    <form onSubmit={submitContent}>
       <ImageFormBody
         gid={gid}
         form={form}
         isEdit={false}
-        gridClassName="lg:grid-cols-2"
-        beforeFields={header}
         actions={
           <FormActions
-            onCancel={onDone}
+            className="z-30 mt-6"
+            onCancel={onCancel}
             submitLabel="创建"
             disabled={!form.canCreate}
             submitting={submitting}

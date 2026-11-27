@@ -26,6 +26,20 @@ type DeviceSyncRequest struct {
 	Telemetry       DeviceTelemetry `json:"telemetry"`
 }
 
+type DeviceMessageBoardRequest struct {
+	Protocol  int    `json:"protocol"`
+	GroupID   string `json:"groupId"`
+	ContentID string `json:"contentId,omitempty"`
+	Message   string `json:"message"`
+	Author    string `json:"author,omitempty"`
+}
+
+type DeviceMessageBoardResponse struct {
+	ContentID      string `json:"contentId"`
+	ImageHash      string `json:"imageHash"`
+	ColorImageHash string `json:"colorImageHash"`
+}
+
 type DeviceTelemetry struct {
 	BatteryPct *int    `json:"batteryPct,omitempty"`
 	RSSIDbm    *int    `json:"rssiDbm,omitempty"`
@@ -34,6 +48,18 @@ type DeviceTelemetry struct {
 	// renders CurrentContentID first when its dynamic refresh is due.
 	WakeReason       string `json:"wakeReason,omitempty"`
 	CurrentContentID string `json:"currentContentId,omitempty"`
+}
+
+// DeviceSyncStatus is stored from sync reports. The optional diagnostic query
+// parameters (diag, syncResult, screenVersion, nextRefreshAt) keep protocol v2
+// compatible with servers that strictly decode the original JSON body.
+type DeviceSyncStatus struct {
+	FrameFormat     string `json:"frameFormat"`
+	AppliedVersion  string `json:"appliedVersion"`
+	ScreenVersion   string `json:"screenVersion"`
+	ExpectedVersion string `json:"expectedVersion"`
+	LastResult      string `json:"lastResult"`
+	NextRefreshAt   int64  `json:"nextRefreshAt"` // Unix seconds; zero when there is no scheduled refresh.
 }
 
 // DeviceGroupRequest uses the same frame format negotiation as DeviceSyncRequest.
@@ -65,6 +91,7 @@ type DeviceGroup struct {
 	Position        GroupPosition `json:"position"`
 	ContentCount    int           `json:"contentCount"`
 	ManifestVersion string        `json:"manifestVersion"`
+	RotationMinutes int16         `json:"rotationMinutes,omitempty"`
 }
 
 type GroupPosition struct {

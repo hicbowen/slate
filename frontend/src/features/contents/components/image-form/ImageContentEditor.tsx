@@ -6,7 +6,7 @@
 //   AudioDropzone   — 选音频 + 删除已有音频
 //   DitherControls  — 缩放 / 抖动算法 / 阈值
 
-import type { FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
 import type { Content } from '@/api';
 import { useGenerateContentTts } from '@/features/contents/query/content-audio-queries';
@@ -17,7 +17,7 @@ import {
 import { useToast } from '@/components/feedback/toast-context';
 import { FormActions } from '@/components/ui/FormActions';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { TYPE_META } from '@/features/contents/model/content-type-meta';
+import { useLeaveDraft } from '@/hooks/useLeaveDraft';
 import { getApiErrorMessage } from '@/lib/api-errors';
 import { useImageContentForm } from '@/features/contents/hooks/useImageContentForm';
 import { ImageFormBody } from './ImageFormBody';
@@ -32,14 +32,18 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
   const updateImageContent = useUpdateImageContent(gid);
   const patchFrameName = usePatchContentFrameName(gid);
   const generateTts = useGenerateContentTts(gid);
-  const submitting =
-    updateImageContent.isPending || patchFrameName.isPending || generateTts.isPending;
+  const [submitting, setSubmitting] = useState(false);
+  const inFlight = useRef(false);
   const toast = useToast();
   const form = useImageContentForm(content);
+  const leaveAfterSave = useLeaveDraft(form.dirty);
 
   const canSubmit = form.canEdit;
 
   async function submitContent() {
+    if (inFlight.current || !canSubmit) return;
+    inFlight.current = true;
+    setSubmitting(true);
     try {
       if (form.hasUploadPatch) {
         const fd = await form.buildFormData();
@@ -63,9 +67,12 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
         }
       }
       toast.success('内容已保存');
-      onDone();
+      leaveAfterSave(onDone);
     } catch (err) {
       toast.error('保存失败', getApiErrorMessage(err));
+    } finally {
+      inFlight.current = false;
+      setSubmitting(false);
     }
   }
 
@@ -79,8 +86,8 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
       <PageHeader
         onBack={onDone}
         icon={<ImageIcon size={24} />}
-        title={`编辑第 ${content.seq + 1} 项`}
-        subtitle="改顺序请在组内用拖拽。"
+        title="编辑图片"
+        subtitle={`内容组中的第 ${content.seq + 1} 项`}
       />
 
       <div className="mt-6 fade-up fade-up-1">
@@ -96,16 +103,9 @@ export function ImageContentEditor({ gid, content, onDone }: ImageContentEditorP
             editingContentId={content.id}
             audioStatus={content.audio?.status ?? null}
             audioError={content.audio?.error ?? null}
-            beforeFields={
-              <div className="space-y-3">
-                <p className="font-sans text-[12px] text-stone leading-relaxed">
-                  {TYPE_META.image.description}
-                </p>
-                <div className="border-t border-line" />
-              </div>
-            }
             actions={
               <FormActions
+                className="z-30 mt-6"
                 onCancel={onDone}
                 submitLabel="保存"
                 disabled={!canSubmit}

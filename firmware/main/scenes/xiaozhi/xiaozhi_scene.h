@@ -19,12 +19,14 @@ class XiaozhiScene : public Scene {
     void      OnEnter(SceneContext& ctx) override;
     void      OnExit(SceneContext& ctx) override;
     void      OnEvent(SceneContext& ctx, const UiEvent& e) override;
+    void      OnTick(SceneContext& ctx, int64_t now_ms) override;
     lv_obj_t* Root() override {
         return root_;
     }
 
    private:
     void                     EnsureServiceStarted(SceneContext& ctx);
+    void                     MaybeStartListening();
     xiaozhi::XiaozhiService* Service(SceneContext& ctx);
     void                     CreateLayout();
     void                     Render(SceneContext& ctx, bool full = false);
@@ -50,6 +52,9 @@ class XiaozhiScene : public Scene {
     xiaozhi::XiaozhiService*   service_                = nullptr;
     int                        rendered_state_         = 0;
     bool                       service_entered_        = false;
+    bool                       auto_start_             = true;
+    int64_t                    sync_wait_started_ms_   = 0;
+    bool                       sync_wait_timed_out_    = false;
     size_t                     rendered_message_count_ = 0;
     std::string                rendered_messages_key_;
     std::unique_ptr<StatusBar> status_bar_;

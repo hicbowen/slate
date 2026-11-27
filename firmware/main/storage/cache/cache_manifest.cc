@@ -29,6 +29,7 @@ bool ReadManifestMetaFile(const std::string& path, cache::ManifestMeta& out) {
     out.name             = cache::internal::JsonStringField(root, "group_name");
     out.manifest_version = cache::internal::JsonStringField(root, "manifest_version");
     out.content_count    = cache::internal::JsonNonNegativeIntField(root, "content_count", 0);
+    out.rotation_minutes = cache::internal::JsonNonNegativeIntField(root, "rotation_minutes", 0);
     out.last_access_seq  = cache::internal::JsonUint32Field(root, "last_access_seq", 0);
     cJSON_Delete(root);
     return !out.manifest_version.empty();
@@ -39,7 +40,7 @@ bool ReadManifestMetaFile(const std::string& path, cache::ManifestMeta& out) {
 namespace cache {
 
 bool WriteManifest(const std::string& gid, const std::string& manifest_version, int content_count,
-                   const std::string& name) {
+                   const std::string& name, int rotation_minutes) {
     internal::DirEnsure(std::string(internal::kRoot) + "/groups");
     internal::DirEnsure(internal::GroupDir(gid));
     internal::DirEnsure(internal::FramesDir(gid));
@@ -52,6 +53,7 @@ bool WriteManifest(const std::string& gid, const std::string& manifest_version, 
     cJSON_AddStringToObject(root, "group_name", name.empty() ? old.name.c_str() : name.c_str());
     cJSON_AddStringToObject(root, "manifest_version", manifest_version.c_str());
     cJSON_AddNumberToObject(root, "content_count", content_count);
+    cJSON_AddNumberToObject(root, "rotation_minutes", rotation_minutes);
     cJSON_AddNumberToObject(root, "last_access_seq", static_cast<double>(old.last_access_seq));
     char* s  = cJSON_PrintUnformatted(root);
     bool  ok = s && internal::WriteAll(internal::ManifestPath(gid), s, std::strlen(s));
@@ -96,6 +98,7 @@ bool TouchGroup(const std::string& gid) {
     cJSON_AddStringToObject(root, "group_name", meta.name.c_str());
     cJSON_AddStringToObject(root, "manifest_version", meta.manifest_version.c_str());
     cJSON_AddNumberToObject(root, "content_count", meta.content_count);
+    cJSON_AddNumberToObject(root, "rotation_minutes", meta.rotation_minutes);
     cJSON_AddNumberToObject(root, "last_access_seq", static_cast<double>(meta.last_access_seq));
     char* s = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

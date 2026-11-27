@@ -129,15 +129,16 @@ func (q *Queries) CompleteTTS(ctx context.Context, arg CompleteTTSParams) (int64
 }
 
 const createDynamic = `-- name: CreateDynamic :exec
-INSERT INTO content_dynamic (content_id, type, config, data, next_run_at, refresh_due_at)
-VALUES ($1, $2, $3, $4, now(), now())
+INSERT INTO content_dynamic (content_id, type, config, data, next_run_at, refresh_due_at, push_token_hash)
+VALUES ($1, $2, $3, $4, now(), now(), $5)
 `
 
 type CreateDynamicParams struct {
-	ContentID string
-	Type      string
-	Config    json.RawMessage
-	Data      json.RawMessage
+	ContentID     string
+	Type          string
+	Config        json.RawMessage
+	Data          json.RawMessage
+	PushTokenHash *string
 }
 
 func (q *Queries) CreateDynamic(ctx context.Context, arg CreateDynamicParams) error {
@@ -146,6 +147,7 @@ func (q *Queries) CreateDynamic(ctx context.Context, arg CreateDynamicParams) er
 		arg.Type,
 		arg.Config,
 		arg.Data,
+		arg.PushTokenHash,
 	)
 	return err
 }
@@ -232,7 +234,7 @@ func (q *Queries) GetAudio(ctx context.Context, contentID string) (ContentAudio,
 }
 
 const getDynamic = `-- name: GetDynamic :one
-SELECT content_id, type, config, data, rendered_at, next_run_at, refresh_due_at, lease_until, attempts, last_error FROM content_dynamic WHERE content_id = $1
+SELECT content_id, type, config, data, rendered_at, next_run_at, refresh_due_at, lease_until, attempts, last_error, push_token_hash FROM content_dynamic WHERE content_id = $1
 `
 
 func (q *Queries) GetDynamic(ctx context.Context, contentID string) (ContentDynamic, error) {
@@ -249,6 +251,7 @@ func (q *Queries) GetDynamic(ctx context.Context, contentID string) (ContentDyna
 		&i.LeaseUntil,
 		&i.Attempts,
 		&i.LastError,
+		&i.PushTokenHash,
 	)
 	return i, err
 }
@@ -302,6 +305,27 @@ func (q *Queries) ReleaseDynamicLease(ctx context.Context, arg ReleaseDynamicLea
 		arg.LeaseUntil,
 	)
 	return err
+}
+
+const rotateDashboardPushToken = `-- name: RotateDashboardPushToken :execrows
+UPDATE content_dynamic d SET push_token_hash = $1
+FROM contents c JOIN groups g ON g.id = c.group_id
+WHERE d.content_id = c.id AND c.id = $2 AND g.owner_id = $3
+    AND d.type = 'dashboard'
+`
+
+type RotateDashboardPushTokenParams struct {
+	TokenHash *string
+	ContentID string
+	OwnerID   string
+}
+
+func (q *Queries) RotateDashboardPushToken(ctx context.Context, arg RotateDashboardPushTokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rotateDashboardPushToken, arg.TokenHash, arg.ContentID, arg.OwnerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const saveDynamicRender = `-- name: SaveDynamicRender :exec

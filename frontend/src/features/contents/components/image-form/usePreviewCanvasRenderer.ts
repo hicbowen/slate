@@ -3,6 +3,8 @@ import type { ImageRenderPreset } from '@/lib/eink/render-preset';
 import { clearCanvas, decodeBppImage, isValidBppLength } from '@/lib/eink/bpp';
 import {
   drawImagePreview,
+  normalizeCropOffset,
+  type CropOptions,
   type ImageFrameFormat,
   type MonochromeMode,
 } from '@/lib/eink/image-preview';
@@ -23,9 +25,11 @@ export function usePreviewCanvasRenderer({
   threshold,
   mode,
   scale,
+  fit,
   offset,
   onOffsetChange,
   canvasRef,
+  interactive,
 }: {
   imageFile: File | null;
   existingImage: ArrayBuffer | undefined;
@@ -35,9 +39,11 @@ export function usePreviewCanvasRenderer({
   threshold: number;
   mode: MonochromeMode;
   scale: number;
+  fit?: CropOptions['fit'];
   offset: CanvasOffset;
   onOffsetChange: (offset: CanvasOffset) => void;
   canvasRef: RefObject<HTMLCanvasElement | null>;
+  interactive: boolean;
 }) {
   const loadedImage = useLoadedImage(imageFile);
   const drawFrameRef = useRef<number | null>(null);
@@ -60,6 +66,7 @@ export function usePreviewCanvasRenderer({
       if (!ctx) return false;
       drawImagePreview(ctx, canvas, loadedImage.image, {
         scale,
+        fit,
         offset: currentOffsetRef.current,
         threshold,
         mode,
@@ -69,7 +76,7 @@ export function usePreviewCanvasRenderer({
       });
       return true;
     },
-    [renderPreset, canvasRef, format, imageFile, loadedImage, mode, scale, threshold]
+    [renderPreset, canvasRef, fit, format, imageFile, loadedImage, mode, scale, threshold]
   );
 
   const scheduleImageDraw = useCallback(
@@ -84,10 +91,16 @@ export function usePreviewCanvasRenderer({
   );
 
   const pan = useCanvasPan({
-    enabled: !!imageFile && loadedImage?.file === imageFile,
+    enabled: interactive && !!imageFile && loadedImage?.file === imageFile,
     offset,
     currentOffsetRef,
     onOffsetChange,
+    normalizeOffset: (next) => {
+      const canvas = canvasRef.current;
+      return canvas && loadedImage
+        ? normalizeCropOffset(canvas, loadedImage.image, { scale, fit, offset: next })
+        : next;
+    },
     onPreviewMove: () => scheduleImageDraw(false),
     onCommit: () => scheduleImageDraw(true),
   });

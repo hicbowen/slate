@@ -55,6 +55,7 @@ inline constexpr char kPosition[]         = "position";
 inline constexpr char kProtocol[]         = "protocol";
 inline constexpr char kRefreshAt[]        = "refreshAt";
 inline constexpr char kRssiDbm[]          = "rssiDbm";
+inline constexpr char kRotationMinutes[]  = "rotationMinutes";
 inline constexpr char kSecret[]           = "secret";
 inline constexpr char kServerTime[]       = "serverTime";
 inline constexpr char kSize[]             = "size";
@@ -214,6 +215,9 @@ bool ParseDeviceState(cJSON* data, DeviceState& out) {
         out.group_name       = JsonString(group, proto::kName);
         out.manifest_version = JsonString(group, proto::kManifestVersion);
         out.content_count    = JsonInt(group, proto::kContentCount, 0);
+        const int rotation = JsonInt(group, proto::kRotationMinutes, 0);
+        if (rotation == 15 || rotation == 30 || rotation == 60)
+            out.rotation_minutes = rotation;
         if (out.group_id.empty() || out.manifest_version.empty()) {
             ESP_LOGW(kTag, "device state invalid reason=group_fields_missing");
             return false;
@@ -477,6 +481,37 @@ bool ApiClient::PostJson(const std::string& path, const std::string& body, bool 
 }
 
 // ─── 设备协议端点 ────────────────────────────────────────────────
+bool ApiClient::WriteMessageBoard(const std::string& group_id, const std::string& content_id,
+                                  const std::string& message, const std::string& author, MessageBoardUpdate& out,
+                                  std::string& error) {
+    cJSON* root = NewProtocolBody();
+    if (!root) {
+        error = "设备内存不足，未发送留言";
+        return false;
+    }
+    cJSON_AddStringToObject(root, "groupId", group_id.c_str());
+    if (!content_id.empty())
+        cJSON_AddStringToObject(root, "contentId", content_id.c_str());
+    cJSON_AddStringToObject(root, "message", message.c_str());
+    cJSON_AddStringToObject(root, "author", author.c_str());
+    std::vector<uint8_t> response;
+    const bool received =
+        DoRequest("/api/device/message-board", HTTP_METHOD_POST, PrintBody(root), response, true, kDefaultTimeoutMs);
+    cJSON* envelope = response.empty() ? nullptr :
+        cJSON_ParseWithLength(reinterpret_cast<const char*>(response.data()), response.size());
+    cJSON* data = cJSON_GetObjectItemCaseSensitive(envelope, proto::kData);
+    out.content_id = JsonString(data, "contentId");
+    out.image_hash = JsonString(data, display_profile::kFourColor ? "colorImageHash" : "imageHash");
+    const bool saved = received && JsonBool(envelope, proto::kSuccess, false) && !out.content_id.empty();
+    if (!saved) {
+        error = JsonString(envelope, proto::kMessage);
+        if (error.empty())
+            error = "未能确认留言已保存，请在 Slate 网页查看";
+    }
+    cJSON_Delete(envelope);
+    return saved;
+}
+
 bool ApiClient::Register(RegisterResult& out) {
     std::string mac;
     {
@@ -519,7 +554,17 @@ bool ApiClient::Sync(const std::string& manifest_version, const Telemetry& tel, 
                 cJSON_AddStringToObject(t, proto::kCurrentContentId, tel.current_content_id.c_str());
         }
     }
-    const char* path = display_profile::kFourColor ? "/api/device/sync" : "/api/device/sync?frameFormat=gray4";
+    std::string path = "/api/device/sync?diag=1";
+    if (!display_profile::kFourColor)
+        path += "&frameFormat=gray4";
+    if (!tel.screen_version.empty())
+        path += "&screenVersion=" + tel.screen_version;
+    if (tel.sync_result[0] != '\0') {
+        path += "&syncResult=";
+        path += tel.sync_result;
+    }
+    if (tel.next_refresh_at > 0)
+        path += "&nextRefreshAt=" + std::to_string(tel.next_refresh_at);
     return PostJson(path, PrintBody(root), /*need_auth=*/true,
                     [&](cJSON* data) { return ParseDeviceState(data, out); });
 }

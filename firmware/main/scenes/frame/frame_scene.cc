@@ -9,7 +9,9 @@
 #include "drivers/display/epd_ssd1683.h"
 #include "events/event_bus.h"
 #include "events/ui_event_log.h"
+#include "power/power_state.h"
 #include "scenes/core/scene_stack.h"
+#include "scenes/frame/card_directory_scene.h"
 #include "scenes/settings/settings_scene.h"
 #include "scenes/splash/splash_scene.h"
 #include "storage/cache/cache.h"
@@ -18,6 +20,7 @@
 #include "ui/status_bar.h"
 #include "ui/theme.h"
 #include "utils/utf8_utils.h"
+#include "xiaozhi/mcp/mcp_tools.h"
 
 namespace {
 constexpr char kTag[] = "frame";
@@ -117,7 +120,34 @@ void FrameScene::OnEnter(SceneContext& ctx) {
 
     ctx.epd->Unlock();
 
+    next_rotation_ms_ = 0;
+    xiaozhi::mcp::TakePendingCard(directory_group_, directory_content_);
+    cache::CachedGroupSummary group;
+    if (cache::ReadCachedGroupSummary(group)) {
+        if (gid_ != group.gid)
+            RebindGroup(ctx, group.gid.c_str(), group.content_count);
+        content_count_ = group.content_count;
+        const bool requested = gid_ == directory_group_ && !directory_content_.empty();
+        if (requested || !current_content_id_.empty()) {
+            for (int i = 0; i < content_count_; ++i) {
+                cache::FrameMeta frame;
+                if (!cache::ReadFrameMeta(gid_, i, frame))
+                    continue;
+                if (requested && frame.content_id == directory_content_) {
+                    idx_ = i;
+                    break;
+                }
+                if (frame.content_id == current_content_id_)
+                    idx_ = i;
+            }
+        }
+    }
+    directory_group_.clear();
+    directory_content_.clear();
+    ReadRotationSettings();
     if (!gid_.empty() && content_count_ > 0) {
+        if (idx_ < 0 || idx_ >= content_count_)
+            idx_ = 0;
         LoadFrame(ctx, idx_, /*force_full*/ first_load_full_refresh_, AudioBehavior::RestartIfAvailable);
     } else {
         ESP_LOGI(kTag, "content empty gid_empty=%d count=%d", gid_.empty() ? 1 : 0, content_count_);
@@ -131,6 +161,8 @@ void FrameScene::OnExit(SceneContext& ctx) {
     ESP_LOGD(kTag, "exit gid=%s idx=%d", gid_.c_str(), idx_);
     if (ctx.audio)
         ctx.audio->Stop();
+    power_state::ConfirmScreenVersionIfIdle(ctx.epd);
+    power_state::QueueScreenVersion("");
     DestroyRoot(ctx, root_, [this]() {
         frame_view_.reset();
         status_bar_.reset();
@@ -151,15 +183,22 @@ void FrameScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
     }
     switch (e.kind) {
         case UiEventKind::kButtonShort: {
+            next_rotation_ms_ = 0;
             switch (e.u.button.btn) {
                 case ButtonId::kUp:
                     ESP_LOGD(kTag, "button short btn=up action=prev_frame");
                     PrevFrame(ctx);
                     break;
                 case ButtonId::kDown:
-                case ButtonId::kEnter:
                     ESP_LOGD(kTag, "button short btn=%s action=next_frame", evt::log::ButtonName(e.u.button.btn));
                     NextFrame(ctx);
+                    break;
+                case ButtonId::kEnter:
+                    ctx.stack->RequestPush(std::make_unique<CardDirectoryScene>(
+                        idx_, [this](const std::string& gid, const std::string& id) {
+                            directory_group_ = gid;
+                            directory_content_ = id;
+                        }));
                     break;
             }
             break;
@@ -182,6 +221,8 @@ void FrameScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
             break;
         }
         case UiEventKind::kChargeChanged: {
+            if (!e.u.charge.present)
+                next_rotation_ms_ = 0;
             RefreshStatusBarForCharge(ctx, e);
             break;
         }
@@ -211,6 +252,7 @@ void FrameScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
             const bool same_group      = (gid_ == e.u.group.gid);
             const bool content_changed = e.u.group.content_changed;
             if (same_group && !content_changed) {
+                ReadRotationSettings();
                 content_count_ = e.u.group.content_count > 0 ? e.u.group.content_count : 0;
                 if (content_count_ > 0 && (idx_ < 0 || idx_ >= content_count_))
                     idx_ = 0;
@@ -223,6 +265,7 @@ void FrameScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
                 if (content_count_ > 0 && (idx_ < 0 || idx_ >= content_count_))
                     idx_ = 0;
             }
+            ReadRotationSettings();
             if (content_count_ > 0) {
                 LoadFrame(ctx, idx_, /*force_full*/ true,
                           same_group ? AudioBehavior::StopIfUnavailable : AudioBehavior::RestartIfAvailable);
@@ -248,15 +291,53 @@ void FrameScene::OnEvent(SceneContext& ctx, const UiEvent& e) {
     }
 }
 
+void FrameScene::ReadRotationSettings() {
+    cache::ManifestMeta meta;
+    const int interval = !gid_.empty() && cache::ReadManifestMeta(gid_, meta) ? meta.rotation_minutes : 0;
+    if (interval != rotation_minutes_) {
+        rotation_minutes_ = interval;
+        next_rotation_ms_ = 0;
+    }
+}
+
+void FrameScene::OnTick(SceneContext& ctx, int64_t now_ms) {
+    if (rotation_minutes_ <= 0 || content_count_ < 2 || !root_ || !ctx.read_charge)
+        return;
+    if (!ctx.read_charge().power_present) {
+        next_rotation_ms_ = 0;
+        return;
+    }
+    const int64_t interval_ms = static_cast<int64_t>(rotation_minutes_) * 60 * 1000;
+    if (next_rotation_ms_ == 0) {
+        next_rotation_ms_ = now_ms + interval_ms;
+        return;
+    }
+    if (now_ms < next_rotation_ms_ || (ctx.sync_busy && ctx.sync_busy()) || ctx.epd->IsRefreshPending())
+        return;
+    next_rotation_ms_ = now_ms + interval_ms;
+    cache::FrameMeta current;
+    const bool compare = display_profile::kFourColor && cache::ReadFrameMeta(gid_, idx_, current);
+    for (int offset = 1; offset < content_count_; ++offset) {
+        const int next = (idx_ + offset) % content_count_;
+        cache::FrameMeta candidate;
+        if (compare && cache::ReadFrameMeta(gid_, next, candidate) &&
+            candidate.image_hash == current.image_hash && candidate.status_bar_text == current.status_bar_text)
+            continue;
+        if (LoadFrame(ctx, next, /*force_full=*/false, AudioBehavior::Silent)) {
+            ESP_LOGI(kTag, "rotate interval_min=%d idx=%d", rotation_minutes_, idx_);
+            break;
+        }
+    }
+}
+
 void FrameScene::NextFrame(SceneContext& ctx) {
     if (content_count_ <= 0) {
         ESP_LOGD(kTag, "next frame ignored reason=empty count=%d", content_count_);
         return;
     }
-    const int old = idx_;
-    idx_          = (idx_ + 1) % content_count_;
-    ESP_LOGD(kTag, "next frame from=%d to=%d count=%d", old, idx_, content_count_);
-    LoadFrame(ctx, idx_, /*force_full*/ false, AudioBehavior::RestartIfAvailable);
+    const int next = (idx_ + 1) % content_count_;
+    ESP_LOGD(kTag, "next frame from=%d to=%d count=%d", idx_, next, content_count_);
+    LoadFrame(ctx, next, /*force_full*/ false, AudioBehavior::RestartIfAvailable);
 }
 
 void FrameScene::PrevFrame(SceneContext& ctx) {
@@ -264,10 +345,9 @@ void FrameScene::PrevFrame(SceneContext& ctx) {
         ESP_LOGD(kTag, "prev frame ignored reason=empty count=%d", content_count_);
         return;
     }
-    const int old = idx_;
-    idx_          = (idx_ - 1 + content_count_) % content_count_;
-    ESP_LOGD(kTag, "prev frame from=%d to=%d count=%d", old, idx_, content_count_);
-    LoadFrame(ctx, idx_, /*force_full*/ false, AudioBehavior::RestartIfAvailable);
+    const int previous = (idx_ - 1 + content_count_) % content_count_;
+    ESP_LOGD(kTag, "prev frame from=%d to=%d count=%d", idx_, previous, content_count_);
+    LoadFrame(ctx, previous, /*force_full*/ false, AudioBehavior::RestartIfAvailable);
 }
 
 void FrameScene::CycleGroup(SceneContext& ctx, bool next) {
@@ -352,34 +432,39 @@ void FrameScene::RebindGroup(SceneContext& ctx, const char* gid, int content_cou
     gid_           = gid ? gid : "";
     content_count_ = content_count > 0 ? content_count : 0;
     idx_           = 0;
+    current_content_id_.clear();
+    next_rotation_ms_ = 0;
     if (ctx.clear_current_frame)
         ctx.clear_current_frame();
     first_loaded_ = false;
 }
 
-void FrameScene::LoadFrame(SceneContext& ctx, int idx, bool force_full, AudioBehavior audio_behavior) {
+bool FrameScene::LoadFrame(SceneContext& ctx, int idx, bool force_full, AudioBehavior audio_behavior) {
     ESP_LOGD(kTag, "load frame begin gid=%s idx=%d count=%d force_full=%d audio=%s", gid_.c_str(), idx, content_count_,
              force_full ? 1 : 0,
              audio_behavior == AudioBehavior::RestartIfAvailable ? "restart_if_available" : "stop_if_unavailable");
     if (gid_.empty() || idx < 0 || content_count_ <= 0 || idx >= content_count_) {
         ESP_LOGW(kTag, "load frame failed reason=invalid_state gid_empty=%d idx=%d count=%d", gid_.empty() ? 1 : 0, idx,
                  content_count_);
-        return;
+        return false;
     }
 
     std::vector<uint8_t> raw;
-    if (!cache::ReadFrameImage(gid_, idx, raw)) {
+    cache::ManifestMeta manifest;
+    cache::ReadManifestMeta(gid_, manifest);
+    if (!cache::ReadFrameImage(gid_, idx, raw) ||
+        (raw.size() != FrameView::kRawBytes && !display_profile::IsGrayFrameSize(raw.size()))) {
         ESP_LOGW(kTag, "load frame failed idx=%d reason=image_miss bytes=%u", idx, static_cast<unsigned>(raw.size()));
         if (ctx.audio)
             ctx.audio->Stop();
-        return;
+        return false;
     }
     cache::FrameMeta meta;
     cache::ReadFrameMeta(gid_, idx, meta);
 
     if (!ctx.epd->Lock(2000)) {
         ESP_LOGW(kTag, "load frame failed idx=%d reason=epd_lock_timeout", idx);
-        return;
+        return false;
     }
     ESP_LOGD(kTag, "lvgl refresh begin scene=frame idx=%d", idx);
     ApplyEmptyState();
@@ -397,7 +482,7 @@ void FrameScene::LoadFrame(SceneContext& ctx, int idx, bool force_full, AudioBeh
         if (!ctx.epd->RequestGray16FullRefresh(raw.data(), raw.size())) {
             ctx.epd->Unlock();
             ESP_LOGW(kTag, "load frame failed idx=%d reason=gray_request_rejected", idx);
-            return;
+            return false;
         }
         ctx.epd->Unlock();
     } else {
@@ -409,11 +494,18 @@ void FrameScene::LoadFrame(SceneContext& ctx, int idx, bool force_full, AudioBeh
         else
             ctx.epd->RequestUrgentPartialRefresh();
     }
+    cache::ManifestMeta latest;
+    if (cache::ReadManifestMeta(gid_, latest) && latest.manifest_version == manifest.manifest_version)
+        power_state::QueueScreenVersion(manifest.manifest_version);
+    idx_ = idx;
+    current_content_id_ = meta.content_id;
     current_gray_ = gray;
     first_loaded_ = true;
     ESP_LOGD(kTag, "load frame refresh idx=%d full=%d gray=%d", idx, full ? 1 : 0, gray ? 1 : 0);
 
-    if (ctx.audio) {
+    if (ctx.audio && audio_behavior == AudioBehavior::Silent) {
+        ctx.audio->Stop();
+    } else if (ctx.audio) {
         std::vector<uint8_t> pcm;
         if (!meta.audio_hash.empty() && cache::ReadFrameAudio(gid_, idx, pcm) && !pcm.empty()) {
             if (audio_behavior == AudioBehavior::RestartIfAvailable) {
@@ -428,6 +520,7 @@ void FrameScene::LoadFrame(SceneContext& ctx, int idx, bool force_full, AudioBeh
 
     if (ctx.set_current_frame_from_meta)
         ctx.set_current_frame_from_meta(idx, meta);
+    return true;
 }
 
 void FrameScene::ApplyEmptyState() {

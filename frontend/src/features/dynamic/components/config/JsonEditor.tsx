@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { fieldBaseCls } from '@/components/ui/styles/form';
 import { cn } from '@/lib/cn';
 
@@ -16,12 +17,19 @@ export function JsonEditor({
   onChange?: (value: string) => void;
   readOnly?: boolean;
 }) {
+  const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    input.current?.setCustomValidity(readOnly ? '' : (error ?? ''));
+  }, [error, readOnly]);
+
   return (
     <label className="block">
       <span className="block font-mono text-[10px] text-stone uppercase tracking-[0.18em] mb-1.5">
         {label}
       </span>
       <textarea
+        ref={input}
+        aria-invalid={!!error}
         className={cn(
           fieldBaseCls,
           'block w-full resize-y font-mono text-[11px] leading-relaxed px-2 py-2 !border !border-ink bg-cream/30'

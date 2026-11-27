@@ -31,7 +31,7 @@ class MenuList {
 
     static constexpr int kVisibleRows = 6;
 
-    MenuList(lv_obj_t* parent, std::vector<Item> items, int initial_cursor = 0);
+    MenuList(lv_obj_t* parent, std::vector<Item> items, int initial_cursor = 0, const char* footer = nullptr);
 
     // 返回 true 表示视口发生了滚动(调用方应走 full refresh 而非 partial)。
     bool OnUp();
@@ -52,6 +52,7 @@ class MenuList {
     bool EnsureCursorVisible();
 
     std::vector<Item>      items_;
+    const int              visible_rows_;
     int                    cursor_       = 0;
     int                    viewport_top_ = 0;
     lv_obj_t*              root_         = nullptr;

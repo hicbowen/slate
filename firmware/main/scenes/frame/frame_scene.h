@@ -21,6 +21,7 @@ class FrameScene : public Scene {
     void      OnEnter(SceneContext& ctx) override;
     void      OnExit(SceneContext& ctx) override;
     void      OnEvent(SceneContext& ctx, const UiEvent& e) override;
+    void      OnTick(SceneContext& ctx, int64_t now_ms) override;
     lv_obj_t* Root() override {
         return root_;
     }
@@ -29,9 +30,11 @@ class FrameScene : public Scene {
     enum class AudioBehavior {
         RestartIfAvailable,
         StopIfUnavailable,
+        Silent,
     };
 
-    void LoadFrame(SceneContext& ctx, int idx, bool force_full, AudioBehavior audio_behavior);
+    bool LoadFrame(SceneContext& ctx, int idx, bool force_full, AudioBehavior audio_behavior);
+    void ReadRotationSettings();
     void NextFrame(SceneContext& ctx);
     void PrevFrame(SceneContext& ctx);
     void CycleGroup(SceneContext& ctx, bool next);
@@ -49,7 +52,12 @@ class FrameScene : public Scene {
     bool        current_gray_            = false;
     bool        first_loaded_            = false;
     bool        first_load_full_refresh_ = true;
+    int         rotation_minutes_       = 0;
+    int64_t     next_rotation_ms_       = 0;
     std::string cached_status_bar_text_;
+    std::string current_content_id_;
+    std::string directory_group_;
+    std::string directory_content_;
 
     lv_obj_t*                  root_        = nullptr;
     lv_obj_t*                  empty_label_ = nullptr;

@@ -1,4 +1,10 @@
-import { DEFAULT_TTS_VOICE, catalog, type DynamicConfig, type DynamicType } from '@/api';
+import {
+  CountdownLayoutEditorial,
+  DEFAULT_TTS_VOICE,
+  catalog,
+  type DynamicConfig,
+  type DynamicType,
+} from '@/api';
 
 const LOCAL_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
@@ -9,7 +15,15 @@ export function defaultConfig(type: DynamicType): DynamicConfig {
     case 'month_calendar':
       return { type, tz: LOCAL_TIME_ZONE, ...audio };
     case 'countdown':
-      return { type, tz: LOCAL_TIME_ZONE, goal: '', targetDate: '' };
+      return {
+        type,
+        tz: LOCAL_TIME_ZONE,
+        goal: '',
+        targetDate: '',
+        countdownLayout: CountdownLayoutEditorial,
+      };
+    case 'message_board':
+      return { type, message: '' };
     case 'weather':
       return {
         type,

@@ -1,13 +1,21 @@
-import { useCallback } from 'react';
-import { catalog, systemTemplate, type DashboardTemplate, type DynamicConfig } from '@/api';
+import { useCallback, useState } from 'react';
+import {
+  catalog,
+  systemTemplate,
+  type ContentDynamic,
+  type DashboardTemplate,
+  type DynamicConfig,
+} from '@/api';
 import {
   DASHBOARD_CUSTOM_STARTER_SAMPLE_DATA,
   DASHBOARD_SYSTEM_TEMPLATE_SAMPLE_DATA,
 } from '@/features/dynamic/model/dashboard-samples';
 import { Select, SelectItem } from '@/components/ui/Select';
+import { Button } from '@/components/ui/Button';
 import { JsonEditor } from './JsonEditor';
 import { DynamicRefreshSettings } from './RefreshSettings';
 import { DashboardPushPanel } from './DashboardPushPanel';
+import { DashboardLayoutEditor } from './DashboardLayoutEditor';
 import { parseDashboardTemplate, parseJsonRecord } from '@/features/dynamic/model/json-parse';
 import type { DynamicConfigChange } from '@/features/dynamic/model/config-types';
 import { useJsonDraftWithEcho } from '@/features/dynamic/hooks/useJsonDraftWithEcho';
@@ -22,6 +30,7 @@ export function DashboardConfigPanel({
   onDashboardDataChange,
   dataLabel = onDashboardDataChange ? '初始数据 JSON' : '当前数据 JSON',
   contentId,
+  pushAuth,
 }: {
   config: DynamicConfig;
   onChange: DynamicConfigChange;
@@ -29,8 +38,10 @@ export function DashboardConfigPanel({
   onDashboardDataChange?: (data: Record<string, unknown>) => void;
   dataLabel?: string;
   contentId?: string;
+  pushAuth?: ContentDynamic['pushAuth'];
 }) {
   const ref = config.template;
+  const [editJson, setEditJson] = useState(false);
   const templateSelection =
     ref?.kind === 'system' && ref.id ? ref.id : CUSTOM_DASHBOARD_TEMPLATE_VALUE;
   const customTemplate = ref?.kind === 'custom' ? (ref.template ?? null) : null;
@@ -108,13 +119,42 @@ export function DashboardConfigPanel({
       <DynamicRefreshSettings config={config} onChange={onChange} />
 
       {templateSelection === CUSTOM_DASHBOARD_TEMPLATE_VALUE && (
-        <JsonEditor
-          label="自定义模板 JSON"
-          value={templateDraft.text}
-          error={templateDraft.error}
-          minRows={8}
-          onChange={templateDraft.updateDraft}
-        />
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2" role="group" aria-label="模板编辑方式">
+            <Button
+              size="sm"
+              aria-pressed={!editJson}
+              variant={editJson ? 'soft' : 'primary'}
+              disabled={!!templateDraft.error}
+              onClick={() => setEditJson(false)}
+            >
+              区块编辑
+            </Button>
+            <Button
+              size="sm"
+              aria-pressed={editJson}
+              variant={editJson ? 'primary' : 'soft'}
+              onClick={() => setEditJson(true)}
+            >
+              JSON
+            </Button>
+          </div>
+          {editJson ? (
+            <JsonEditor
+              label="自定义模板 JSON"
+              value={templateDraft.text}
+              error={templateDraft.error}
+              minRows={8}
+              onChange={templateDraft.updateDraft}
+            />
+          ) : (
+            <DashboardLayoutEditor
+              template={customTemplate ?? catalog.dashboardStarter}
+              data={dashboardData}
+              onChange={updateCustomTemplate}
+            />
+          )}
+        </div>
       )}
 
       <JsonEditor
@@ -126,7 +166,14 @@ export function DashboardConfigPanel({
         readOnly={!onDashboardDataChange}
       />
 
-      {contentId && <DashboardPushPanel contentId={contentId} data={dashboardData} />}
+      {contentId && pushAuth && (
+        <DashboardPushPanel
+          key={contentId}
+          contentId={contentId}
+          auth={pushAuth}
+          data={dashboardData}
+        />
+      )}
     </div>
   );
 }

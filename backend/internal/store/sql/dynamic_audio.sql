@@ -1,6 +1,12 @@
 -- name: CreateDynamic :exec
-INSERT INTO content_dynamic (content_id, type, config, data, next_run_at, refresh_due_at)
-VALUES ($1, $2, $3, $4, now(), now());
+INSERT INTO content_dynamic (content_id, type, config, data, next_run_at, refresh_due_at, push_token_hash)
+VALUES ($1, $2, $3, $4, now(), now(), $5);
+
+-- name: RotateDashboardPushToken :execrows
+UPDATE content_dynamic d SET push_token_hash = sqlc.arg(token_hash)
+FROM contents c JOIN groups g ON g.id = c.group_id
+WHERE d.content_id = c.id AND c.id = sqlc.arg(content_id) AND g.owner_id = sqlc.arg(owner_id)
+    AND d.type = 'dashboard';
 
 -- name: GetDynamic :one
 SELECT * FROM content_dynamic WHERE content_id = $1;

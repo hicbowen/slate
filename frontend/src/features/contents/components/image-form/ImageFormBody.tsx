@@ -1,17 +1,20 @@
-import { DisplayModeGray, DisplayModeMono, type AudioStatus } from '@/api';
-import { useState, type ReactNode } from 'react';
+import { DisplayModeGray, type AudioStatus } from '@/api';
+import { useRef, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { useBlob } from '@/features/contents/query/content-image-queries';
-import { FramePreviewFormat } from '@/components/eink/FramePreviewFormat';
-import { Button } from '@/components/ui/Button';
-import type { ImageFrameFormat } from '@/lib/eink/image-preview';
+import { MobilePreviewDock } from '@/components/eink/MobilePreviewDock';
 import { Input } from '@/components/ui/Input';
 import { FormSection } from '@/components/ui/FormSection';
-import { cn } from '@/lib/cn';
+import { Select, SelectItem } from '@/components/ui/Select';
+import { appRoutes } from '@/app/routes';
+import { IMAGE_RENDER_PRESET_INFO, type ImageRenderPreset } from '@/lib/eink/render-preset';
+import type { useImageContentForm } from '@/features/contents/hooks/useImageContentForm';
 import { DitherControls } from './DitherControls';
 import { ImageAudioBlock } from './ImageAudioBlock';
+import { ImageCropControls } from './ImageCropControls';
 import { ImageDropzone } from './ImageDropzone';
-import { PreviewCanvas } from './PreviewCanvas';
-import type { useImageContentForm } from '@/features/contents/hooks/useImageContentForm';
+import { ImagePreviewDeviceControls, type PreviewDevice } from './ImagePreviewDeviceControls';
+import { PreviewCanvas, type PreviewCanvasProps } from './PreviewCanvas';
 
 interface ImageFormBodyProps {
   gid: string;
@@ -24,10 +27,6 @@ interface ImageFormBodyProps {
   editingContentId?: string | null;
   audioStatus?: AudioStatus | null;
   audioError?: string | null;
-  frameNamePlaceholder?: string;
-  frameNameAutoFocus?: boolean;
-  gridClassName?: string;
-  beforeFields?: ReactNode;
   actions: ReactNode;
 }
 
@@ -42,149 +41,195 @@ export function ImageFormBody({
   editingContentId = null,
   audioStatus,
   audioError,
-  frameNamePlaceholder = '如：挖掘机',
-  frameNameAutoFocus,
-  gridClassName,
-  beforeFields,
   actions,
 }: ImageFormBodyProps) {
-  const [format, setFormat] = useState<ImageFrameFormat>(
-    form.displayMode === DisplayModeGray ? 'gray4' : 'mono1'
-  );
-  const canRender = !!(form.image.file || form.image.sourceFile);
-  const grayAvailable = canRender || !!grayImageHash;
-  const colorAvailable = canRender || !!colorImageHash;
-  const previewFormat =
-    (format === 'gray4' && !grayAvailable) || (format === 'bwry2' && !colorAvailable)
-      ? 'mono1'
-      : format;
-  const savedHash = { mono1: imageHash, gray4: grayImageHash, bwry2: colorImageHash }[
-    previewFormat
-  ];
+  const [device, setDevice] = useState<PreviewDevice>('note4');
+  const previewRef = useRef<HTMLDivElement>(null);
+  const image = form.image.file ?? form.image.sourceFile;
+  const grayAvailable = !!(image || grayImageHash);
+  const colorAvailable = !!(image || colorImageHash);
+  const showingColor = device === 'note4c' && colorAvailable;
+  const format = showingColor
+    ? 'bwry2'
+    : form.displayMode === DisplayModeGray && grayAvailable
+      ? 'gray4'
+      : 'mono1';
+  const savedHash = { mono1: imageHash, gray4: grayImageHash, bwry2: colorImageHash }[format];
   const saved = useBlob(form.image.renderFile ? null : savedHash);
+  const preview: PreviewCanvasProps = {
+    imageFile: image,
+    preferExistingImage: !!savedHash && !!form.image.sourceFile && !form.image.renderFile,
+    existingImage: saved.data,
+    existingImagePending: !!savedHash && !form.image.renderFile && saved.isPending,
+    format,
+    renderPreset: form.dither.renderPreset,
+    threshold: form.dither.threshold,
+    mode: form.dither.mode,
+    scale: form.crop.scale,
+    fit: form.crop.fit,
+    offset: form.crop.offset,
+    onOffsetChange: form.crop.setOffset,
+    statusCaption: form.frameName.trim() || null,
+  };
+  const audioConfigured =
+    hasExistingAudio || !!audioStatus || !!form.audio.file || !!form.audio.ttsText;
+
   return (
-    <div
-      className={cn('grid grid-cols-1 gap-6 lg:gap-8', gridClassName ?? 'lg:grid-cols-[1.3fr_1fr]')}
-    >
-      <div className="order-2 min-w-0 lg:order-1">
-        <FramePreviewFormat
-          format={previewFormat}
-          onChange={setFormat}
-          allowGray
-          grayAvailable={grayAvailable}
-          colorAvailable={colorAvailable}
+    <>
+      <div className="mb-5 space-y-2">
+        <ImageDropzone
+          isEdit={isEdit}
+          imageFile={form.image.file}
+          onPick={form.image.onPick}
+          pending={form.image.pending}
+          error={form.image.error}
         />
-        <PreviewCanvas
-          canvasRef={form.image.previewRef}
-          imageFile={form.image.file ?? form.image.sourceFile}
-          preferExistingImage={!!savedHash && !!form.image.sourceFile && !form.image.renderFile}
-          existingImage={saved.data}
-          existingImagePending={!!savedHash && !form.image.renderFile && saved.isPending}
-          format={previewFormat}
-          renderPreset={form.dither.renderPreset}
-          threshold={form.dither.threshold}
-          mode={form.dither.mode}
-          scale={form.crop.scale}
-          offset={form.crop.offset}
-          onOffsetChange={form.crop.setOffset}
-          statusCaption={form.frameName.trim() || null}
-        />
-      </div>
-
-      <div className="order-1 min-w-0 lg:order-2 lg:mt-7 space-y-6">
-        {beforeFields}
-
-        <FormSection label="帧名称（选填，最多 64 字）">
-          <Input
-            type="text"
-            maxLength={64}
-            value={form.frameName}
-            onChange={(event) => form.setFrameName(event.target.value)}
-            placeholder={frameNamePlaceholder}
-            autoFocus={frameNameAutoFocus}
-          />
-        </FormSection>
-
-        <FormSection
-          label="Note4 上屏方式"
-          hint={grayAvailable ? '16 灰使用全刷，适合照片。' : '上传原图可生成 16 灰帧。'}
-        >
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Note4 上屏方式">
-            <Button
-              size="sm"
-              variant={form.displayMode === DisplayModeMono ? 'primary' : 'soft'}
-              aria-pressed={form.displayMode === DisplayModeMono}
-              onClick={() => {
-                form.setDisplayMode(DisplayModeMono);
-                setFormat('mono1');
-              }}
-            >
-              黑白 · 快速
-            </Button>
-            <Button
-              size="sm"
-              variant={form.displayMode === DisplayModeGray ? 'primary' : 'soft'}
-              disabled={!grayAvailable}
-              aria-pressed={form.displayMode === DisplayModeGray}
-              onClick={() => {
-                form.setDisplayMode(DisplayModeGray);
-                setFormat('gray4');
-              }}
-            >
-              16 灰 · 照片
-            </Button>
-          </div>
-        </FormSection>
-
-        <FormSection
-          label="类型参数"
-          hint={
-            form.image.sourceError
-              ? '可编辑源图加载失败，仍可更换图片。'
-              : form.image.sourceFile
-                ? '可用已保存的源图重新调整渲染。'
-                : undefined
-          }
-        >
-          <div className="space-y-4">
-            <ImageDropzone isEdit={isEdit} imageFile={form.image.file} onPick={form.image.onPick} />
-            <DitherControls
-              format={previewFormat}
-              renderPreset={form.dither.renderPreset}
-              onImageRenderPresetChange={form.dither.setImageRenderPreset}
-              mode={form.dither.mode}
-              onModeChange={form.dither.setMode}
-              threshold={form.dither.threshold}
-              onThresholdChange={form.dither.setThreshold}
-              disabled={isEdit && !canRender}
-              hasImage={canRender}
-              scale={form.crop.scale}
-              onScaleChange={form.crop.setScale}
-              onResetCrop={form.crop.reset}
+        {!isEdit && (
+          <Link
+            to={appRoutes.batchImages(gid)}
+            className="text-[12px] text-stone underline underline-offset-4"
+          >
+            批量导入照片
+          </Link>
+        )}
+        {form.image.sourceError && (
+          <p className="text-[12px] text-clay">可编辑图片加载失败，仍可更换图片。</p>
+        )}
+        {(form.image.file || form.image.hadOriginal) && (
+          <label className="flex items-start gap-2 text-[12px] text-stone">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-ink"
+              checked={form.image.keepOriginal}
+              disabled={!form.image.canRetainOriginal}
+              onChange={(event) => form.image.setKeepOriginal(event.target.checked)}
             />
-          </div>
-        </FormSection>
-
-        <FormSection label="音频">
-          <ImageAudioBlock
-            gid={gid}
-            mode={form.audio.mode}
-            onModeChange={form.audio.setMode}
-            audioFile={form.audio.file}
-            onAudioFileChange={form.audio.setFile}
-            ttsText={form.audio.ttsText}
-            onTtsTextChange={form.audio.setTtsText}
-            ttsVoice={form.audio.ttsVoice}
-            onTtsVoiceChange={form.audio.setTtsVoice}
-            hasExistingAudio={hasExistingAudio}
-            editingContentId={editingContentId}
-            audioStatus={audioStatus}
-            audioError={audioError}
-          />
-        </FormSection>
-
-        {actions}
+            <span>
+              <span className="block text-ink">保留原图</span>
+              {form.image.canRetainOriginal
+                ? '原图保存在服务端，以后可重新裁剪。单张上限 12 MB。'
+                : '只保留裁剪后的图片。可保留的原图须为 PNG、JPG、WebP、GIF 或 BMP，且不超过 12 MB。'}
+            </span>
+          </label>
+        )}
+        {isEdit && !form.image.file && !form.image.hadOriginal && (
+          <p className="text-[12px] text-stone">如需重取裁剪范围，请重新选择原图。</p>
+        )}
       </div>
-    </div>
+
+      {image || imageHash ? (
+        <div className="lg:grid lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start lg:gap-8">
+          <div ref={previewRef} className="min-w-0 lg:sticky lg:top-4">
+            <div className="space-y-2">
+              <ImagePreviewDeviceControls
+                device={showingColor ? 'note4c' : 'note4'}
+                onDeviceChange={setDevice}
+                displayMode={form.displayMode}
+                onDisplayModeChange={form.setDisplayMode}
+                grayAvailable={grayAvailable}
+                colorAvailable={colorAvailable}
+              />
+              <div className="lg:max-w-[calc((100dvh_-_21rem)*1.33333)]">
+                <PreviewCanvas {...preview} interactive={!!image} />
+              </div>
+            </div>
+            {image && (
+              <ImageCropControls
+                fit={form.crop.fit}
+                scale={form.crop.scale}
+                onFitChange={(next) => {
+                  if (next === form.crop.fit) return;
+                  form.crop.setFit(next);
+                  form.crop.reset();
+                }}
+                onScaleChange={form.crop.setScale}
+                onReset={form.crop.reset}
+              />
+            )}
+          </div>
+
+          <MobilePreviewDock
+            previewRef={previewRef}
+            preview={<PreviewCanvas {...preview} interactive={false} />}
+          />
+
+          <div className="mt-6 min-w-0 space-y-5 lg:mt-0">
+            <Input
+              label="帧名称（选填）"
+              maxLength={64}
+              value={form.frameName}
+              onChange={(event) => form.setFrameName(event.target.value)}
+              placeholder={form.image.file?.name.replace(/\.[^.]+$/, '') || '填写状态栏标题'}
+            />
+            {image && (
+              <>
+                <FormSection
+                  label="图片风格"
+                  hint={
+                    format === 'mono1' && form.dither.mode !== 'preset'
+                      ? '当前黑白预览使用手动抖动。图片风格用于 16 灰和四色。'
+                      : undefined
+                  }
+                >
+                  <Select
+                    aria-label="图片风格"
+                    value={form.dither.renderPreset}
+                    onValueChange={(value) =>
+                      form.dither.setImageRenderPreset(value as ImageRenderPreset)
+                    }
+                  >
+                    {Object.entries(IMAGE_RENDER_PRESET_INFO).map(([value, { label, hint }]) => (
+                      <SelectItem key={value} value={value} hint={hint}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </Select>
+                </FormSection>
+                <details className="border-y border-line py-3">
+                  <summary className="cursor-pointer text-[13px] text-ink">高级设置</summary>
+                  <div className="mt-4">
+                    {format === 'mono1' ? (
+                      <DitherControls
+                        mode={form.dither.mode}
+                        onModeChange={form.dither.setMode}
+                        threshold={form.dither.threshold}
+                        onThresholdChange={form.dither.setThreshold}
+                      />
+                    ) : (
+                      <p className="text-[12px] text-stone">切换到 Note4 黑白可调整抖动和阈值。</p>
+                    )}
+                  </div>
+                </details>
+              </>
+            )}
+            <details className="border-b border-line pb-3" open={audioConfigured || undefined}>
+              <summary className="cursor-pointer text-[13px] text-ink">
+                {audioConfigured ? '音频' : '添加音频'}
+              </summary>
+              <div className="mt-4">
+                <ImageAudioBlock
+                  gid={gid}
+                  mode={form.audio.mode}
+                  onModeChange={form.audio.setMode}
+                  audioFile={form.audio.file}
+                  onAudioFileChange={form.audio.setFile}
+                  ttsText={form.audio.ttsText}
+                  onTtsTextChange={form.audio.setTtsText}
+                  ttsVoice={form.audio.ttsVoice}
+                  onTtsVoiceChange={form.audio.setTtsVoice}
+                  hasExistingAudio={hasExistingAudio}
+                  editingContentId={editingContentId}
+                  audioStatus={audioStatus}
+                  audioError={audioError}
+                />
+              </div>
+            </details>
+            {actions}
+          </div>
+        </div>
+      ) : (
+        actions
+      )}
+    </>
   );
 }

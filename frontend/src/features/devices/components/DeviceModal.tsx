@@ -11,7 +11,7 @@
 import { useCallback } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type { Device } from '@/api';
-import { usePatchDevice } from '@/features/devices/query/device-queries';
+import { useDeviceDetail, usePatchDevice } from '@/features/devices/query/device-queries';
 import { useGroups } from '@/features/groups/query/group-queries';
 import { useToast } from '@/components/feedback/toast-context';
 import { useInlineRename } from '@/hooks/useInlineRename';
@@ -33,6 +33,7 @@ interface DeviceModalProps {
 
 export function DeviceModal({ open, onOpenChange, device }: DeviceModalProps) {
   const groups = useGroups();
+  const detail = useDeviceDetail(device.id, open);
   const patch = usePatchDevice(device.id);
   const toast = useToast();
   const onUnbindSuccess = useCallback(() => onOpenChange(false), [onOpenChange]);
@@ -98,7 +99,11 @@ export function DeviceModal({ open, onOpenChange, device }: DeviceModalProps) {
               onChange={changeGroup}
               disabled={patch.isPending}
             />
-            <DeviceStatusGrid device={device} online={online} lastSeenAgo={lastSeenAgo} />
+            <DeviceStatusGrid
+              device={detail.data ?? device}
+              online={online}
+              lastSeenAgo={lastSeenAgo}
+            />
             <DeviceDangerZone pending={unbindPending} onUnbind={unbindWithConfirm} />
           </div>
         </Dialog.Content>

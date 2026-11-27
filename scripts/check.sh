@@ -37,7 +37,10 @@ frontend() {
 case "${1:-all}" in
   backend) backend ;;
   frontend) frontend ;;
-  all) backend && frontend ;;
+  all)
+    backend
+    frontend
+    ;;
   *)
     echo "usage: $0 [backend|frontend]" >&2
     exit 2

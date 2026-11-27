@@ -34,9 +34,12 @@ func (e *Engine) fetchData(ctx context.Context, cfg api.DynamicConfig, lastData 
 		}
 		today := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
 		// Compute calendar days in UTC to avoid daylight-saving transitions and Duration overflow.
-		days := max(0, (target.Unix()-today.Unix())/86400)
-		return render.CountdownData{RemainingDays: days}, nil
-	case api.DynamicTypeFontTest:
+		days := (target.Unix() - today.Unix()) / 86400
+		if cfg.CountdownMode == api.CountdownModeUp {
+			return render.CountdownData{DayNumber: max(0, 1-days)}, nil
+		}
+		return render.CountdownData{RemainingDays: max(0, days)}, nil
+	case api.DynamicTypeFontTest, api.DynamicTypeMessageBoard:
 		return nil, nil
 	case api.DynamicTypeDashboard:
 		if ValidateDashboardData(lastData) != nil {

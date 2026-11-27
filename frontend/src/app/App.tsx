@@ -18,6 +18,9 @@ const GroupDetailPage = lazy(() =>
 const ContentNewPage = lazy(() =>
   import('@/pages/contents/ContentNewPage').then((module) => ({ default: module.ContentNewPage }))
 );
+const BatchImagesPage = lazy(() =>
+  import('@/pages/contents/BatchImagesPage').then((module) => ({ default: module.BatchImagesPage }))
+);
 const ImageContentEditorPage = lazy(() =>
   import('@/pages/contents/ImageContentEditorPage').then((module) => ({
     default: module.ImageContentEditorPage,
@@ -58,6 +61,7 @@ export function App() {
             <Route path={routePaths.deviceDetail} element={<DashboardPage />} />
             <Route path={routePaths.groupDetail} element={<GroupDetailPage />} />
             <Route path={routePaths.contentNew} element={<ContentNewPage />} />
+            <Route path={routePaths.batchImages} element={<BatchImagesPage />} />
             <Route path={routePaths.imageContentEdit} element={<ImageContentEditorPage />} />
             <Route path={routePaths.dynamicContentEdit} element={<DynamicContentEditorPage />} />
           </Route>

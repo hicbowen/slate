@@ -36,7 +36,7 @@ const blobVisibleToUser = `-- name: BlobVisibleToUser :one
 SELECT EXISTS (
     SELECT 1 FROM contents c JOIN groups g ON g.id = c.group_id
     LEFT JOIN content_audio a ON a.content_id = c.id
-    WHERE g.owner_id = $1 AND (c.image_hash = $2 OR c.color_image_hash = $2 OR c.gray_image_hash = $2 OR c.image_source_hash = $2 OR a.hash = $2)
+    WHERE g.owner_id = $1 AND (c.image_hash = $2 OR c.color_image_hash = $2 OR c.gray_image_hash = $2 OR c.image_source_hash = $2 OR c.image_original_hash = $2 OR a.hash = $2)
 )
 `
 
@@ -50,6 +50,16 @@ func (q *Queries) BlobVisibleToUser(ctx context.Context, arg BlobVisibleToUserPa
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const clearContentImageOriginal = `-- name: ClearContentImageOriginal :exec
+UPDATE contents SET image_original_hash = NULL, image_crop = NULL, updated_at = now()
+WHERE id = $1 AND kind = 'image'
+`
+
+func (q *Queries) ClearContentImageOriginal(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, clearContentImageOriginal, id)
+	return err
 }
 
 const compactContentSortOrders = `-- name: CompactContentSortOrders :exec
@@ -75,8 +85,8 @@ func (q *Queries) CountGroups(ctx context.Context, ownerID string) (int32, error
 }
 
 const createContent = `-- name: CreateContent :exec
-INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, gray_image_hash, display_mode, image_source_hash, image_render_preset)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::text, 'mono1'), $10, COALESCE($11::text, 'auto'))
+INSERT INTO contents (id, group_id, sort_order, kind, frame_name, image_hash, color_image_hash, gray_image_hash, display_mode, image_source_hash, image_render_preset, image_original_hash, image_crop)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::text, 'mono1'), $10, COALESCE($11::text, 'auto'), $12, $13)
 `
 
 type CreateContentParams struct {
@@ -91,6 +101,8 @@ type CreateContentParams struct {
 	DisplayMode       *string
 	ImageSourceHash   *string
 	ImageRenderPreset *string
+	ImageOriginalHash *string
+	ImageCrop         json.RawMessage
 }
 
 func (q *Queries) CreateContent(ctx context.Context, arg CreateContentParams) error {
@@ -106,12 +118,14 @@ func (q *Queries) CreateContent(ctx context.Context, arg CreateContentParams) er
 		arg.DisplayMode,
 		arg.ImageSourceHash,
 		arg.ImageRenderPreset,
+		arg.ImageOriginalHash,
+		arg.ImageCrop,
 	)
 	return err
 }
 
 const createGroup = `-- name: CreateGroup :one
-INSERT INTO groups (id, owner_id, name, sort_order) VALUES ($1, $2, $3, $4) RETURNING id, owner_id, name, sort_order, created_at, updated_at
+INSERT INTO groups (id, owner_id, name, sort_order) VALUES ($1, $2, $3, $4) RETURNING id, owner_id, name, sort_order, created_at, updated_at, rotation_minutes
 `
 
 type CreateGroupParams struct {
@@ -136,6 +150,7 @@ func (q *Queries) CreateGroup(ctx context.Context, arg CreateGroupParams) (Group
 		&i.SortOrder,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RotationMinutes,
 	)
 	return i, err
 }
@@ -171,9 +186,9 @@ func (q *Queries) FirstGroupID(ctx context.Context, ownerID string) (string, err
 
 const getContent = `-- name: GetContent :one
 SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash, c.gray_image_hash, c.display_mode,
-       c.image_source_hash, c.image_render_preset,
+       c.image_source_hash, c.image_render_preset, c.image_original_hash, c.image_crop,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
-       d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
+       d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error, d.push_token_hash,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
        a.text AS audio_text, a.hash AS audio_hash, a.size AS audio_size,
        a.last_error AS audio_error, a.updated_at AS audio_updated_at,
@@ -197,6 +212,8 @@ type GetContentRow struct {
 	DisplayMode       string
 	ImageSourceHash   *string
 	ImageRenderPreset string
+	ImageOriginalHash *string
+	ImageCrop         json.RawMessage
 	DynamicType       *string
 	DynamicConfig     json.RawMessage
 	DynamicData       json.RawMessage
@@ -204,6 +221,7 @@ type GetContentRow struct {
 	NextRunAt         *time.Time
 	RefreshDueAt      *time.Time
 	DynamicError      *string
+	PushTokenHash     *string
 	AudioSource       *AudioSource
 	AudioStatus       *AudioStatus
 	AudioVoice        *string
@@ -230,6 +248,8 @@ func (q *Queries) GetContent(ctx context.Context, id string) (GetContentRow, err
 		&i.DisplayMode,
 		&i.ImageSourceHash,
 		&i.ImageRenderPreset,
+		&i.ImageOriginalHash,
+		&i.ImageCrop,
 		&i.DynamicType,
 		&i.DynamicConfig,
 		&i.DynamicData,
@@ -237,6 +257,7 @@ func (q *Queries) GetContent(ctx context.Context, id string) (GetContentRow, err
 		&i.NextRunAt,
 		&i.RefreshDueAt,
 		&i.DynamicError,
+		&i.PushTokenHash,
 		&i.AudioSource,
 		&i.AudioStatus,
 		&i.AudioVoice,
@@ -251,7 +272,7 @@ func (q *Queries) GetContent(ctx context.Context, id string) (GetContentRow, err
 }
 
 const getGroup = `-- name: GetGroup :one
-SELECT id, owner_id, name, sort_order, created_at, updated_at FROM groups WHERE id = $1
+SELECT id, owner_id, name, sort_order, created_at, updated_at, rotation_minutes FROM groups WHERE id = $1
 `
 
 func (q *Queries) GetGroup(ctx context.Context, id string) (Group, error) {
@@ -264,6 +285,7 @@ func (q *Queries) GetGroup(ctx context.Context, id string) (Group, error) {
 		&i.SortOrder,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RotationMinutes,
 	)
 	return i, err
 }
@@ -294,9 +316,9 @@ func (q *Queries) ListContentIDs(ctx context.Context, groupID string) ([]string,
 
 const listContents = `-- name: ListContents :many
 SELECT c.id, c.group_id, c.sort_order, c.kind, c.frame_name, c.image_hash, c.color_image_hash, c.gray_image_hash, c.display_mode,
-       c.image_source_hash, c.image_render_preset,
+       c.image_source_hash, c.image_render_preset, c.image_original_hash, c.image_crop,
        d.type AS dynamic_type, d.config AS dynamic_config, d.data AS dynamic_data,
-       d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error,
+       d.rendered_at, d.next_run_at, d.refresh_due_at, d.last_error AS dynamic_error, d.push_token_hash,
        a.source AS audio_source, a.status AS audio_status, a.voice AS audio_voice,
        a.text AS audio_text, a.hash AS audio_hash, a.size AS audio_size,
        a.last_error AS audio_error, a.updated_at AS audio_updated_at
@@ -319,6 +341,8 @@ type ListContentsRow struct {
 	DisplayMode       string
 	ImageSourceHash   *string
 	ImageRenderPreset string
+	ImageOriginalHash *string
+	ImageCrop         json.RawMessage
 	DynamicType       *string
 	DynamicConfig     json.RawMessage
 	DynamicData       json.RawMessage
@@ -326,6 +350,7 @@ type ListContentsRow struct {
 	NextRunAt         *time.Time
 	RefreshDueAt      *time.Time
 	DynamicError      *string
+	PushTokenHash     *string
 	AudioSource       *AudioSource
 	AudioStatus       *AudioStatus
 	AudioVoice        *string
@@ -357,6 +382,8 @@ func (q *Queries) ListContents(ctx context.Context, groupID string) ([]ListConte
 			&i.DisplayMode,
 			&i.ImageSourceHash,
 			&i.ImageRenderPreset,
+			&i.ImageOriginalHash,
+			&i.ImageCrop,
 			&i.DynamicType,
 			&i.DynamicConfig,
 			&i.DynamicData,
@@ -364,6 +391,7 @@ func (q *Queries) ListContents(ctx context.Context, groupID string) ([]ListConte
 			&i.NextRunAt,
 			&i.RefreshDueAt,
 			&i.DynamicError,
+			&i.PushTokenHash,
 			&i.AudioSource,
 			&i.AudioStatus,
 			&i.AudioVoice,
@@ -408,9 +436,11 @@ func (q *Queries) ListGroupIDs(ctx context.Context, ownerID string) ([]string, e
 }
 
 const listGroups = `-- name: ListGroups :many
-SELECT g.id, g.name, g.sort_order,
+SELECT g.id, g.name, g.sort_order, g.rotation_minutes,
        COUNT(c.id)::int AS content_count,
-       (COUNT(c.id) * 15000 + COALESCE(SUM(a.size), 0))::bigint AS total_bytes
+       COUNT(c.gray_image_hash) FILTER (WHERE c.display_mode = 'gray16') AS gray_count,
+       COUNT(c.color_image_hash) AS color_count,
+       COALESCE(SUM(a.size) FILTER (WHERE a.status = 'ready' AND a.hash IS NOT NULL), 0)::bigint AS audio_bytes
 FROM groups g
 LEFT JOIN contents c ON c.group_id = g.id
 LEFT JOIN content_audio a ON a.content_id = c.id
@@ -420,11 +450,14 @@ ORDER BY g.sort_order, g.created_at
 `
 
 type ListGroupsRow struct {
-	ID           string
-	Name         string
-	SortOrder    int32
-	ContentCount int32
-	TotalBytes   int64
+	ID              string
+	Name            string
+	SortOrder       int32
+	RotationMinutes int16
+	ContentCount    int32
+	GrayCount       int64
+	ColorCount      int64
+	AudioBytes      int64
 }
 
 func (q *Queries) ListGroups(ctx context.Context, ownerID string) ([]ListGroupsRow, error) {
@@ -440,8 +473,11 @@ func (q *Queries) ListGroups(ctx context.Context, ownerID string) ([]ListGroupsR
 			&i.ID,
 			&i.Name,
 			&i.SortOrder,
+			&i.RotationMinutes,
 			&i.ContentCount,
-			&i.TotalBytes,
+			&i.GrayCount,
+			&i.ColorCount,
+			&i.AudioBytes,
 		); err != nil {
 			return nil, err
 		}
@@ -495,6 +531,8 @@ SELECT gray_image_hash::text FROM contents WHERE gray_image_hash IS NOT NULL
 UNION
 SELECT image_source_hash::text FROM contents WHERE image_source_hash IS NOT NULL
 UNION
+SELECT image_original_hash::text FROM contents WHERE image_original_hash IS NOT NULL
+UNION
 SELECT hash::text FROM content_audio WHERE hash IS NOT NULL
 `
 
@@ -516,20 +554,6 @@ func (q *Queries) ReferencedBlobHashes(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	return items, nil
-}
-
-const renameGroup = `-- name: RenameGroup :exec
-UPDATE groups SET name = $2, updated_at = now() WHERE id = $1
-`
-
-type RenameGroupParams struct {
-	ID   string
-	Name string
-}
-
-func (q *Queries) RenameGroup(ctx context.Context, arg RenameGroupParams) error {
-	_, err := q.db.Exec(ctx, renameGroup, arg.ID, arg.Name)
-	return err
 }
 
 const setContentFrameName = `-- name: SetContentFrameName :exec
@@ -569,20 +593,35 @@ func (q *Queries) SetContentImage(ctx context.Context, arg SetContentImageParams
 	return err
 }
 
-const setContentImageSource = `-- name: SetContentImageSource :exec
-UPDATE contents SET image_source_hash = $2, image_render_preset = $3, updated_at = now()
-WHERE id = $1 AND kind = 'image'
+const setContentImageSource = `-- name: SetContentImageSource :execrows
+UPDATE contents SET image_source_hash = $1, image_render_preset = $2,
+    image_original_hash = $3, image_crop = $4, updated_at = now()
+WHERE id = $5 AND kind = 'image'
+    AND ($6::text IS NULL OR image_original_hash = $6)
 `
 
 type SetContentImageSourceParams struct {
-	ID                string
 	ImageSourceHash   *string
 	ImageRenderPreset string
+	ImageOriginalHash *string
+	ImageCrop         json.RawMessage
+	ID                string
+	ExpectedOriginal  *string
 }
 
-func (q *Queries) SetContentImageSource(ctx context.Context, arg SetContentImageSourceParams) error {
-	_, err := q.db.Exec(ctx, setContentImageSource, arg.ID, arg.ImageSourceHash, arg.ImageRenderPreset)
-	return err
+func (q *Queries) SetContentImageSource(ctx context.Context, arg SetContentImageSourceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setContentImageSource,
+		arg.ImageSourceHash,
+		arg.ImageRenderPreset,
+		arg.ImageOriginalHash,
+		arg.ImageCrop,
+		arg.ID,
+		arg.ExpectedOriginal,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setContentSortOrders = `-- name: SetContentSortOrders :exec
@@ -630,6 +669,32 @@ type SetImageDisplayModeParams struct {
 
 func (q *Queries) SetImageDisplayMode(ctx context.Context, arg SetImageDisplayModeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setImageDisplayMode, arg.DisplayMode, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateGroup = `-- name: UpdateGroup :execrows
+UPDATE groups SET name = COALESCE($3, name),
+    rotation_minutes = COALESCE($4, rotation_minutes), updated_at = now()
+WHERE id = $1 AND owner_id = $2
+`
+
+type UpdateGroupParams struct {
+	ID              string
+	OwnerID         string
+	Name            *string
+	RotationMinutes *int16
+}
+
+func (q *Queries) UpdateGroup(ctx context.Context, arg UpdateGroupParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateGroup,
+		arg.ID,
+		arg.OwnerID,
+		arg.Name,
+		arg.RotationMinutes,
+	)
 	if err != nil {
 		return 0, err
 	}

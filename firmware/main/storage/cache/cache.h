@@ -38,11 +38,12 @@ struct ManifestMeta {
     std::string name;
     std::string manifest_version;
     int         content_count   = 0;
+    int         rotation_minutes = 0;
     uint32_t    last_access_seq = 0;
 };
 
 bool WriteManifest(const std::string& gid, const std::string& manifest_version, int content_count,
-                   const std::string& name = "");
+                   const std::string& name, int rotation_minutes);
 bool ReadManifestMeta(const std::string& gid, ManifestMeta& out);
 bool ReadManifestContentCount(const std::string& gid, int& out);
 bool TouchGroup(const std::string& gid);

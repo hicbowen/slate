@@ -30,7 +30,7 @@ export function DeviceNameHeader({
       <div className="min-w-0">
         <p className="inline-flex items-center gap-2 text-[12px] text-stone">
           <span className={cn('dot', online ? 'dot-online' : 'dot-offline')} />
-          {online ? '在线' : '离线'}
+          {online ? '近期有联系' : '等待设备联系'}
           <span className="font-mono text-[11px] text-stone-light">{device.mac}</span>
         </p>
         <div className="mt-1.5">

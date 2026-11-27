@@ -23,7 +23,15 @@ export function DynamicFramePreview({
           </span>
         </div>
       )}
-      {pending && (
+      {pending && data && (
+        <span
+          role="status"
+          className="absolute right-2 top-[12%] z-20 border border-line bg-paper px-2 py-1 text-[11px] text-stone"
+        >
+          更新中
+        </span>
+      )}
+      {pending && !data && (
         <div className="absolute inset-0 z-20 flex items-center justify-center">
           <Spinner />
         </div>

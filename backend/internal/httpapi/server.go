@@ -101,7 +101,7 @@ func (a *API) Handler() http.Handler {
 	route("POST /api/groups", userAuth, a.createGroup)
 	route("PUT /api/groups/order", userAuth, a.reorderGroups)
 	route("GET /api/groups/{id}", userAuth, a.getGroup)
-	route("PATCH /api/groups/{id}", userAuth, a.renameGroup)
+	route("PATCH /api/groups/{id}", userAuth, a.updateGroup)
 	route("DELETE /api/groups/{id}", userAuth, a.deleteGroup)
 	route("GET /api/groups/{id}/contents", userAuth, a.listContents)
 	route("POST /api/groups/{id}/contents", userAuth, a.createContent)
@@ -116,12 +116,14 @@ func (a *API) Handler() http.Handler {
 	route("DELETE /api/contents/{id}/audio", userAuth, a.deleteAudio)
 	route("POST /api/contents/{id}/audio/tts", userAuth, a.generateTTS)
 	route("POST /api/contents/{id}/data", public, a.ingest)
+	route("POST /api/contents/{id}/data/token", userAuth, a.rotateDashboardPushToken)
 	route("GET /api/weather/cities", userAuth, a.searchCities)
 	route("GET /api/blobs/{hash}", userAuth, a.getBlob)
 
 	route("POST /api/device/register", public, a.registerDevice)
 	route("POST /api/device/sync", deviceAuth, a.syncDevice)
 	route("POST /api/device/group", deviceAuth, a.changeDeviceGroup)
+	route("POST /api/device/message-board", deviceAuth, a.writeDeviceMessageBoard)
 	route("GET /api/device/blobs/{hash}", deviceAuth, a.getDeviceBlob)
 
 	spa := a.spaHandler()

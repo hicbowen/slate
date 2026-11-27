@@ -36,6 +36,7 @@ Slate 的 Web 管理端：账号、设备绑定、内容组、图片与动态内
 | `/devices/:did` | `DashboardPage`，直接打开设备弹窗 |
 | `/groups/:gid` | `GroupDetailPage`：组内内容列表与排序 |
 | `/groups/:gid/contents/new` | `ContentNewPage`：新建图片或动态内容 |
+| `/groups/:gid/contents/batch-images` | 批量导入照片、统一渲染风格和逐张裁剪 |
 | `/groups/:gid/contents/image/:contentId/edit` | `ImageContentEditorPage` |
 | `/groups/:gid/contents/dynamic/:contentId/edit` | `DynamicContentEditorPage` |
 
@@ -54,13 +55,14 @@ Slate 的 Web 管理端：账号、设备绑定、内容组、图片与动态内
 
 - 浏览器从同一裁剪区域生成 400×300 黑白、16 灰及黑白红黄四色帧，同时保存裁剪源图和优化风格。再次编辑可从保存的源图重新渲染。早期 v2 图片如果只有设备帧，换图后可重新调整渲染。图片可单独设置 Note4 的上屏方式。
 - 预览和上传复用渲染函数，16 灰预览采用 Note4 实测亮度表。
+- 新选图片可勾选「保留原图」，服务端会额外保存原始文件（每张最多 12 MB）和裁剪参数，便于再次编辑时重取画面。已有图片可在编辑时取消保留。
 - 抖动模式列表在 `lib/eink/dither.ts`。`lib/eink/testdata/dither.json` 固定了各模式的输出，改算法时要有意更新它。
 
 **动态内容**
 
 - 配置表单覆盖所有类型，选项（字体、模板、榜单源、音色）来自 `catalog.json`。
 - 预览调用 `POST /api/contents/preview`，按选中的型号请求黑白或四色数据，再绘制到 canvas。
-- Dashboard 编辑页展示推送 URL（`POST /api/contents/{id}/data`），这个 URL 本身就是凭证。
+- Dashboard 支持区块表单和 JSON 编辑，并可生成、轮换数据推送令牌。
 
 **缓存与刷新**
 
